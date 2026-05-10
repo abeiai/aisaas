@@ -1,0 +1,934 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+}
+
+enum RefreshTokenType {
+  USER
+  ADMIN
+}
+
+enum ContentStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum PaymentProvider {
+  ALIPAY
+  WECHAT_PAY
+}
+
+enum PaymentOrderStatus {
+  CREATED
+  PAYING
+  PAID
+  CLOSED
+  FAILED
+}
+
+enum AiTaskStatus {
+  CREATED
+  RESERVED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  COMPENSATED
+}
+
+enum AiProviderType {
+  OPENAI_COMPATIBLE
+}
+
+enum AiProviderAdapterType {
+  OPENAI_COMPATIBLE
+  ANTHROPIC
+  GEMINI
+  CUSTOM_OPENAI_COMPATIBLE
+}
+
+enum AiProviderInstanceStatus {
+  DISABLED
+  ENABLED
+  TEST_FAILED
+}
+
+enum CreditReservationStatus {
+  RESERVED
+  SETTLED
+  RELEASED
+  EXPIRED
+  FAILED
+}
+
+enum LedgerEntryType {
+  TOP_UP
+  RESERVE
+  CONSUME
+  RELEASE
+  REFUND
+  ADMIN_ADJUST
+}
+
+enum MediaStorageProvider {
+  LOCAL
+  S3
+}
+
+enum KnowledgeDocumentStatus {
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum WorkflowRunStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+model User {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  passwordHash  String
+  nickname      String
+  status        UserStatus     @default(ACTIVE)
+  lastLoginAt   DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  refreshTokens RefreshToken[]
+  wallet        Wallet?
+  paymentOrders PaymentOrder[]
+  ledgerEntries LedgerEntry[]
+  aiTasks       AiTask[]
+  reservations  CreditReservation[]
+  knowledgeBases KnowledgeBase[]
+  aiToolCalls    AiToolCall[]
+  workflowRuns   AiWorkflowRun[]
+  aiUsageStats   AiUsageDailyStat[]
+
+  @@map("users")
+}
+
+model AdminUser {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  passwordHash  String
+  name          String
+  role          AdminRole      @default(SUPER_ADMIN)
+  status        UserStatus     @default(ACTIVE)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  refreshTokens RefreshToken[]
+  operationLogs AdminOperationLog[]
+  mediaAssets   MediaAsset[]
+  resolvedAlerts SystemAlert[] @relation("ResolvedSystemAlerts")
+
+  @@map("admin_users")
+}
+
+model RefreshToken {
+  id          String           @id @default(cuid())
+  userId      String?
+  adminUserId String?
+  tokenHash   String
+  type        RefreshTokenType
+  expiresAt   DateTime
+  createdAt   DateTime         @default(now())
+  revokedAt   DateTime?
+  user        User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  adminUser   AdminUser?       @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([adminUserId])
+  @@index([tokenHash])
+  @@map("refresh_tokens")
+}
+
+model ArticleCategory {
+  id          String    @id @default(cuid())
+  name        String
+  slug        String    @unique
+  description String?
+  sortOrder   Int       @default(0)
+  isVisible   Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  articles    Article[]
+
+  @@map("article_categories")
+}
+
+model Article {
+  id             String          @id @default(cuid())
+  categoryId     String
+  coverMediaId   String?
+  title          String
+  slug           String          @unique
+  summary        String?
+  coverImage     String?
+  content        String
+  status         ContentStatus   @default(DRAFT)
+  seoTitle       String?
+  seoDescription String?
+  seoKeywords    String?
+  canonicalUrl   String?
+  noIndex        Boolean         @default(false)
+  ogTitle        String?
+  ogDescription  String?
+  ogImage        String?
+  scheduledAt    DateTime?
+  publishedAt    DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  category       ArticleCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  coverMedia     MediaAsset?     @relation(fields: [coverMediaId], references: [id], onDelete: SetNull)
+  articleTags    ArticleTag[]
+
+  @@index([categoryId])
+  @@index([coverMediaId])
+  @@index([status])
+  @@index([scheduledAt])
+  @@map("articles")
+}
+
+model Page {
+  id             String        @id @default(cuid())
+  title          String
+  slug           String        @unique
+  content        String
+  status         ContentStatus @default(DRAFT)
+  seoTitle       String?
+  seoDescription String?
+  seoKeywords    String?
+  canonicalUrl   String?
+  noIndex        Boolean       @default(false)
+  ogTitle        String?
+  ogDescription  String?
+  ogImage        String?
+  scheduledAt    DateTime?
+  publishedAt    DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([status])
+  @@index([scheduledAt])
+  @@map("pages")
+}
+
+model Tag {
+  id          String       @id @default(cuid())
+  name        String
+  slug        String       @unique
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  articleTags ArticleTag[]
+
+  @@map("tags")
+}
+
+model ArticleTag {
+  articleId String
+  tagId     String
+  article   Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([articleId, tagId])
+  @@index([tagId])
+  @@map("article_tags")
+}
+
+model MediaAsset {
+  id               String               @id @default(cuid())
+  filename         String
+  originalName     String
+  mimeType         String
+  size             Int
+  url              String
+  storageProvider  MediaStorageProvider @default(LOCAL)
+  createdByAdminId String?
+  createdAt        DateTime             @default(now())
+  createdByAdmin   AdminUser?           @relation(fields: [createdByAdminId], references: [id], onDelete: SetNull)
+  coverArticles    Article[]
+
+  @@index([createdByAdminId])
+  @@index([createdAt])
+  @@map("media_assets")
+}
+
+model SystemConfig {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  label       String
+  value       String
+  description String?
+  group       String   @default("site")
+  isPublic    Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([group])
+  @@map("system_configs")
+}
+
+model LoginFailure {
+  id            String    @id @default(cuid())
+  subject       String    @unique
+  failedCount   Int       @default(0)
+  firstFailedAt DateTime  @default(now())
+  lockedUntil   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([lockedUntil])
+  @@map("login_failures")
+}
+
+model AdminOperationLog {
+  id           String     @id @default(cuid())
+  adminUserId  String?
+  action       String
+  resourceType String
+  resourceId   String?
+  description  String
+  ip           String?
+  userAgent    String?
+  createdAt    DateTime   @default(now())
+  adminUser    AdminUser? @relation(fields: [adminUserId], references: [id], onDelete: SetNull)
+
+  @@index([adminUserId])
+  @@index([action])
+  @@index([resourceType, resourceId])
+  @@index([createdAt])
+  @@map("admin_operation_logs")
+}
+
+model AiScenario {
+  id              String   @id @default(cuid())
+  name            String
+  slug            String   @unique
+  description     String?
+  toolCategoryId  String?
+  promptTemplate  String
+  promptVariables Json?
+  inputSchema     Json?
+  requiredCapabilities Json?
+  costCredits     Int
+  isEnabled       Boolean  @default(true)
+  sortOrder       Int      @default(0)
+  isBuiltIn       Boolean  @default(false)
+  templateVersion String?
+  defaultModelId  String?
+  fallbackModelId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  toolCategory    AiToolCategory? @relation(fields: [toolCategoryId], references: [id], onDelete: SetNull)
+  defaultModel    AiModel? @relation("ScenarioDefaultModel", fields: [defaultModelId], references: [id], onDelete: SetNull)
+  fallbackModel   AiModel? @relation("ScenarioFallbackModel", fields: [fallbackModelId], references: [id], onDelete: SetNull)
+  modelBinding    AiScenarioModelBinding?
+  tasks           AiTask[]
+  usageStats      AiUsageDailyStat[]
+
+  @@index([isEnabled])
+  @@index([toolCategoryId])
+  @@index([sortOrder])
+  @@index([defaultModelId])
+  @@index([fallbackModelId])
+  @@map("ai_scenarios")
+}
+
+model AiToolCategory {
+  id          String       @id @default(cuid())
+  name        String
+  slug        String       @unique
+  description String?
+  sortOrder   Int          @default(0)
+  isVisible   Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  scenarios   AiScenario[]
+
+  @@index([isVisible])
+  @@index([sortOrder])
+  @@map("ai_tool_categories")
+}
+
+model AiProviderPreset {
+  id                 String                @id @default(cuid())
+  providerKey        String                @unique
+  displayName        String
+  adapterType        AiProviderAdapterType
+  defaultBaseUrl     String
+  apiKeyEnvName      String
+  docsUrl            String?
+  region             String?
+  isBuiltIn          Boolean               @default(true)
+  isEnabledByDefault Boolean               @default(false)
+  presetVersion      String
+  lastUpdatedAt      DateTime
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  modelPresets       AiModelPreset[]
+  instances          AiProviderInstance[]
+
+  @@index([adapterType])
+  @@index([isBuiltIn])
+  @@map("ai_provider_presets")
+}
+
+model AiModelPreset {
+  id                       String             @id @default(cuid())
+  providerPresetId         String
+  modelKey                 String
+  displayName              String
+  providerModelName        String
+  capabilityTags           Json
+  contextWindow            Int?
+  supportsStreaming        Boolean            @default(false)
+  supportsVision           Boolean            @default(false)
+  supportsTools            Boolean            @default(false)
+  supportsEmbedding        Boolean            @default(false)
+  supportsImageGeneration  Boolean            @default(false)
+  supportsAudio            Boolean            @default(false)
+  isDeprecated             Boolean            @default(false)
+  deprecatedMessage        String?
+  replacementModelKey      String?
+  recommendedAlias         String?
+  createdAt                DateTime           @default(now())
+  updatedAt                DateTime           @updatedAt
+  providerPreset           AiProviderPreset   @relation(fields: [providerPresetId], references: [id], onDelete: Cascade)
+  modelInstances           AiModelInstance[]
+
+  @@unique([providerPresetId, modelKey])
+  @@index([providerPresetId])
+  @@index([isDeprecated])
+  @@map("ai_model_presets")
+}
+
+model AiProviderInstance {
+  id               String                   @id @default(cuid())
+  providerPresetId String
+  name             String
+  baseUrl          String
+  status           AiProviderInstanceStatus @default(DISABLED)
+  lastTestedAt     DateTime?
+  lastTestResult   Json?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  providerPreset   AiProviderPreset         @relation(fields: [providerPresetId], references: [id], onDelete: Restrict)
+  credential       AiProviderCredential?
+  modelInstances   AiModelInstance[]
+  tasks            AiTask[]
+  callLogs         AiCallLog[]
+  usageStats       AiUsageDailyStat[]
+
+  @@index([providerPresetId])
+  @@index([status])
+  @@map("ai_provider_instances")
+}
+
+model AiProviderCredential {
+  id                 String             @id @default(cuid())
+  providerInstanceId String             @unique
+  apiKeyEncrypted    String
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  providerInstance   AiProviderInstance @relation(fields: [providerInstanceId], references: [id], onDelete: Cascade)
+
+  @@map("ai_provider_credentials")
+}
+
+model AiModelInstance {
+  id                 String             @id @default(cuid())
+  providerInstanceId String
+  modelPresetId      String?
+  displayName        String
+  providerModelName  String
+  capabilityTags     Json
+  inputPrice         Decimal            @default(0) @db.Decimal(10, 4)
+  outputPrice        Decimal            @default(0) @db.Decimal(10, 4)
+  isEnabled          Boolean            @default(false)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  providerInstance   AiProviderInstance @relation(fields: [providerInstanceId], references: [id], onDelete: Cascade)
+  modelPreset        AiModelPreset?     @relation(fields: [modelPresetId], references: [id], onDelete: SetNull)
+  aliases            AiModelAlias[]
+  tasks              AiTask[]
+  callLogs           AiCallLog[]
+  usageStats         AiUsageDailyStat[]
+
+  @@unique([providerInstanceId, providerModelName])
+  @@index([providerInstanceId])
+  @@index([modelPresetId])
+  @@index([isEnabled])
+  @@map("ai_model_instances")
+}
+
+model AiModelAlias {
+  id              String           @id @default(cuid())
+  aliasKey        String           @unique
+  displayName     String
+  description     String?
+  modelInstanceId String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  modelInstance   AiModelInstance? @relation(fields: [modelInstanceId], references: [id], onDelete: SetNull)
+
+  @@index([modelInstanceId])
+  @@map("ai_model_aliases")
+}
+
+model AiScenarioModelBinding {
+  id                 String     @id @default(cuid())
+  scenarioId         String     @unique
+  defaultModelAlias  String
+  fallbackModelAlias String?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  scenario           AiScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  @@index([defaultModelAlias])
+  @@index([fallbackModelAlias])
+  @@map("ai_scenario_model_bindings")
+}
+
+model AiProvider {
+  id              String         @id @default(cuid())
+  name            String
+  type            AiProviderType @default(OPENAI_COMPATIBLE)
+  baseUrl         String
+  apiKeyEncrypted String
+  apiKeyPreview   String?
+  isEnabled       Boolean        @default(true)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  models          AiModel[]
+  tasks           AiTask[]
+  callLogs        AiCallLog[]
+  usageStats      AiUsageDailyStat[]
+
+  @@index([isEnabled])
+  @@map("ai_providers")
+}
+
+model AiModel {
+  id                String      @id @default(cuid())
+  providerId        String
+  fallbackModelId   String?
+  displayName       String
+  modelName         String
+  supportsStreaming Boolean     @default(false)
+  supportsVision    Boolean     @default(false)
+  inputPrice        Decimal     @default(0) @db.Decimal(10, 4)
+  outputPrice       Decimal     @default(0) @db.Decimal(10, 4)
+  isEnabled         Boolean     @default(true)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  provider          AiProvider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  fallbackModel     AiModel?    @relation("AiModelFallback", fields: [fallbackModelId], references: [id], onDelete: SetNull)
+  primaryForModels  AiModel[]   @relation("AiModelFallback")
+  defaultScenarios  AiScenario[] @relation("ScenarioDefaultModel")
+  fallbackScenarios AiScenario[] @relation("ScenarioFallbackModel")
+  tasks             AiTask[]
+  callLogs          AiCallLog[]
+  usageStats        AiUsageDailyStat[]
+
+  @@index([providerId])
+  @@index([fallbackModelId])
+  @@index([isEnabled])
+  @@unique([providerId, modelName])
+  @@map("ai_models")
+}
+
+model PaymentOrder {
+  id              String             @id @default(cuid())
+  userId          String
+  provider        PaymentProvider
+  orderNo         String             @unique
+  amountCny       Decimal            @db.Decimal(10, 2)
+  credits         Int
+  status          PaymentOrderStatus @default(CREATED)
+  providerTradeNo String?
+  paymentUrl      String?
+  qrCodeUrl       String?
+  providerPayload Json?
+  notifyRaw       Json?
+  paidAt          DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ledgerEntries   LedgerEntry[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([provider, providerTradeNo])
+  @@map("payment_orders")
+}
+
+model PaymentNotifyLog {
+  id            String          @id @default(cuid())
+  provider      PaymentProvider
+  orderNo       String?
+  headers       Json?
+  body          Json
+  verifyResult  String
+  processResult String
+  errorMessage  String?
+  createdAt     DateTime        @default(now())
+
+  @@index([provider, orderNo])
+  @@index([createdAt])
+  @@map("payment_notify_logs")
+}
+
+model Wallet {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  availableCredits     Int      @default(0)
+  frozenCredits        Int      @default(0)
+  totalTopUpCredits    Int      @default(0)
+  totalConsumedCredits Int      @default(0)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("wallets")
+}
+
+model AiTask {
+  id               String       @id @default(cuid())
+  userId           String
+  scenarioId       String
+  knowledgeBaseId  String?
+  aiProviderId     String?
+  aiModelId        String?
+  aiProviderInstanceId String?
+  aiModelInstanceId    String?
+  status           AiTaskStatus @default(CREATED)
+  input            Json
+  renderedPrompt   String?
+  output           String?
+  inputPreview     String?
+  outputPreview    String?
+  inputHash        String?
+  outputHash       String?
+  saveFullContent  Boolean      @default(false)
+  errorMessage     String?
+  estimatedCredits Int
+  actualCredits    Int?
+  providerName     String?
+  modelName        String?
+  inputTokens      Int?
+  outputTokens     Int?
+  totalTokens      Int?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  finishedAt       DateTime?
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scenario         AiScenario   @relation(fields: [scenarioId], references: [id], onDelete: Restrict)
+  knowledgeBase    KnowledgeBase? @relation(fields: [knowledgeBaseId], references: [id], onDelete: SetNull)
+  aiProvider       AiProvider?  @relation(fields: [aiProviderId], references: [id], onDelete: SetNull)
+  aiModel          AiModel?     @relation(fields: [aiModelId], references: [id], onDelete: SetNull)
+  aiProviderInstance AiProviderInstance? @relation(fields: [aiProviderInstanceId], references: [id], onDelete: SetNull)
+  aiModelInstance    AiModelInstance?    @relation(fields: [aiModelInstanceId], references: [id], onDelete: SetNull)
+  reservation      CreditReservation?
+  ledgerEntries    LedgerEntry[]
+  callLogs         AiCallLog[]
+
+  @@index([userId, createdAt])
+  @@index([scenarioId])
+  @@index([knowledgeBaseId])
+  @@index([aiProviderId])
+  @@index([aiModelId])
+  @@index([aiProviderInstanceId])
+  @@index([aiModelInstanceId])
+  @@index([status])
+  @@map("ai_tasks")
+}
+
+model AiUsageDailyStat {
+  id                 String    @id @default(cuid())
+  date               DateTime  @db.Date
+  dimensionKey       String    @unique
+  providerId         String?
+  modelId            String?
+  providerInstanceId String?
+  modelInstanceId    String?
+  scenarioId         String?
+  toolId             String?
+  userId             String?
+  providerName       String?
+  modelName          String?
+  scenarioName       String?
+  toolName           String?
+  userEmail          String?
+  requestCount       Int       @default(0)
+  successCount       Int       @default(0)
+  failureCount       Int       @default(0)
+  inputTokens        Int       @default(0)
+  outputTokens       Int       @default(0)
+  totalTokens        Int       @default(0)
+  consumedCredits    Int       @default(0)
+  estimatedCost      Decimal   @default(0) @db.Decimal(12, 4)
+  avgLatencyMs       Int?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  user               User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  scenario           AiScenario? @relation(fields: [scenarioId], references: [id], onDelete: SetNull)
+  aiProvider         AiProvider? @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  aiModel            AiModel?    @relation(fields: [modelId], references: [id], onDelete: SetNull)
+  providerInstance   AiProviderInstance? @relation(fields: [providerInstanceId], references: [id], onDelete: SetNull)
+  modelInstance      AiModelInstance?    @relation(fields: [modelInstanceId], references: [id], onDelete: SetNull)
+
+  @@index([date])
+  @@index([providerId])
+  @@index([modelId])
+  @@index([providerInstanceId])
+  @@index([modelInstanceId])
+  @@index([scenarioId])
+  @@index([toolId])
+  @@index([userId])
+  @@map("ai_usage_daily_stats")
+}
+
+model AiCallLog {
+  id           String     @id @default(cuid())
+  taskId       String
+  providerId   String?
+  modelId      String?
+  providerInstanceId String?
+  modelInstanceId    String?
+  provider     String
+  model        String
+  requestId    String?
+  inputTokens  Int?
+  outputTokens Int?
+  totalTokens  Int?
+  latencyMs    Int?
+  success      Boolean    @default(false)
+  errorCode    String?
+  errorMessage String?
+  createdAt    DateTime   @default(now())
+  task         AiTask     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  aiProvider   AiProvider? @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  aiModel      AiModel?    @relation(fields: [modelId], references: [id], onDelete: SetNull)
+  providerInstance AiProviderInstance? @relation(fields: [providerInstanceId], references: [id], onDelete: SetNull)
+  modelInstance    AiModelInstance?    @relation(fields: [modelInstanceId], references: [id], onDelete: SetNull)
+
+  @@index([taskId])
+  @@index([providerId])
+  @@index([modelId])
+  @@index([providerInstanceId])
+  @@index([modelInstanceId])
+  @@index([success])
+  @@index([createdAt])
+  @@map("ai_call_logs")
+}
+
+model SystemAlert {
+  id                  String     @id @default(cuid())
+  type                String
+  level               String
+  title               String
+  message             String
+  status              String     @default("OPEN")
+  fingerprint         String     @unique
+  relatedResourceType String?
+  relatedResourceId   String?
+  createdAt           DateTime   @default(now())
+  resolvedAt          DateTime?
+  resolvedByAdminId   String?
+  resolver            AdminUser? @relation("ResolvedSystemAlerts", fields: [resolvedByAdminId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([type])
+  @@index([level])
+  @@map("system_alerts")
+}
+
+model CreditReservation {
+  id             String                  @id @default(cuid())
+  userId         String
+  taskId         String                  @unique
+  amount         Int
+  status         CreditReservationStatus @default(RESERVED)
+  idempotencyKey String                  @unique
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  expiresAt      DateTime
+  user           User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task           AiTask                  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([expiresAt])
+  @@map("credit_reservations")
+}
+
+model LedgerEntry {
+  id              String          @id @default(cuid())
+  userId          String
+  type            LedgerEntryType
+  amount          Int
+  balanceAfter    Int
+  relatedOrderId  String?
+  relatedTaskId   String?
+  idempotencyKey  String          @unique
+  note            String?
+  createdAt       DateTime        @default(now())
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  relatedOrder    PaymentOrder?   @relation(fields: [relatedOrderId], references: [id], onDelete: SetNull)
+  relatedTask     AiTask?         @relation(fields: [relatedTaskId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([relatedOrderId])
+  @@index([relatedTaskId])
+  @@map("ledger_entries")
+}
+
+model KnowledgeBase {
+  id          String              @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documents   KnowledgeDocument[]
+  tasks       AiTask[]
+
+  @@index([userId, createdAt])
+  @@map("knowledge_bases")
+}
+
+model KnowledgeDocument {
+  id              String                  @id @default(cuid())
+  knowledgeBaseId String
+  filename        String
+  mimeType        String
+  size            Int
+  status          KnowledgeDocumentStatus @default(PROCESSING)
+  contentText     String?
+  errorMessage    String?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  knowledgeBase   KnowledgeBase           @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  chunks          KnowledgeChunk[]
+
+  @@index([knowledgeBaseId, createdAt])
+  @@index([status])
+  @@map("knowledge_documents")
+}
+
+model KnowledgeChunk {
+  id          String            @id @default(cuid())
+  documentId  String
+  content     String
+  embeddingId String?
+  sortOrder   Int               @default(0)
+  createdAt   DateTime          @default(now())
+  document    KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId, sortOrder])
+  @@index([embeddingId])
+  @@map("knowledge_chunks")
+}
+
+model AiToolCall {
+  id        String   @id @default(cuid())
+  userId    String
+  toolName  String
+  input     Json
+  output    Json?
+  success   Boolean  @default(false)
+  errorMessage String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([toolName])
+  @@map("ai_tool_calls")
+}
+
+model AiWorkflow {
+  id          String           @id @default(cuid())
+  name        String
+  slug        String           @unique
+  description String?
+  costCredits Int              @default(0)
+  isEnabled   Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  steps       AiWorkflowStep[]
+  runs        AiWorkflowRun[]
+
+  @@index([isEnabled])
+  @@map("ai_workflows")
+}
+
+model AiWorkflowStep {
+  id          String     @id @default(cuid())
+  workflowId  String
+  name        String
+  prompt      String
+  sortOrder   Int        @default(0)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  workflow    AiWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  runSteps    AiWorkflowRunStep[]
+
+  @@index([workflowId, sortOrder])
+  @@map("ai_workflow_steps")
+}
+
+model AiWorkflowRun {
+  id          String            @id @default(cuid())
+  workflowId  String
+  userId      String
+  status      WorkflowRunStatus @default(RUNNING)
+  input       String
+  output      String?
+  errorMessage String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  finishedAt  DateTime?
+  workflow    AiWorkflow        @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  steps       AiWorkflowRunStep[]
+
+  @@index([workflowId, createdAt])
+  @@index([userId, createdAt])
+  @@index([status])
+  @@map("ai_workflow_runs")
+}
+
+model AiWorkflowRunStep {
+  id          String        @id @default(cuid())
+  runId       String
+  stepId      String
+  sortOrder   Int
+  input       String
+  output      String?
+  errorMessage String?
+  createdAt   DateTime      @default(now())
+  run         AiWorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  step        AiWorkflowStep @relation(fields: [stepId], references: [id], onDelete: Restrict)
+
+  @@index([runId, sortOrder])
+  @@index([stepId])
+  @@map("ai_workflow_run_steps")
+}

@@ -1,0 +1,185 @@
+name: aisaas-prod
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+      api-core:
+        condition: service_healthy
+    ports:
+      - "${NGINX_HTTP_PORT:-7340}:7340"
+      - "${NGINX_HTTPS_PORT:-7346}:7346"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./deploy/certs:/etc/nginx/certs:ro
+      - ./deploy/data/logs/nginx:/var/log/nginx
+      - ./deploy/data/uploads:/var/www/uploads:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7340/healthz >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web:
+    image: ${WEB_IMAGE:-aisaas-web:0.0.0}
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-0.0.0}
+    restart: unless-stopped
+    env_file:
+      - path: .env.production
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: "7341"
+      HOSTNAME: 0.0.0.0
+      APP_VERSION: ${APP_VERSION:-0.0.0}
+      API_BASE_URL: ${API_BASE_URL:-http://api-core:7342/api}
+    depends_on:
+      api-core:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:7341/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  api-core:
+    image: ${API_CORE_IMAGE:-aisaas-api-core:0.0.0}
+    build:
+      context: .
+      dockerfile: apps/api-core/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: .env.production
+        required: false
+    environment:
+      NODE_ENV: production
+      APP_VERSION: ${APP_VERSION:-0.0.0}
+      API_CORE_PORT: "7342"
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:7340}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://aisaas:change_this_postgres_password@postgres:7347/aisaas?schema=public}
+      REDIS_URL: ${REDIS_URL:-redis://redis:7348}
+      AI_GATEWAY_BASE_URL: ${AI_GATEWAY_BASE_URL:-http://ai-gateway:7343}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-}
+      JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-15m}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
+      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:-}
+      RATE_LIMIT_WINDOW_SECONDS: ${RATE_LIMIT_WINDOW_SECONDS:-60}
+      RATE_LIMIT_AUTH_LOGIN_MAX: ${RATE_LIMIT_AUTH_LOGIN_MAX:-10}
+      RATE_LIMIT_AUTH_REGISTER_MAX: ${RATE_LIMIT_AUTH_REGISTER_MAX:-5}
+      RATE_LIMIT_ADMIN_AUTH_LOGIN_MAX: ${RATE_LIMIT_ADMIN_AUTH_LOGIN_MAX:-10}
+      RATE_LIMIT_PAYMENT_ORDERS_MAX: ${RATE_LIMIT_PAYMENT_ORDERS_MAX:-20}
+      RATE_LIMIT_AI_TASKS_MAX: ${RATE_LIMIT_AI_TASKS_MAX:-20}
+      LOGIN_FAILURE_MAX_ATTEMPTS: ${LOGIN_FAILURE_MAX_ATTEMPTS:-5}
+      LOGIN_FAILURE_WINDOW_SECONDS: ${LOGIN_FAILURE_WINDOW_SECONDS:-900}
+      LOGIN_FAILURE_LOCK_SECONDS: ${LOGIN_FAILURE_LOCK_SECONDS:-900}
+      DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-}
+      ALIPAY_APP_ID: ${ALIPAY_APP_ID:-}
+      ALIPAY_ENV: ${ALIPAY_ENV:-production}
+      ALIPAY_GATEWAY_URL: ${ALIPAY_GATEWAY_URL:-}
+      ALIPAY_PRIVATE_KEY: ${ALIPAY_PRIVATE_KEY:-}
+      ALIPAY_PUBLIC_KEY: ${ALIPAY_PUBLIC_KEY:-}
+      ALIPAY_NOTIFY_URL: ${ALIPAY_NOTIFY_URL:-}
+      WECHAT_PAY_MCH_ID: ${WECHAT_PAY_MCH_ID:-}
+      WECHAT_PAY_APP_ID: ${WECHAT_PAY_APP_ID:-}
+      WECHAT_PAY_GATEWAY_URL: ${WECHAT_PAY_GATEWAY_URL:-}
+      WECHAT_PAY_API_V3_KEY: ${WECHAT_PAY_API_V3_KEY:-}
+      WECHAT_PAY_PRIVATE_KEY: ${WECHAT_PAY_PRIVATE_KEY:-}
+      WECHAT_PAY_SERIAL_NO: ${WECHAT_PAY_SERIAL_NO:-}
+      WECHAT_PAY_PLATFORM_PUBLIC_KEY: ${WECHAT_PAY_PLATFORM_PUBLIC_KEY:-}
+      WECHAT_PAY_PLATFORM_SERIAL_NO: ${WECHAT_PAY_PLATFORM_SERIAL_NO:-}
+      WECHAT_PAY_NOTIFY_URL: ${WECHAT_PAY_NOTIFY_URL:-}
+      ENABLE_MOCK_PAYMENT_NOTIFY: ${ENABLE_MOCK_PAYMENT_NOTIFY:-}
+      AI_GATEWAY_TIMEOUT_MS: ${AI_GATEWAY_TIMEOUT_MS:-30000}
+      AI_PROVIDER_NAME: ${AI_PROVIDER_NAME:-}
+      AI_PROVIDER_BASE_URL: ${AI_PROVIDER_BASE_URL:-}
+      AI_PROVIDER_MODEL_DISPLAY_NAME: ${AI_PROVIDER_MODEL_DISPLAY_NAME:-}
+      AI_PROVIDER_MODEL_NAME: ${AI_PROVIDER_MODEL_NAME:-}
+      AI_PROVIDER_API_KEY: ${AI_PROVIDER_API_KEY:-}
+      AI_PROVIDER_INPUT_PRICE: ${AI_PROVIDER_INPUT_PRICE:-1}
+      AI_PROVIDER_OUTPUT_PRICE: ${AI_PROVIDER_OUTPUT_PRICE:-4}
+      AI_PROVIDER_TEMPERATURE: ${AI_PROVIDER_TEMPERATURE:-0.7}
+      AI_PROVIDER_MAX_TOKENS: ${AI_PROVIDER_MAX_TOKENS:-800}
+      PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-https://example.com/api}
+      UPLOAD_DRIVER: ${UPLOAD_DRIVER:-local}
+      MEDIA_UPLOAD_MAX_BYTES: ${MEDIA_UPLOAD_MAX_BYTES:-2097152}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-auto}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_PUBLIC_BASE_URL: ${S3_PUBLIC_BASE_URL:-}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-1}
+      S3_KEY_PREFIX: ${S3_KEY_PREFIX:-uploads/}
+      CMS_SCHEDULED_PUBLISHER_ENABLED: ${CMS_SCHEDULED_PUBLISHER_ENABLED:-1}
+      CMS_SCHEDULED_PUBLISHER_INTERVAL_MS: ${CMS_SCHEDULED_PUBLISHER_INTERVAL_MS:-60000}
+      LOG_DIR: /app/logs
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - ./deploy/data/logs/api-core:/app/logs
+      - ./deploy/data/uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:7342/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  ai-gateway:
+    image: ${AI_GATEWAY_IMAGE:-aisaas-ai-gateway:0.0.0}
+    build:
+      context: .
+      dockerfile: apps/ai-gateway/Dockerfile
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:7343/health', timeout=3).read()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aisaas}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_this_postgres_password}
+      POSTGRES_DB: ${POSTGRES_DB:-aisaas}
+    command: ["postgres", "-p", "7347"]
+    ports:
+      - "${POSTGRES_BIND_HOST:-127.0.0.1}:${POSTGRES_HOST_PORT:-7347}:7347"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB} -p 7347"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--port", "7348"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "7348", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -1,0 +1,113 @@
+import { IsOptional, IsString, MaxLength } from "class-validator";
+
+export class UpdateSystemConfigDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  siteName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  siteLogo?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  themePrimaryColor?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  publicNavItems?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  footerText?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  homeTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  homeDescription?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  homeCtaText?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  homeCtaHref?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(800)
+  homeFeatureHighlights?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  homeLatestArticleCount?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  seoTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  seoDescription?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  beianNo?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  serviceQrCode?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  defaultCreditExchangeRate?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  defaultAiModel?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  aiSaveFullContent?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  siteUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  siteDescription?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  apiBaseUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  registrationStatus?: string;
+}

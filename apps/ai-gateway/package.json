@@ -1,0 +1,12 @@
+{
+  "name": "@aisaas/ai-gateway",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "python3 -m uvicorn app.main:app --host 0.0.0.0 --port 7343 --reload",
+    "build": "python3 -m py_compile app/main.py",
+    "lint": "python3 -m py_compile app/main.py",
+    "typecheck": "python3 -m py_compile app/main.py",
+    "test": "python3 -m py_compile app/main.py"
+  }
+}

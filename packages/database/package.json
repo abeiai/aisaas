@@ -1,0 +1,40 @@
+{
+  "name": "@aisaas/database",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "dev": "pnpm db:studio",
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node -e \"console.log('数据库包暂无测试')\"",
+    "db:generate": "prisma generate --schema prisma/schema.prisma",
+    "db:migrate": "prisma migrate dev --schema prisma/schema.prisma",
+    "db:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
+    "db:seed": "tsx prisma/seed.ts",
+    "seed:demo": "tsx prisma/seed-demo.ts",
+    "template:blank": "tsx prisma/template-blank.ts",
+    "ai:seed-tools": "tsx prisma/ai-seed-tools.ts",
+    "ai:seed-presets": "tsx prisma/ai-seed-presets.ts",
+    "db:studio": "prisma studio --schema prisma/schema.prisma"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "7.8.0",
+    "@prisma/client-runtime-utils": "7.8.0",
+    "dotenv": "17.4.2",
+    "pg": "^8.20.0",
+    "prisma": "7.8.0",
+    "tsx": "4.21.0"
+  },
+  "devDependencies": {
+    "@aisaas/config": "workspace:*",
+    "@types/node": "25.6.2",
+    "@types/pg": "^8.20.0",
+    "eslint": "10.3.0",
+    "typescript": "6.0.3"
+  }
+}

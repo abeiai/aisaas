@@ -1,0 +1,40 @@
+name: aisaas
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: aisaas-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aisaas
+      POSTGRES_PASSWORD: aisaas_dev_password
+      POSTGRES_DB: aisaas
+    command: ["postgres", "-p", "7344"]
+    ports:
+      - "7344:7344"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aisaas -d aisaas -p 7344"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: aisaas-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--port", "7345"]
+    ports:
+      - "7345:7345"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "7345", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
