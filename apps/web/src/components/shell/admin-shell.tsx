@@ -2,8 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { LogOut } from "lucide-react";
 
-import { adminNavItems } from "@/lib/mock-data";
-import { cn } from "@/lib/utils";
+import { AdminSidebar } from "@/components/shell/admin-sidebar";
 import { Button } from "@/components/ui/button";
 import { adminLogoutAction } from "@/lib/auth-actions";
 
@@ -27,21 +26,7 @@ export function AdminShell({ active, title, description, children }: AdminShellP
               管理端
             </span>
           </div>
-          <nav className="grid gap-1 p-4">
-            {adminNavItems.map((item) => (
-              <Link
-                className={cn(
-                  "flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-foreground",
-                  active === item.href && "bg-secondary text-foreground"
-                )}
-                href={item.href}
-                key={item.href}
-              >
-                <item.icon />
-                {item.label}
-              </Link>
-            ))}
-          </nav>
+          <AdminSidebar active={active} />
         </aside>
         <section className="flex min-w-0 flex-col">
           <header className="flex min-h-16 flex-col gap-4 border-b border-border bg-background px-5 py-4 md:flex-row md:items-center md:justify-between">

@@ -1,18 +1,20 @@
 import Link from "next/link";
 import { ArrowLeft, CheckCircle2, Coins, CreditCard, QrCode, WalletCards } from "lucide-react";
+import { headers } from "next/headers";
 import QRCode from "qrcode";
 
+import { PaymentOrderForm } from "@/components/billing/payment-order-form";
 import { PaymentPoller } from "@/components/billing/payment-poller";
+import { WechatJsapiLauncher } from "@/components/billing/wechat-jsapi-launcher";
 import { PublicShell } from "@/components/shell/public-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getCurrentUser } from "@/lib/auth-actions";
 import {
   createPaymentOrderAction,
+  getAvailablePaymentProducts,
   getLedger,
   getPaymentOrder,
   getWallet,
@@ -21,6 +23,7 @@ import {
   type LedgerEntry,
   type PaymentOrder
 } from "@/lib/billing-api";
+import { detectPaymentScene } from "@/lib/payment-scene";
 
 export const dynamic = "force-dynamic";
 
@@ -58,8 +61,15 @@ export default async function BillingPage({
   searchParams: Promise<{ order?: string; error?: string; paid?: string }>;
 }) {
   const params = await searchParams;
+  const requestHeaders = await headers();
   await getCurrentUser();
-  const [wallet, ledger] = await Promise.all([getWallet(), getLedger()]);
+  const [wallet, ledger, availableProducts] = await Promise.all([
+    getWallet(),
+    getLedger(),
+    getAvailablePaymentProducts()
+  ]);
+  const initialScene = detectPaymentScene(requestHeaders.get("user-agent"));
+  const authorizeUrl = `${process.env.PUBLIC_API_BASE_URL ?? "http://localhost:7342/api"}/payment/wechat/jsapi/authorize?redirect=${encodeURIComponent("/dashboard/billing")}`;
   const currentOrder = params.order
     ? await getPaymentOrder(params.order).catch(() => null)
     : null;
@@ -82,7 +92,7 @@ export default async function BillingPage({
               点数充值与钱包流水
             </h1>
             <p className="text-base leading-7 text-muted-foreground">
-              当前版本已接入支付宝网页支付和微信 Native 扫码支付，支付结果以后端订单和渠道回调为准。
+              当前可用支付方式由后台正式启用状态决定，支付结果以后端订单和渠道回调为准。
             </p>
           </div>
           <Button asChild variant="outline">
@@ -164,48 +174,13 @@ export default async function BillingPage({
               <CardDescription>请选择充值套餐和支付方式。</CardDescription>
             </CardHeader>
             <CardContent>
-              <form action={createPaymentOrderAction} className="flex flex-col gap-6">
-                <FieldGroup>
-                  <Field>
-                    <FieldLabel>充值套餐</FieldLabel>
-                    <div className="grid gap-3 md:grid-cols-3">
-                      {rechargePackages.map((item, index) => (
-                        <label
-                          className="flex cursor-pointer flex-col gap-3 rounded-xl border border-border bg-background p-4"
-                          key={item.code}
-                        >
-                          <span className="flex items-center justify-between gap-3">
-                            <span className="font-medium">{item.name}</span>
-                            <input
-                              defaultChecked={index === 1}
-                              name="packageCode"
-                              type="radio"
-                              value={item.code}
-                            />
-                          </span>
-                          <span className="font-display text-3xl font-light">
-                            ¥{item.amountCny}
-                          </span>
-                          <span className="text-sm text-muted-foreground">
-                            {item.credits.toLocaleString("zh-CN")} 点 · {item.description}
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="provider">支付方式</FieldLabel>
-                    <Select id="provider" name="provider" defaultValue="ALIPAY">
-                      <option value="ALIPAY">支付宝</option>
-                      <option value="WECHAT_PAY">微信支付</option>
-                    </Select>
-                    <FieldDescription>支付宝会返回支付页链接，微信支付会返回扫码二维码。</FieldDescription>
-                  </Field>
-                </FieldGroup>
-                <Button className="w-fit" type="submit">
-                  创建充值订单
-                </Button>
-              </form>
+              <PaymentOrderForm
+                action={createPaymentOrderAction}
+                authorizeUrl={authorizeUrl}
+                initialScene={initialScene}
+                products={availableProducts}
+                rechargeOptions={rechargePackages}
+              />
             </CardContent>
           </Card>
 
@@ -251,10 +226,10 @@ export default async function BillingPage({
                       当前支付渠道尚未配置真实商户参数。测试环境可启用模拟回调完成钱包闭环。
                     </div>
                   ) : null}
-                  {currentOrder.paymentUrl && currentOrder.provider === "ALIPAY" ? (
+                  {currentOrder.action === "REDIRECT" && currentOrder.paymentUrl ? (
                     <Button asChild className="w-fit">
                       <a href={currentOrder.paymentUrl} rel="noreferrer" target="_blank">
-                        打开支付宝支付页
+                        打开支付页
                       </a>
                     </Button>
                   ) : null}
@@ -265,6 +240,9 @@ export default async function BillingPage({
                         使用微信扫码完成支付，页面会自动刷新订单状态。
                       </p>
                     </div>
+                  ) : null}
+                  {currentOrder.action === "WECHAT_JSAPI" && currentOrder.launchParams ? (
+                    <WechatJsapiLauncher params={currentOrder.launchParams} />
                   ) : null}
                   {currentOrder.status !== "PAID" && currentOrder.paymentMode === "UNCONFIGURED" ? (
                     <form action={mockPayOrderAction}>

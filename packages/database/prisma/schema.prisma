@@ -27,9 +27,40 @@ enum ContentStatus {
   ARCHIVED
 }
 
+enum ContentModuleType {
+  SLIDESHOW
+  IMAGE_CARD_LIST
+  SPLIT_IMAGE_TEXT
+}
+
+enum PageCompositionTargetType {
+  HOME
+  PAGE
+}
+
 enum PaymentProvider {
   ALIPAY
   WECHAT_PAY
+}
+
+enum PaymentScene {
+  DESKTOP_WEB
+  MOBILE_WEB
+  WECHAT_BROWSER
+}
+
+enum PaymentProduct {
+  ALIPAY_PAGE
+  ALIPAY_WAP
+  WECHAT_NATIVE
+  WECHAT_H5
+  WECHAT_JSAPI
+}
+
+enum PaymentAction {
+  REDIRECT
+  QR_CODE
+  WECHAT_JSAPI
 }
 
 enum PaymentOrderStatus {
@@ -59,6 +90,13 @@ enum AiProviderAdapterType {
   ANTHROPIC
   GEMINI
   CUSTOM_OPENAI_COMPATIBLE
+  DASHSCOPE_AUDIO
+}
+
+enum AiProviderModality {
+  TEXT
+  AUDIO
+  MULTIMODAL
 }
 
 enum AiProviderInstanceStatus {
@@ -89,6 +127,19 @@ enum MediaStorageProvider {
   S3
 }
 
+enum MediaAssetType {
+  IMAGE
+  AUDIO
+  VIDEO
+}
+
+enum MediaAssetSource {
+  SYSTEM
+  USER_UPLOAD
+  AI_GENERATED
+  WEB_FETCHED
+}
+
 enum KnowledgeDocumentStatus {
   PROCESSING
   READY
@@ -101,9 +152,67 @@ enum WorkflowRunStatus {
   FAILED
 }
 
+enum AudioAssetType {
+  SOURCE_SAMPLE
+  PREVIEW
+  TTS_OUTPUT
+}
+
+enum AudioTaskType {
+  TTS
+  VOICE_CLONE
+  VOICE_DESIGN
+}
+
+enum AudioTaskStatus {
+  CREATED
+  RESERVED
+  UPLOADING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  COMPENSATED
+}
+
+enum AudioBillingMode {
+  PER_CHARACTER
+  PER_TASK
+  PER_SECOND
+}
+
+enum VoiceAssetType {
+  SYSTEM
+  CLONED
+  DESIGNED
+}
+
+enum VoiceAssetStatus {
+  DRAFT
+  CREATING
+  PENDING_REVIEW
+  READY
+  FAILED
+  REJECTED
+  DISABLED
+  DELETED
+}
+
+enum VoiceAssetVisibility {
+  PRIVATE
+  PUBLIC
+  ADMIN_ONLY
+}
+
+enum VoiceConsentType {
+  SELF_VOICE
+  AUTHORIZED_VOICE
+}
+
 model User {
   id            String         @id @default(cuid())
   email         String         @unique
+  wechatOpenId  String?        @unique
   passwordHash  String
   nickname      String
   status        UserStatus     @default(ACTIVE)
@@ -120,6 +229,12 @@ model User {
   aiToolCalls    AiToolCall[]
   workflowRuns   AiWorkflowRun[]
   aiUsageStats   AiUsageDailyStat[]
+  audioAssets     AudioAsset[]
+  voiceAssets     VoiceAsset[]
+  audioTasks      AudioTask[]
+  voiceConsents   VoiceConsent[]
+  audioPreference UserAudioPreference?
+  audioUsageLogs  AudioUsageLog[]
 
   @@map("users")
 }
@@ -137,6 +252,7 @@ model AdminUser {
   operationLogs AdminOperationLog[]
   mediaAssets   MediaAsset[]
   resolvedAlerts SystemAlert[] @relation("ResolvedSystemAlerts")
+  reviewedVoiceAssets VoiceAsset[] @relation("ReviewedVoiceAssets")
 
   @@map("admin_users")
 }
@@ -169,6 +285,7 @@ model ArticleCategory {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   articles    Article[]
+  articleLinks ArticleCategoryLink[]
 
   @@map("article_categories")
 }
@@ -198,12 +315,25 @@ model Article {
   category       ArticleCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   coverMedia     MediaAsset?     @relation(fields: [coverMediaId], references: [id], onDelete: SetNull)
   articleTags    ArticleTag[]
+  articleCategories ArticleCategoryLink[]
 
   @@index([categoryId])
   @@index([coverMediaId])
   @@index([status])
   @@index([scheduledAt])
   @@map("articles")
+}
+
+model ArticleCategoryLink {
+  articleId  String
+  categoryId String
+  createdAt  DateTime        @default(now())
+  article    Article         @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  category   ArticleCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([articleId, categoryId])
+  @@index([categoryId])
+  @@map("article_category_links")
 }
 
 model Page {
@@ -224,6 +354,7 @@ model Page {
   publishedAt    DateTime?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
+  compositions    PageComposition[]
 
   @@index([status])
   @@index([scheduledAt])
@@ -259,6 +390,8 @@ model MediaAsset {
   mimeType         String
   size             Int
   url              String
+  mediaType        MediaAssetType       @default(IMAGE)
+  sourceType       MediaAssetSource     @default(USER_UPLOAD)
   storageProvider  MediaStorageProvider @default(LOCAL)
   createdByAdminId String?
   createdAt        DateTime             @default(now())
@@ -267,7 +400,84 @@ model MediaAsset {
 
   @@index([createdByAdminId])
   @@index([createdAt])
+  @@index([mediaType])
+  @@index([sourceType])
   @@map("media_assets")
+}
+
+model ContentModule {
+  id          String            @id @default(cuid())
+  name        String
+  slug        String            @unique
+  type        ContentModuleType
+  description String?
+  settings    Json
+  isEnabled   Boolean           @default(true)
+  sortOrder   Int               @default(0)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  items       ContentModuleItem[]
+  compositionItems PageCompositionItem[]
+
+  @@index([type])
+  @@index([isEnabled])
+  @@index([sortOrder])
+  @@map("content_modules")
+}
+
+model ContentModuleItem {
+  id          String        @id @default(cuid())
+  moduleId    String
+  title       String?
+  imageUrl    String?
+  imageAlt    String?
+  linkType    String?
+  linkTarget  String?
+  config      Json
+  sortOrder   Int           @default(0)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  module      ContentModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@index([moduleId])
+  @@index([sortOrder])
+  @@map("content_module_items")
+}
+
+model PageComposition {
+  id          String                    @id @default(cuid())
+  targetKey   String                    @unique
+  targetType  PageCompositionTargetType
+  pageId      String?
+  title       String
+  isEnabled   Boolean                   @default(false)
+  showHeader  Boolean                   @default(true)
+  showFooter  Boolean                   @default(true)
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+  page        Page?                     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  items       PageCompositionItem[]
+
+  @@index([targetType])
+  @@index([pageId])
+  @@index([isEnabled])
+  @@map("page_compositions")
+}
+
+model PageCompositionItem {
+  id            String          @id @default(cuid())
+  compositionId String
+  moduleId      String
+  sortOrder     Int             @default(0)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  composition   PageComposition @relation(fields: [compositionId], references: [id], onDelete: Cascade)
+  module        ContentModule   @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([compositionId, moduleId])
+  @@index([moduleId])
+  @@index([sortOrder])
+  @@map("page_composition_items")
 }
 
 model SystemConfig {
@@ -373,7 +583,9 @@ model AiProviderPreset {
   providerKey        String                @unique
   displayName        String
   adapterType        AiProviderAdapterType
+  modality           AiProviderModality    @default(TEXT)
   defaultBaseUrl     String
+  defaultWebSocketUrl String?
   apiKeyEnvName      String
   docsUrl            String?
   region             String?
@@ -425,6 +637,8 @@ model AiProviderInstance {
   providerPresetId String
   name             String
   baseUrl          String
+  webSocketUrl     String?
+  region           String?
   status           AiProviderInstanceStatus @default(DISABLED)
   lastTestedAt     DateTime?
   lastTestResult   Json?
@@ -436,6 +650,9 @@ model AiProviderInstance {
   tasks            AiTask[]
   callLogs         AiCallLog[]
   usageStats       AiUsageDailyStat[]
+  audioTasks       AudioTask[]
+  voiceAssets      VoiceAsset[]
+  audioUsageLogs   AudioUsageLog[]
 
   @@index([providerPresetId])
   @@index([status])
@@ -471,6 +688,8 @@ model AiModelInstance {
   tasks              AiTask[]
   callLogs           AiCallLog[]
   usageStats         AiUsageDailyStat[]
+  audioTasks         AudioTask[]
+  audioUsageLogs     AudioUsageLog[]
 
   @@unique([providerInstanceId, providerModelName])
   @@index([providerInstanceId])
@@ -559,6 +778,9 @@ model PaymentOrder {
   id              String             @id @default(cuid())
   userId          String
   provider        PaymentProvider
+  scene           PaymentScene      @default(DESKTOP_WEB)
+  product         PaymentProduct    @default(ALIPAY_PAGE)
+  action          PaymentAction     @default(REDIRECT)
   orderNo         String             @unique
   amountCny       Decimal            @db.Decimal(10, 2)
   credits         Int
@@ -566,6 +788,9 @@ model PaymentOrder {
   providerTradeNo String?
   paymentUrl      String?
   qrCodeUrl       String?
+  launchParams    Json?
+  clientIp        String?
+  userAgent       String?
   providerPayload Json?
   notifyRaw       Json?
   paidAt          DateTime?
@@ -576,6 +801,7 @@ model PaymentOrder {
 
   @@index([userId])
   @@index([status])
+  @@index([scene, product])
   @@index([provider, providerTradeNo])
   @@map("payment_orders")
 }
@@ -761,10 +987,217 @@ model SystemAlert {
   @@map("system_alerts")
 }
 
+model AudioAsset {
+  id              String               @id @default(cuid())
+  userId          String
+  type            AudioAssetType
+  storageProvider MediaStorageProvider @default(LOCAL)
+  url             String
+  objectKey       String
+  mimeType        String
+  durationMs      Int?
+  sizeBytes       Int
+  sampleRate      Int?
+  channels        Int?
+  createdAt       DateTime             @default(now())
+  user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceVoiceAssets VoiceAsset[]       @relation("VoiceSourceAudioAsset")
+  previewVoiceAssets VoiceAsset[]      @relation("VoicePreviewAudioAsset")
+  sourceAudioTasks AudioTask[]         @relation("AudioTaskSourceAsset")
+  outputAudioTasks AudioTask[]         @relation("AudioTaskOutputAsset")
+  voiceConsents    VoiceConsent[]
+
+  @@index([userId, createdAt])
+  @@index([type])
+  @@map("audio_assets")
+}
+
+model VoiceAsset {
+  id                   String                @id @default(cuid())
+  userId               String
+  providerInstanceId   String?
+  provider             String
+  providerVoiceId      String?
+  name                 String
+  type                 VoiceAssetType
+  targetModel          String
+  status               VoiceAssetStatus      @default(DRAFT)
+  visibility           VoiceAssetVisibility  @default(PRIVATE)
+  language             String?
+  description          String?
+  previewAudioUrl      String?
+  sourceAudioAssetId   String?
+  previewAudioAssetId  String?
+  consentId            String?
+  reviewedByAdminId    String?
+  reviewedAt           DateTime?
+  reviewNote           String?
+  disabledReason       String?
+  deletedAt            DateTime?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  providerInstance     AiProviderInstance?   @relation(fields: [providerInstanceId], references: [id], onDelete: SetNull)
+  sourceAudioAsset     AudioAsset?           @relation("VoiceSourceAudioAsset", fields: [sourceAudioAssetId], references: [id], onDelete: SetNull)
+  previewAudioAsset    AudioAsset?           @relation("VoicePreviewAudioAsset", fields: [previewAudioAssetId], references: [id], onDelete: SetNull)
+  audioTasks           AudioTask[]
+  consent              VoiceConsent?        @relation("VoiceAssetConsent", fields: [consentId], references: [id], onDelete: SetNull)
+  targetConsent        VoiceConsent?        @relation("VoiceConsentTarget")
+  reviewer             AdminUser?           @relation("ReviewedVoiceAssets", fields: [reviewedByAdminId], references: [id], onDelete: SetNull)
+  defaultForPreferences UserAudioPreference[] @relation("DefaultVoiceAsset")
+  audioUsageLogs       AudioUsageLog[]
+
+  @@index([userId, createdAt])
+  @@index([providerInstanceId])
+  @@index([providerVoiceId])
+  @@index([targetModel])
+  @@index([status])
+  @@index([consentId])
+  @@index([reviewedByAdminId])
+  @@map("voice_assets")
+}
+
+model VoiceConsent {
+  id                 String       @id @default(cuid())
+  userId             String
+  voiceAssetId       String?      @unique
+  sourceAudioAssetId String?
+  consentText        String       @default("")
+  consentType        VoiceConsentType @default(SELF_VOICE)
+  ownerName          String?
+  ownerContact       String?
+  agreedAt           DateTime     @default(now())
+  statement          String
+  ip                 String?
+  userAgent          String?
+  createdAt          DateTime     @default(now())
+  user               User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  voiceAsset         VoiceAsset?  @relation("VoiceConsentTarget", fields: [voiceAssetId], references: [id], onDelete: SetNull)
+  sourceAudioAsset   AudioAsset?  @relation(fields: [sourceAudioAssetId], references: [id], onDelete: SetNull)
+  voiceAssets        VoiceAsset[] @relation("VoiceAssetConsent")
+
+  @@index([userId, createdAt])
+  @@index([voiceAssetId])
+  @@index([sourceAudioAssetId])
+  @@map("voice_consents")
+}
+
+model UserAudioPreference {
+  id                    String      @id @default(cuid())
+  userId                String      @unique
+  defaultVoiceAssetId   String?
+  defaultSystemVoiceId  String?
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+  user                  User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  defaultVoiceAsset     VoiceAsset? @relation("DefaultVoiceAsset", fields: [defaultVoiceAssetId], references: [id], onDelete: SetNull)
+
+  @@index([defaultVoiceAssetId])
+  @@map("user_audio_preferences")
+}
+
+model AudioPricingRule {
+  id              String           @id @default(cuid())
+  operationType   AudioTaskType
+  model           String           @default("*")
+  billingMode     AudioBillingMode
+  creditsPerUnit  Decimal          @db.Decimal(10, 4)
+  minimumCredits  Int              @default(0)
+  modelMultiplier Decimal          @default(1) @db.Decimal(8, 4)
+  isEnabled       Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@unique([operationType, model])
+  @@index([operationType, isEnabled])
+  @@index([model])
+  @@map("audio_pricing_rules")
+}
+
+model AudioTask {
+  id                   String              @id @default(cuid())
+  userId               String
+  type                 AudioTaskType
+  status               AudioTaskStatus     @default(CREATED)
+  provider             String
+  model                String
+  providerInstanceId   String?
+  modelInstanceId      String?
+  voiceAssetId         String?
+  inputText            String?
+  inputTextLength      Int                 @default(0)
+  sourceAudioAssetId   String?
+  outputAudioAssetId   String?
+  estimatedCredits     Int
+  actualCredits        Int?
+  errorCode            String?
+  errorMessage         String?
+  requestId            String?
+  providerPayload      Json?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  finishedAt           DateTime?
+  user                 User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  providerInstance     AiProviderInstance? @relation(fields: [providerInstanceId], references: [id], onDelete: SetNull)
+  modelInstance        AiModelInstance?    @relation(fields: [modelInstanceId], references: [id], onDelete: SetNull)
+  voiceAsset           VoiceAsset?         @relation(fields: [voiceAssetId], references: [id], onDelete: SetNull)
+  sourceAudioAsset     AudioAsset?         @relation("AudioTaskSourceAsset", fields: [sourceAudioAssetId], references: [id], onDelete: SetNull)
+  outputAudioAsset     AudioAsset?         @relation("AudioTaskOutputAsset", fields: [outputAudioAssetId], references: [id], onDelete: SetNull)
+  reservation          CreditReservation?
+  ledgerEntries        LedgerEntry[]
+  usageLogs            AudioUsageLog[]
+
+  @@index([userId, createdAt])
+  @@index([type])
+  @@index([status])
+  @@index([providerInstanceId])
+  @@index([modelInstanceId])
+  @@index([voiceAssetId])
+  @@index([sourceAudioAssetId])
+  @@index([outputAudioAssetId])
+  @@map("audio_tasks")
+}
+
+model AudioUsageLog {
+  id                 String              @id @default(cuid())
+  taskId             String              @unique
+  userId             String
+  provider           String
+  model              String
+  providerInstanceId String?
+  modelInstanceId    String?
+  voiceAssetId       String?
+  operationType      AudioTaskType
+  characterCount     Int                 @default(0)
+  audioDurationMs    Int?
+  usageCount         Int                 @default(1)
+  latencyMs          Int?
+  success            Boolean             @default(false)
+  estimatedCost      Decimal             @default(0) @db.Decimal(12, 4)
+  consumedCredits    Int                 @default(0)
+  providerRequestId  String?
+  createdAt          DateTime            @default(now())
+  task               AudioTask           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  providerInstance   AiProviderInstance? @relation(fields: [providerInstanceId], references: [id], onDelete: SetNull)
+  modelInstance      AiModelInstance?    @relation(fields: [modelInstanceId], references: [id], onDelete: SetNull)
+  voiceAsset         VoiceAsset?         @relation(fields: [voiceAssetId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([operationType])
+  @@index([providerInstanceId])
+  @@index([modelInstanceId])
+  @@index([voiceAssetId])
+  @@index([success])
+  @@index([createdAt])
+  @@map("audio_usage_logs")
+}
+
 model CreditReservation {
   id             String                  @id @default(cuid())
   userId         String
-  taskId         String                  @unique
+  taskId         String?                 @unique
+  audioTaskId    String?                 @unique
   amount         Int
   status         CreditReservationStatus @default(RESERVED)
   idempotencyKey String                  @unique
@@ -772,9 +1205,11 @@ model CreditReservation {
   updatedAt      DateTime                @updatedAt
   expiresAt      DateTime
   user           User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  task           AiTask                  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  task           AiTask?                 @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  audioTask      AudioTask?              @relation(fields: [audioTaskId], references: [id], onDelete: Cascade)
 
   @@index([userId, status])
+  @@index([audioTaskId])
   @@index([expiresAt])
   @@map("credit_reservations")
 }
@@ -787,16 +1222,23 @@ model LedgerEntry {
   balanceAfter    Int
   relatedOrderId  String?
   relatedTaskId   String?
+  relatedAudioTaskId String?
+  relatedTaskType String?
+  operationType   AudioTaskType?
   idempotencyKey  String          @unique
   note            String?
   createdAt       DateTime        @default(now())
   user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   relatedOrder    PaymentOrder?   @relation(fields: [relatedOrderId], references: [id], onDelete: SetNull)
   relatedTask     AiTask?         @relation(fields: [relatedTaskId], references: [id], onDelete: SetNull)
+  relatedAudioTask AudioTask?     @relation(fields: [relatedAudioTaskId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt])
   @@index([relatedOrderId])
   @@index([relatedTaskId])
+  @@index([relatedAudioTaskId])
+  @@index([relatedTaskType])
+  @@index([operationType])
   @@map("ledger_entries")
 }
 

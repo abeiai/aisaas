@@ -10,6 +10,16 @@ import { assertValidSlug } from "./slug.js";
 const articleInclude = {
   category: true,
   coverMedia: true,
+  articleCategories: {
+    include: {
+      category: true
+    },
+    orderBy: {
+      category: {
+        sortOrder: "asc"
+      }
+    }
+  },
   articleTags: {
     include: {
       tag: true
@@ -147,17 +157,19 @@ export class CmsService {
     const slug = dto.slug.trim();
     assertValidSlug(slug);
     await this.assertArticleSlugAvailable(slug);
-    await this.ensureCategory(dto.categoryId);
+    const categoryIds = this.normalizeCategoryIds(dto.categoryIds, dto.categoryId);
+    await this.ensureCategories(categoryIds);
 
     const status = dto.status ?? "DRAFT";
     const scheduledAt = this.optionalDate(dto.scheduledAt);
+    const publishedAt = this.optionalDate(dto.publishedAt);
     await this.ensureMedia(dto.coverMediaId);
     const tagSlugs = this.normalizeTagSlugs(dto.tagSlugs);
     await this.ensureTags(tagSlugs);
 
     const article = await this.prisma.article.create({
       data: {
-        categoryId: dto.categoryId,
+        categoryId: categoryIds[0],
         coverMediaId: this.optionalText(dto.coverMediaId),
         title: dto.title.trim(),
         slug,
@@ -174,7 +186,16 @@ export class CmsService {
         ogDescription: this.optionalText(dto.ogDescription),
         ogImage: this.optionalText(dto.ogImage),
         scheduledAt,
-        publishedAt: status === "PUBLISHED" ? new Date() : null,
+        publishedAt: status === "PUBLISHED" ? publishedAt ?? new Date() : publishedAt,
+        articleCategories: {
+          create: categoryIds.map((categoryId) => ({
+            category: {
+              connect: {
+                id: categoryId
+              }
+            }
+          }))
+        },
         articleTags: {
           create: tagSlugs.map((tagSlug) => ({
             tag: {
@@ -200,8 +221,13 @@ export class CmsService {
       await this.assertArticleSlugAvailable(slug, id);
     }
 
-    if (dto.categoryId !== undefined) {
-      await this.ensureCategory(dto.categoryId);
+    const categoryIds =
+      dto.categoryIds === undefined && dto.categoryId === undefined
+        ? undefined
+        : this.normalizeCategoryIds(dto.categoryIds, dto.categoryId);
+
+    if (categoryIds !== undefined) {
+      await this.ensureCategories(categoryIds);
     }
 
     if (dto.coverMediaId !== undefined) {
@@ -213,14 +239,15 @@ export class CmsService {
       await this.ensureTags(tagSlugs);
     }
 
-    const publishNow = dto.status === "PUBLISHED" && existing.status !== "PUBLISHED";
+    const publishNow =
+      dto.status === "PUBLISHED" && existing.status !== "PUBLISHED" && dto.publishedAt === undefined;
 
     const article = await this.prisma.article.update({
       where: {
         id
       },
       data: {
-        categoryId: dto.categoryId,
+        categoryId: categoryIds?.[0],
         coverMediaId:
           dto.coverMediaId !== undefined ? this.optionalText(dto.coverMediaId) : undefined,
         title: dto.title?.trim(),
@@ -240,7 +267,25 @@ export class CmsService {
           dto.ogDescription !== undefined ? this.optionalText(dto.ogDescription) : undefined,
         ogImage: dto.ogImage !== undefined ? this.optionalText(dto.ogImage) : undefined,
         scheduledAt: dto.scheduledAt !== undefined ? this.optionalDate(dto.scheduledAt) : undefined,
-        publishedAt: publishNow ? new Date() : undefined,
+        publishedAt:
+          dto.publishedAt !== undefined
+            ? this.optionalDate(dto.publishedAt)
+            : publishNow
+              ? new Date()
+              : undefined,
+        articleCategories:
+          categoryIds === undefined
+            ? undefined
+            : {
+                deleteMany: {},
+                create: categoryIds.map((categoryId) => ({
+                  category: {
+                    connect: {
+                      id: categoryId
+                    }
+                  }
+                }))
+              },
         articleTags:
           tagSlugs === undefined
             ? undefined
@@ -509,6 +554,24 @@ export class CmsService {
     return category;
   }
 
+  private async ensureCategories(ids: string[]) {
+    if (ids.length === 0) {
+      throw new AppException(40001, "请至少选择一个文章分类", HttpStatus.BAD_REQUEST);
+    }
+
+    const count = await this.prisma.articleCategory.count({
+      where: {
+        id: {
+          in: ids
+        }
+      }
+    });
+
+    if (count !== ids.length) {
+      throw new AppException(40004, "文章分类不存在", HttpStatus.NOT_FOUND);
+    }
+  }
+
   private async ensureArticle(id: string) {
     const article = await this.prisma.article.findUnique({
       where: {
@@ -538,6 +601,10 @@ export class CmsService {
 
     if (!media) {
       throw new AppException(40401, "媒体资源不存在", HttpStatus.NOT_FOUND);
+    }
+
+    if (media.mediaType !== "IMAGE") {
+      throw new AppException(40001, "文章封面只能选择图片素材", HttpStatus.BAD_REQUEST);
     }
 
     return media;
@@ -669,15 +736,32 @@ export class CmsService {
     );
   }
 
+  private normalizeCategoryIds(values: string[] | undefined, fallback?: string) {
+    const ids = Array.from(
+      new Set(
+        [...(values ?? []), fallback ?? ""]
+          .map((value) => value.trim())
+          .filter(Boolean)
+      )
+    );
+
+    if (ids.length === 0) {
+      throw new AppException(40001, "请至少选择一个文章分类", HttpStatus.BAD_REQUEST);
+    }
+
+    return ids;
+  }
+
   private toArticle(
     article: Prisma.ArticleGetPayload<{
       include: typeof articleInclude;
     }>
   ) {
-    const { articleTags, ...rest } = article;
+    const { articleCategories, articleTags, ...rest } = article;
 
     return {
       ...rest,
+      categories: articleCategories.map((item) => item.category),
       tags: articleTags.map((item) => item.tag)
     };
   }

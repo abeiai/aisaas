@@ -110,4 +110,59 @@ export class UpdateSystemConfigDto {
   @IsString()
   @MaxLength(40)
   registrationStatus?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4)
+  mediaImageMaxSizeMb?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4)
+  mediaAudioMaxSizeMb?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4)
+  mediaVideoMaxSizeMb?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  audioVoiceCloneReviewRequired?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  audioVoiceDesignReviewRequired?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  audioUserPublicVoiceEnabled?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  audioCloneDefaultVisibility?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  audioDesignDefaultVisibility?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  audioSafetyNotice?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  audioCloneConsentText?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  audioDownloadNotice?: string;
 }

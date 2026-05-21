@@ -141,8 +141,10 @@ export interface AiProviderPreset {
   id: string;
   providerKey: string;
   displayName: string;
-  adapterType: "OPENAI_COMPATIBLE" | "ANTHROPIC" | "GEMINI" | "CUSTOM_OPENAI_COMPATIBLE";
+  adapterType: "OPENAI_COMPATIBLE" | "ANTHROPIC" | "GEMINI" | "CUSTOM_OPENAI_COMPATIBLE" | "DASHSCOPE_AUDIO";
+  modality: "TEXT" | "AUDIO" | "MULTIMODAL";
   defaultBaseUrl: string;
+  defaultWebSocketUrl: string | null;
   apiKeyEnvName: string;
   docsUrl: string | null;
   region: string | null;
@@ -156,6 +158,8 @@ export interface AiProviderPreset {
     providerPresetId: string;
     name: string;
     baseUrl: string;
+    webSocketUrl: string | null;
+    region: string | null;
     status: "DISABLED" | "ENABLED" | "TEST_FAILED";
     statusName: string;
     hasApiKey: boolean;
@@ -373,6 +377,8 @@ export async function updateAiProviderAction(formData: FormData) {
     body: JSON.stringify({
       name: text(formData, "name"),
       baseUrl: text(formData, "baseUrl"),
+      webSocketUrl: text(formData, "webSocketUrl"),
+      region: text(formData, "region"),
       apiKey: text(formData, "apiKey"),
       modelId: text(formData, "modelId"),
       modelDisplayName: text(formData, "modelDisplayName"),
@@ -413,21 +419,21 @@ export async function updateAiProviderPresetAction(formData: FormData) {
   const id = text(formData, "id");
   await apiFetch<AiProviderPreset>(`/admin/ai/providers/${id}`, {
     method: "PATCH",
-    body: JSON.stringify({
-      name: text(formData, "name"),
-      baseUrl: text(formData, "baseUrl"),
-      apiKey: text(formData, "apiKey"),
-      status: checked(formData, "isEnabled") ? "ENABLED" : "DISABLED"
-    })
+    body: JSON.stringify(aiProviderPresetPayload(formData))
   });
 
   revalidatePath("/admin/ai/providers");
   revalidatePath(`/admin/ai/providers/${id}`);
   revalidatePath("/admin/ai/model-aliases");
+  revalidatePath("/admin/audio/models");
 }
 
 export async function testAiProviderPresetAction(formData: FormData) {
   const id = text(formData, "id");
+  await apiFetch<AiProviderPreset>(`/admin/ai/providers/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(aiProviderPresetPayload(formData))
+  });
   await apiFetch<{ success: boolean; message: string }>(`/admin/ai/providers/${id}/test`, {
     method: "POST",
     body: JSON.stringify({})
@@ -435,6 +441,18 @@ export async function testAiProviderPresetAction(formData: FormData) {
 
   revalidatePath("/admin/ai/providers");
   revalidatePath(`/admin/ai/providers/${id}`);
+  revalidatePath("/admin/audio/models");
+}
+
+function aiProviderPresetPayload(formData: FormData) {
+  return {
+    name: text(formData, "name"),
+    baseUrl: text(formData, "baseUrl"),
+    webSocketUrl: text(formData, "webSocketUrl"),
+    region: text(formData, "region"),
+    apiKey: text(formData, "apiKey"),
+    status: checked(formData, "isEnabled") ? "ENABLED" : "DISABLED"
+  };
 }
 
 export async function enableAiModelPresetAction(formData: FormData) {

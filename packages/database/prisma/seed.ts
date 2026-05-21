@@ -53,7 +53,7 @@ async function main() {
     }
   });
 
-  await prisma.article.upsert({
+  const demoArticle = await prisma.article.upsert({
     where: {
       slug: "demo"
     },
@@ -79,6 +79,20 @@ async function main() {
       seoTitle: "AI SaaS 内容工具站第一批页面",
       seoDescription: "介绍内容型 AI SaaS 在第一阶段应优先完成的可见页面和 CMS 基础。",
       publishedAt: new Date()
+    }
+  });
+
+  await prisma.articleCategoryLink.upsert({
+    where: {
+      articleId_categoryId: {
+        articleId: demoArticle.id,
+        categoryId: category.id
+      }
+    },
+    update: {},
+    create: {
+      articleId: demoArticle.id,
+      categoryId: category.id
     }
   });
 
@@ -285,6 +299,70 @@ async function main() {
       description: "前台用户注册入口的运营状态。",
       isPublic: false,
       sortOrder: 50
+    },
+    {
+      key: "audioVoiceCloneReviewRequired",
+      label: "声音复刻审核",
+      value: "true",
+      description: "声音复刻生成的自定义音色是否需要管理员审核后才能使用。",
+      isPublic: false,
+      sortOrder: 310
+    },
+    {
+      key: "audioVoiceDesignReviewRequired",
+      label: "声音设计审核",
+      value: "false",
+      description: "声音设计生成的自定义音色是否需要管理员审核后才能使用。",
+      isPublic: false,
+      sortOrder: 311
+    },
+    {
+      key: "audioUserPublicVoiceEnabled",
+      label: "允许公开用户音色",
+      value: "false",
+      description: "是否允许用户创建 PUBLIC 可见性的自定义音色。",
+      isPublic: false,
+      sortOrder: 312
+    },
+    {
+      key: "audioCloneDefaultVisibility",
+      label: "复刻音色默认可见性",
+      value: "PRIVATE",
+      description: "声音复刻生成音色的默认可见性。",
+      isPublic: false,
+      sortOrder: 313
+    },
+    {
+      key: "audioDesignDefaultVisibility",
+      label: "设计音色默认可见性",
+      value: "PRIVATE",
+      description: "声音设计生成音色的默认可见性。",
+      isPublic: false,
+      sortOrder: 314
+    },
+    {
+      key: "audioSafetyNotice",
+      label: "语音安全提示",
+      value: "AI 生成语音可能被误用，请勿用于冒充他人、诈骗、侵权、虚假宣传或违法违规用途。声音复刻仅允许上传本人声音或已获得授权的声音。生成音频建议标注为 AI 生成语音。",
+      description: "前台语音工具和音色库展示的统一风险提示。",
+      isPublic: true,
+      sortOrder: 315
+    },
+    {
+      key: "audioCloneConsentText",
+      label: "声音复刻授权声明",
+      value: "我确认上传的音频为本人声音，或我已获得声音权利人的明确授权。我承诺不会将该音色用于冒充他人、诈骗、侵权、虚假宣传或其他违法违规用途。",
+      description: "声音复刻提交前必须勾选并保存快照的授权声明。",
+      isPublic: true,
+      sortOrder: 316
+    },
+    {
+      key: "audioDownloadNotice",
+      label: "音频下载提示",
+      value: "下载或对外使用生成音频前，请确认用途合法合规，并建议标注为 AI 生成语音。",
+      description: "生成音频下载区域展示的轻量提示。",
+      isPublic: true,
+      sortOrder: 317
     }
   ];
 
@@ -400,6 +478,7 @@ async function main() {
   );
 
   await seedAiProvider(prisma);
+  await seedAudioPricingRules(prisma);
 
   const users = await prisma.user.findMany({
     select: {
@@ -503,4 +582,59 @@ async function seedAiProvider(prisma: ReturnType<typeof getPrismaClient>) {
 
 function normalizeBaseUrl(value: string) {
   return value.replace(/\/+$/, "");
+}
+
+async function seedAudioPricingRules(prisma: ReturnType<typeof getPrismaClient>) {
+  const rules = [
+    {
+      operationType: "TTS" as const,
+      model: "*",
+      billingMode: "PER_CHARACTER" as const,
+      creditsPerUnit: "5",
+      minimumCredits: 5,
+      modelMultiplier: "1"
+    },
+    {
+      operationType: "VOICE_DESIGN" as const,
+      model: "*",
+      billingMode: "PER_TASK" as const,
+      creditsPerUnit: "200",
+      minimumCredits: 200,
+      modelMultiplier: "1"
+    },
+    {
+      operationType: "VOICE_CLONE" as const,
+      model: "*",
+      billingMode: "PER_TASK" as const,
+      creditsPerUnit: "300",
+      minimumCredits: 300,
+      modelMultiplier: "1"
+    }
+  ];
+
+  await Promise.all(
+    rules.map((rule) =>
+      prisma.audioPricingRule.upsert({
+        where: {
+          operationType_model: {
+            operationType: rule.operationType,
+            model: rule.model
+          }
+        },
+        update: {
+          billingMode: rule.billingMode,
+          creditsPerUnit: rule.creditsPerUnit,
+          minimumCredits: rule.minimumCredits,
+          modelMultiplier: rule.modelMultiplier,
+          isEnabled: true
+        },
+        create: {
+          ...rule,
+          isEnabled: true
+        }
+      })
+    )
+  );
+
+  console.log("默认语音计费规则已就绪。");
 }

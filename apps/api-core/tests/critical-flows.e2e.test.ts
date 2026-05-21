@@ -8,6 +8,7 @@ import test from "node:test";
 process.env.JWT_ACCESS_SECRET ??= `test-access-${randomUUID()}`;
 process.env.JWT_REFRESH_SECRET ??= `test-refresh-${randomUUID()}`;
 process.env.SECRET_ENCRYPTION_KEY ??= `test-secret-${randomUUID()}`;
+process.env.ENABLE_MOCK_PAYMENT_NOTIFY ??= "1";
 
 const unique = `e2e-${Date.now()}`;
 const uploadDir = join(tmpdir(), `aisaas-uploads-${unique}`);

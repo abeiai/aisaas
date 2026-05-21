@@ -186,6 +186,14 @@ export async function getCurrentUser() {
   }
 }
 
+export async function getOptionalCurrentUser() {
+  try {
+    return await apiFetch<PublicUser>("/auth/me");
+  } catch {
+    return null;
+  }
+}
+
 export async function updateProfileAction(
   _previousState: AuthActionState,
   formData: FormData

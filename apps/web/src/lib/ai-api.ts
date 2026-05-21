@@ -60,12 +60,25 @@ export interface AiToolCategory {
 export interface AiToolInputField {
   name: string;
   label: string;
-  type: "text" | "textarea" | "select" | "number" | "switch";
+  type:
+    | "text"
+    | "textarea"
+    | "select"
+    | "number"
+    | "switch"
+    | "voice-select"
+    | "audio-upload"
+    | "slider"
+    | "audio-preview"
+    | "format-select";
   required: boolean;
   placeholder: string;
   options: string[];
   min?: number;
   max?: number;
+  defaultValue?: string | number | boolean;
+  accept?: string[];
+  maxSizeMb?: number;
 }
 
 export interface AiToolInputSchema {

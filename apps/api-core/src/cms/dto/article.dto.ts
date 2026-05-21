@@ -10,8 +10,14 @@ import {
 } from "class-validator";
 
 export class CreateArticleDto {
+  @IsOptional()
   @IsString()
-  categoryId!: string;
+  categoryId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  categoryIds?: string[];
 
   @IsOptional()
   @IsString()
@@ -86,6 +92,10 @@ export class CreateArticleDto {
   scheduledAt?: string;
 
   @IsOptional()
+  @IsDateString()
+  publishedAt?: string;
+
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
   tagSlugs?: string[];
@@ -95,6 +105,11 @@ export class UpdateArticleDto {
   @IsOptional()
   @IsString()
   categoryId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  categoryIds?: string[];
 
   @IsOptional()
   @IsString()
@@ -170,6 +185,10 @@ export class UpdateArticleDto {
   @IsOptional()
   @IsDateString()
   scheduledAt?: string;
+
+  @IsOptional()
+  @IsDateString()
+  publishedAt?: string;
 
   @IsOptional()
   @IsArray()

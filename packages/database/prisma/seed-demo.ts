@@ -4,6 +4,7 @@ import { seedAiToolTemplates } from "./seed-ai-tool-templates.js";
 import {
   starterKitDemoArticleCategories,
   starterKitDemoArticles,
+  starterKitDemoAudioPricingRules,
   starterKitDemoPages,
   starterKitDemoSystemConfigs
 } from "./starter-kit-demo-data.js";
@@ -17,6 +18,7 @@ async function main() {
   const articleResult = await seedArticles(prisma);
   const pageResult = await seedPages(prisma);
   const configResult = await seedSystemConfigs(prisma);
+  const audioPricingResult = await seedAudioPricingRules(prisma);
   const toolResult = await seedAiToolTemplates(prisma);
   const presetResult = await seedAiPresets(prisma);
 
@@ -26,6 +28,7 @@ async function main() {
   console.log(`示例文章：新增 ${articleResult.created} 篇，保留 ${articleResult.skipped} 篇。`);
   console.log(`示例单页：新增 ${pageResult.created} 个，保留 ${pageResult.skipped} 个。`);
   console.log(`示例系统设置：新增 ${configResult.created} 项，保留 ${configResult.skipped} 项。`);
+  console.log(`示例语音计费：新增 ${audioPricingResult.created} 条，保留 ${audioPricingResult.skipped} 条。`);
   console.log(
     `示例 AI 工具：共 ${toolResult.templateCount} 个模板，新增 ${toolResult.createdCount} 个，保留 ${toolResult.preservedCount} 个。`
   );
@@ -115,7 +118,12 @@ async function seedArticles(prisma: ReturnType<typeof getPrismaClient>) {
         status: "PUBLISHED",
         seoTitle: article.seoTitle,
         seoDescription: article.seoDescription,
-        publishedAt: new Date()
+        publishedAt: new Date(),
+        articleCategories: {
+          create: {
+            categoryId: category.id
+          }
+        }
       }
     });
     created += 1;
@@ -194,6 +202,43 @@ async function seedSystemConfigs(prisma: ReturnType<typeof getPrismaClient>) {
         group: "site",
         isPublic: config.isPublic,
         sortOrder: config.sortOrder
+      }
+    });
+    created += 1;
+  }
+
+  return {
+    created,
+    skipped
+  };
+}
+
+async function seedAudioPricingRules(prisma: ReturnType<typeof getPrismaClient>) {
+  let created = 0;
+  let skipped = 0;
+
+  for (const rule of starterKitDemoAudioPricingRules) {
+    const existing = await prisma.audioPricingRule.findUnique({
+      where: {
+        operationType_model: {
+          operationType: rule.operationType,
+          model: rule.model
+        }
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (existing) {
+      skipped += 1;
+      continue;
+    }
+
+    await prisma.audioPricingRule.create({
+      data: {
+        ...rule,
+        isEnabled: false
       }
     });
     created += 1;

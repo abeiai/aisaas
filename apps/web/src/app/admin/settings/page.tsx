@@ -5,22 +5,60 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { getAdminSystemConfigs, updateSystemConfigAction } from "@/lib/settings-api";
 
 export const dynamic = "force-dynamic";
 
+const aiConfigKeys = new Set([
+  "defaultAiModel",
+  "aiSaveFullContent",
+  "audioVoiceCloneReviewRequired",
+  "audioVoiceDesignReviewRequired",
+  "audioUserPublicVoiceEnabled",
+  "audioCloneDefaultVisibility",
+  "audioDesignDefaultVisibility",
+  "audioSafetyNotice",
+  "audioCloneConsentText",
+  "audioDownloadNotice"
+]);
+const paymentConfigKeys = new Set([
+  "paymentAlipayEnabled",
+  "paymentAlipayAppId",
+  "paymentAlipayEnvironment",
+  "paymentAlipayPrivateKeyEncrypted",
+  "paymentAlipayPublicKeyEncrypted",
+  "paymentAlipayNotifyUrl",
+  "paymentAlipayReturnUrl",
+  "paymentAlipayPageEnabled",
+  "paymentAlipayWapEnabled",
+  "paymentWechatEnabled",
+  "paymentWechatAppId",
+  "paymentWechatMerchantId",
+  "paymentWechatApiV3KeyEncrypted",
+  "paymentWechatMerchantPrivateKeyEncrypted",
+  "paymentWechatMerchantSerialNo",
+  "paymentWechatNotifyUrl",
+  "paymentWechatPublicKeyEncrypted",
+  "paymentWechatPublicKeyId",
+  "paymentWechatAppSecretEncrypted",
+  "paymentWechatJsapiOauthCallbackUrl",
+  "paymentWechatNativeEnabled",
+  "paymentWechatH5Enabled",
+  "paymentWechatJsapiEnabled"
+]);
+
 export default async function AdminSettingsPage() {
   const settings = await getAdminSystemConfigs();
+  const systemSettings = settings.filter((setting) => !aiConfigKeys.has(setting.key) && !paymentConfigKeys.has(setting.key));
   const configByKey = new Map(settings.map((setting) => [setting.key, setting.value]));
 
   return (
     <AdminShell
       active="/admin/settings"
       title="系统设置"
-      description="管理站点、首页、SEO、备案、客服、点数和默认模型配置。"
+      description="管理站点、首页、SEO、备案、客服、点数和媒体上传配置。"
     >
       <div className="flex flex-col gap-6">
         <Card>
@@ -223,27 +261,6 @@ export default async function AdminSettingsPage() {
                   />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="default-ai-model">默认 AI 模型</FieldLabel>
-                  <Input
-                    id="default-ai-model"
-                    name="defaultAiModel"
-                    defaultValue={configByKey.get("defaultAiModel") ?? "本地 mock"}
-                    required
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="ai-save-full-content">AI 完整内容保存</FieldLabel>
-                  <Select
-                    id="ai-save-full-content"
-                    name="aiSaveFullContent"
-                    defaultValue={configByKey.get("aiSaveFullContent") ?? "false"}
-                  >
-                    <option value="false">关闭，仅保存预览与哈希</option>
-                    <option value="true">启用，保存完整内容</option>
-                  </Select>
-                  <FieldDescription>默认关闭，启用后才保存完整输入、Prompt 和生成结果。</FieldDescription>
-                </Field>
-                <Field>
                   <FieldLabel htmlFor="api-base-url">API 地址</FieldLabel>
                   <Input
                     id="api-base-url"
@@ -261,6 +278,47 @@ export default async function AdminSettingsPage() {
                     required
                   />
                 </Field>
+                <FieldGroup className="rounded-lg border border-border bg-background p-4">
+                  <Field>
+                    <FieldLabel htmlFor="media-image-max-size-mb">图片上传大小</FieldLabel>
+                    <Input
+                      id="media-image-max-size-mb"
+                      name="mediaImageMaxSizeMb"
+                      type="number"
+                      min="1"
+                      max="200"
+                      defaultValue={configByKey.get("mediaImageMaxSizeMb") ?? "10"}
+                      required
+                    />
+                    <FieldDescription>单位 MB，默认 10MB。</FieldDescription>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="media-audio-max-size-mb">音频上传大小</FieldLabel>
+                    <Input
+                      id="media-audio-max-size-mb"
+                      name="mediaAudioMaxSizeMb"
+                      type="number"
+                      min="1"
+                      max="200"
+                      defaultValue={configByKey.get("mediaAudioMaxSizeMb") ?? "20"}
+                      required
+                    />
+                    <FieldDescription>单位 MB，默认 20MB。</FieldDescription>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="media-video-max-size-mb">视频上传大小</FieldLabel>
+                    <Input
+                      id="media-video-max-size-mb"
+                      name="mediaVideoMaxSizeMb"
+                      type="number"
+                      min="1"
+                      max="200"
+                      defaultValue={configByKey.get("mediaVideoMaxSizeMb") ?? "200"}
+                      required
+                    />
+                    <FieldDescription>单位 MB，默认 200MB。</FieldDescription>
+                  </Field>
+                </FieldGroup>
                 <Button className="w-fit" type="submit">保存配置</Button>
               </FieldGroup>
             </form>
@@ -272,7 +330,7 @@ export default async function AdminSettingsPage() {
           description="配置项数据来自真实系统配置 API。"
           headers={["配置项", "当前值", "可公开", "更新时间"]}
         >
-          {settings.map((setting) => (
+          {systemSettings.map((setting) => (
             <TableRow key={setting.key}>
               <TableCell className="font-medium">{setting.label}</TableCell>
               <TableCell className="font-mono text-muted-foreground">{setting.value}</TableCell>

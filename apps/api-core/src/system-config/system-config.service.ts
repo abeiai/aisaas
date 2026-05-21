@@ -179,6 +179,94 @@ const configDefinitions = [
     description: "前台用户注册入口的运营状态。",
     isPublic: false,
     sortOrder: 50
+  },
+  {
+    key: "mediaImageMaxSizeMb",
+    label: "图片上传大小",
+    value: "10",
+    description: "媒体素材中图片文件的最大上传大小，单位 MB。",
+    isPublic: false,
+    sortOrder: 90
+  },
+  {
+    key: "mediaAudioMaxSizeMb",
+    label: "音频上传大小",
+    value: "20",
+    description: "媒体素材中音频文件的最大上传大小，单位 MB。",
+    isPublic: false,
+    sortOrder: 91
+  },
+  {
+    key: "mediaVideoMaxSizeMb",
+    label: "视频上传大小",
+    value: "200",
+    description: "媒体素材中视频文件的最大上传大小，单位 MB。",
+    isPublic: false,
+    sortOrder: 92
+  },
+  {
+    key: "audioVoiceCloneReviewRequired",
+    label: "声音复刻审核",
+    value: "true",
+    description: "声音复刻生成的自定义音色是否需要管理员审核后才能使用。",
+    isPublic: false,
+    sortOrder: 310
+  },
+  {
+    key: "audioVoiceDesignReviewRequired",
+    label: "声音设计审核",
+    value: "false",
+    description: "声音设计生成的自定义音色是否需要管理员审核后才能使用。",
+    isPublic: false,
+    sortOrder: 311
+  },
+  {
+    key: "audioUserPublicVoiceEnabled",
+    label: "允许公开用户音色",
+    value: "false",
+    description: "是否允许用户创建 PUBLIC 可见性的自定义音色。",
+    isPublic: false,
+    sortOrder: 312
+  },
+  {
+    key: "audioCloneDefaultVisibility",
+    label: "复刻音色默认可见性",
+    value: "PRIVATE",
+    description: "声音复刻生成音色的默认可见性。",
+    isPublic: false,
+    sortOrder: 313
+  },
+  {
+    key: "audioDesignDefaultVisibility",
+    label: "设计音色默认可见性",
+    value: "PRIVATE",
+    description: "声音设计生成音色的默认可见性。",
+    isPublic: false,
+    sortOrder: 314
+  },
+  {
+    key: "audioSafetyNotice",
+    label: "语音安全提示",
+    value: "AI 生成语音可能被误用，请勿用于冒充他人、诈骗、侵权、虚假宣传或违法违规用途。声音复刻仅允许上传本人声音或已获得授权的声音。生成音频建议标注为 AI 生成语音。",
+    description: "前台语音工具和音色库展示的统一风险提示。",
+    isPublic: true,
+    sortOrder: 315
+  },
+  {
+    key: "audioCloneConsentText",
+    label: "声音复刻授权声明",
+    value: "我确认上传的音频为本人声音，或我已获得声音权利人的明确授权。我承诺不会将该音色用于冒充他人、诈骗、侵权、虚假宣传或其他违法违规用途。",
+    description: "声音复刻提交前必须勾选并保存快照的授权声明。",
+    isPublic: true,
+    sortOrder: 316
+  },
+  {
+    key: "audioDownloadNotice",
+    label: "音频下载提示",
+    value: "下载或对外使用生成音频前，请确认用途合法合规，并建议标注为 AI 生成语音。",
+    description: "生成音频下载区域展示的轻量提示。",
+    isPublic: true,
+    sortOrder: 317
   }
 ] as const;
 
@@ -301,8 +389,42 @@ export class SystemConfigService {
       return normalizePublicNavItems(value);
     }
 
+    if (
+      key === "audioVoiceCloneReviewRequired" ||
+      key === "audioVoiceDesignReviewRequired" ||
+      key === "audioUserPublicVoiceEnabled"
+    ) {
+      if (value !== "true" && value !== "false") {
+        throw new AppException(40001, "语音审核开关只能选择开启或关闭", HttpStatus.BAD_REQUEST);
+      }
+    }
+
+    if (key === "audioCloneDefaultVisibility" || key === "audioDesignDefaultVisibility") {
+      if (value !== "PRIVATE" && value !== "ADMIN_ONLY" && value !== "PUBLIC") {
+        throw new AppException(40001, "音色默认可见性不合法", HttpStatus.BAD_REQUEST);
+      }
+    }
+
+    if (key === "mediaImageMaxSizeMb" || key === "mediaAudioMaxSizeMb" || key === "mediaVideoMaxSizeMb") {
+      return normalizeMediaUploadSizeMb(value);
+    }
+
     return value;
   }
+}
+
+function normalizeMediaUploadSizeMb(value: string) {
+  if (!/^\d+$/.test(value)) {
+    throw new AppException(40001, "媒体上传大小必须是整数 MB", HttpStatus.BAD_REQUEST);
+  }
+
+  const sizeMb = Number(value);
+
+  if (!Number.isInteger(sizeMb) || sizeMb < 1 || sizeMb > 200) {
+    throw new AppException(40001, "媒体上传大小必须在 1 到 200 MB 之间", HttpStatus.BAD_REQUEST);
+  }
+
+  return String(sizeMb);
 }
 
 function normalizePublicNavItems(value: string) {

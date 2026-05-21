@@ -4,10 +4,10 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
 import { PublicShell } from "@/components/shell/public-shell";
+import { MarkdownContent } from "@/components/markdown/markdown-content";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getPublicArticle } from "@/lib/cms-api";
-import { markdownToHtml } from "@/lib/markdown";
 import { getPublicSystemConfigs } from "@/lib/settings-api";
 
 export const dynamic = "force-dynamic";
@@ -86,6 +86,11 @@ export default async function ArticleDetailPage({
   }
 
   const coverUrl = article.coverMedia?.url || article.coverImage;
+  const categories = article.categories && article.categories.length > 0
+    ? article.categories
+    : article.category
+      ? [article.category]
+      : [];
 
   return (
     <PublicShell>
@@ -98,7 +103,15 @@ export default async function ArticleDetailPage({
         </Button>
         <header className="flex flex-col gap-5">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline">{article.category?.name ?? "未分类"}</Badge>
+            {categories.length > 0 ? (
+              categories.map((category) => (
+                <Badge variant="outline" key={category.id}>
+                  {category.name}
+                </Badge>
+              ))
+            ) : (
+              <Badge variant="outline">未分类</Badge>
+            )}
             <Badge variant="secondary">已发布</Badge>
             <span className="text-sm text-muted-foreground">
               {article.publishedAt ? new Date(article.publishedAt).toLocaleDateString("zh-CN") : "未设置发布时间"}
@@ -128,9 +141,9 @@ export default async function ArticleDetailPage({
             </div>
           )}
         </div>
-        <div
-          className="flex flex-col gap-5 border-t border-border pt-8 text-base leading-8 text-foreground"
-          dangerouslySetInnerHTML={{ __html: markdownToHtml(article.content) }}
+        <MarkdownContent
+          className="border-t border-border pt-8 text-base leading-8 text-foreground"
+          content={article.content}
         />
       </article>
     </PublicShell>

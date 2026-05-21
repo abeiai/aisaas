@@ -144,7 +144,7 @@ function ScenarioForm({
             defaultValue={JSON.stringify(scenario.inputSchema ?? { fields: [] }, null, 2)}
             rows={10}
           />
-          <FieldDescription>支持 text、textarea、select、number、switch。保存后前台工具页会按 schema 渲染表单。</FieldDescription>
+          <FieldDescription>支持 text、textarea、select、number、switch、voice-select、audio-upload、slider、audio-preview、format-select。保存后前台工具页会按 schema 渲染表单。</FieldDescription>
         </Field>
         <Field>
           <FieldLabel htmlFor={`${scenario.id}-vars`}>模板变量</FieldLabel>

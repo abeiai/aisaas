@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getAiTasks } from "@/lib/ai-api";
+import { getAudioTasks } from "@/lib/audio-api";
 import { getCurrentUser, userLogoutAction } from "@/lib/auth-actions";
 import { getWallet } from "@/lib/billing-api";
 import { dashboardQuickLinks } from "@/lib/product-data";
@@ -14,7 +15,11 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const user = await getCurrentUser();
-  const [wallet, tasks] = await Promise.all([getWallet(), getAiTasks().catch(() => [])]);
+  const [wallet, tasks, audioTasks] = await Promise.all([
+    getWallet(),
+    getAiTasks().catch(() => []),
+    getAudioTasks().catch(() => [])
+  ]);
   const latestTasks = tasks.slice(0, 4);
   const stats = [
     {
@@ -30,8 +35,8 @@ export default async function DashboardPage() {
       icon: Coins
     },
     {
-      label: "AI 任务",
-      value: tasks.length.toLocaleString("zh-CN"),
+      label: "AI / 音频任务",
+      value: (tasks.length + audioTasks.length).toLocaleString("zh-CN"),
       description: "最近任务记录",
       icon: Sparkles
     }
@@ -132,6 +137,35 @@ export default async function DashboardPage() {
             {latestTasks.length > 0 ? (
               <Button asChild className="w-fit" variant="outline">
                 <Link href="/dashboard/tasks">查看全部任务</Link>
+              </Button>
+            ) : null}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>最近音频任务</CardTitle>
+            <CardDescription>展示最近 4 条语音合成、声音设计和声音复刻记录。</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            {audioTasks.slice(0, 4).length > 0 ? (
+              audioTasks.slice(0, 4).map((task) => (
+                <Link
+                  className="flex items-center justify-between gap-4 rounded-md border border-border bg-background p-4 text-sm"
+                  href={`/dashboard/audio-tasks/${task.id}`}
+                  key={task.id}
+                >
+                  <span className="font-medium">{task.typeName}</span>
+                  <span className="text-muted-foreground">{task.statusName}</span>
+                </Link>
+              ))
+            ) : (
+              <div className="rounded-md border border-dashed border-border bg-background p-6 text-sm text-muted-foreground">
+                暂无音频任务。可以先进入语音工具创建第一条生成任务。
+              </div>
+            )}
+            {audioTasks.length > 0 ? (
+              <Button asChild className="w-fit" variant="outline">
+                <Link href="/dashboard/audio-tasks">查看音频任务</Link>
               </Button>
             ) : null}
           </CardContent>

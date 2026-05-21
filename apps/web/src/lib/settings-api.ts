@@ -102,12 +102,13 @@ export async function updateSystemConfigAction(formData: FormData) {
       beianNo: text(formData, "beianNo"),
       serviceQrCode: text(formData, "serviceQrCode"),
       defaultCreditExchangeRate: text(formData, "defaultCreditExchangeRate"),
-      defaultAiModel: text(formData, "defaultAiModel"),
-      aiSaveFullContent: text(formData, "aiSaveFullContent"),
       siteUrl: text(formData, "siteUrl"),
       siteDescription: text(formData, "siteDescription"),
       apiBaseUrl: text(formData, "apiBaseUrl"),
-      registrationStatus: text(formData, "registrationStatus")
+      registrationStatus: text(formData, "registrationStatus"),
+      mediaImageMaxSizeMb: text(formData, "mediaImageMaxSizeMb"),
+      mediaAudioMaxSizeMb: text(formData, "mediaAudioMaxSizeMb"),
+      mediaVideoMaxSizeMb: text(formData, "mediaVideoMaxSizeMb")
     })
   });
 
@@ -116,4 +117,30 @@ export async function updateSystemConfigAction(formData: FormData) {
   revalidatePath("/");
   revalidatePath("/sitemap.xml");
   revalidatePath("/robots.txt");
+}
+
+export async function updateAiConfigAction(formData: FormData) {
+  await apiFetch<SystemConfig[]>("/system-config", {
+    method: "PATCH",
+    body: JSON.stringify({
+      defaultAiModel: text(formData, "defaultAiModel"),
+      aiSaveFullContent: text(formData, "aiSaveFullContent"),
+      audioVoiceCloneReviewRequired: text(formData, "audioVoiceCloneReviewRequired"),
+      audioVoiceDesignReviewRequired: text(formData, "audioVoiceDesignReviewRequired"),
+      audioUserPublicVoiceEnabled: text(formData, "audioUserPublicVoiceEnabled"),
+      audioCloneDefaultVisibility: text(formData, "audioCloneDefaultVisibility"),
+      audioDesignDefaultVisibility: text(formData, "audioDesignDefaultVisibility"),
+      audioSafetyNotice: text(formData, "audioSafetyNotice"),
+      audioCloneConsentText: text(formData, "audioCloneConsentText"),
+      audioDownloadNotice: text(formData, "audioDownloadNotice")
+    })
+  });
+
+  revalidatePath("/admin");
+  revalidatePath("/admin/ai/config");
+  revalidatePath("/tools/voice-clone");
+  revalidatePath("/tools/voice-design");
+  revalidatePath("/dashboard/voices");
+  revalidatePath("/dashboard/audio-tasks");
+  revalidatePath("/admin/audio/safety");
 }

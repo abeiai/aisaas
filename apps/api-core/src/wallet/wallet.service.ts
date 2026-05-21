@@ -53,6 +53,10 @@ export class WalletService {
       balanceAfter: entry.balanceAfter,
       relatedOrderId: entry.relatedOrderId,
       relatedTaskId: entry.relatedTaskId,
+      relatedAudioTaskId: entry.relatedAudioTaskId,
+      relatedTaskType: entry.relatedTaskType,
+      operationType: entry.operationType,
+      operationTypeName: entry.operationType ? audioTaskTypeName(entry.operationType) : null,
       idempotencyKey: entry.idempotencyKey,
       note: entry.note,
       createdAt: entry.createdAt,
@@ -81,4 +85,14 @@ export class WalletService {
 
     return names[type];
   }
+}
+
+function audioTaskTypeName(type: string) {
+  const names: Record<string, string> = {
+    TTS: "语音合成",
+    VOICE_CLONE: "声音复刻",
+    VOICE_DESIGN: "声音设计"
+  };
+
+  return names[type] ?? type;
 }

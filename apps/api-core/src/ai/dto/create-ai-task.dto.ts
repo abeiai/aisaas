@@ -1,4 +1,6 @@
-import { IsObject, IsOptional, IsString, MaxLength, MinLength } from "class-validator";
+import { Type } from "class-transformer";
+import { IsArray, IsBoolean, IsObject, IsOptional, IsString, MaxLength, MinLength, ValidateNested } from "class-validator";
+import { AiAttachmentDto } from "./ai-attachment.dto.js";
 
 export class CreateAiTaskDto {
   @IsString()
@@ -17,4 +19,23 @@ export class CreateAiTaskDto {
   @IsOptional()
   @IsString()
   knowledgeBaseId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  modelInstanceId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AiAttachmentDto)
+  attachments?: AiAttachmentDto[];
+
+  @IsOptional()
+  @IsBoolean()
+  reasoningEnabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  searchEnabled?: boolean;
 }

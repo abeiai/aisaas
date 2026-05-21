@@ -31,3 +31,5 @@ deploy/data/uploads/*
 !deploy/data/uploads/.gitkeep
 .DS_Store
 packages/database/generated
+apps/web/public/vendor/vditor/
+apps/api-core/uploads/

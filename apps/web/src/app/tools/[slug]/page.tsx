@@ -7,6 +7,8 @@ import {
   ArrowRight,
   CheckCircle2,
   Coins,
+  FileAudio,
+  Headphones,
   LoaderCircle,
   Sparkles,
   WalletCards
@@ -29,6 +31,13 @@ import {
   type AiTask,
   type AiToolInputField
 } from "@/lib/ai-api";
+import {
+  audioUrl,
+  createAudioToolTaskAction,
+  getAudioTask,
+  getVoiceLibrary,
+  type VoiceLibrary
+} from "@/lib/audio-api";
 import { getKnowledgeBases } from "@/lib/knowledge-api";
 
 export const dynamic = "force-dynamic";
@@ -63,6 +72,14 @@ function taskVariable(task: AiTask | null, name: string) {
   return task?.input.variables?.[name] ?? "";
 }
 
+function isAudioField(field: AiToolInputField) {
+  return ["voice-select", "audio-upload", "slider", "audio-preview", "format-select"].includes(field.type);
+}
+
+function isAudioTool(tool: Awaited<ReturnType<typeof getAiTool>>, fields: AiToolInputField[]) {
+  return tool.requiredCapabilities.includes("AUDIO") || fields.some(isAudioField);
+}
+
 function toolFields(tool: Awaited<ReturnType<typeof getAiTool>>) {
   if (tool.inputSchema?.fields.length) {
     return tool.inputSchema.fields;
@@ -90,14 +107,17 @@ function toolFields(tool: Awaited<ReturnType<typeof getAiTool>>) {
 
 function FieldControl({
   field,
-  task
+  task,
+  voiceLibrary
 }: {
   field: AiToolInputField;
   task: AiTask | null;
+  voiceLibrary: VoiceLibrary | null;
 }) {
   const name = field.name === "input" ? "input" : `var_${field.name}`;
   const value = field.name === "input" ? taskInputText(task) : taskVariable(task, field.name);
   const id = field.name === "input" ? "input" : `var_${field.name}`;
+  const defaultValue = field.defaultValue === undefined ? value : String(field.defaultValue);
 
   if (field.type === "textarea") {
     return (
@@ -136,6 +156,98 @@ function FieldControl({
     );
   }
 
+  if (field.type === "format-select") {
+    return (
+      <Field>
+        <FieldLabel htmlFor={id}>{field.label}</FieldLabel>
+        <Select id={id} name={name} defaultValue={defaultValue || field.options[0] || "mp3"} required={field.required}>
+          {field.options.map((option) => (
+            <option key={option} value={option}>
+              {option.toUpperCase()}
+            </option>
+          ))}
+        </Select>
+      </Field>
+    );
+  }
+
+  if (field.type === "voice-select") {
+    const systemVoices = voiceLibrary?.systemVoices ?? [];
+    const customVoices = voiceLibrary?.customVoices.filter((voice) => voice.status === "READY") ?? [];
+
+    return (
+      <Field>
+        <FieldLabel htmlFor={id}>{field.label}</FieldLabel>
+        <Select id={id} name={name} defaultValue={voiceLibrary?.defaultVoice.voiceAssetId ? `voice:${voiceLibrary.defaultVoice.voiceAssetId}` : ""} required={field.required}>
+          <option value="">使用默认系统音色</option>
+          {systemVoices.map((voice) => (
+            <option key={voice.providerVoiceId} value={`system:${voice.providerVoiceId ?? ""}`}>
+              {voice.name} · 系统音色
+            </option>
+          ))}
+          {customVoices.map((voice) => (
+            <option key={voice.id} value={`voice:${voice.id}`}>
+              {voice.name} · {voice.typeName}
+            </option>
+          ))}
+        </Select>
+        <FieldDescription>只显示系统音色和已审核可用的个人音色。</FieldDescription>
+      </Field>
+    );
+  }
+
+  if (field.type === "audio-upload") {
+    const accept = field.accept?.join(",") || "audio/mpeg,audio/mp3,audio/wav,audio/webm,audio/ogg,audio/mp4,video/mp4";
+
+    return (
+      <Field>
+        <FieldLabel htmlFor={id}>{field.label}</FieldLabel>
+        <Input accept={accept} id={id} name={name} required={field.required} type="file" />
+        <FieldDescription>
+          仅支持音频文件，大小不超过 {(field.maxSizeMb ?? 20).toLocaleString("zh-CN")}MB。
+        </FieldDescription>
+      </Field>
+    );
+  }
+
+  if (field.type === "slider") {
+    return (
+      <Field>
+        <FieldLabel htmlFor={id}>{field.label}</FieldLabel>
+        <div className="grid gap-3">
+          <Input
+            id={id}
+            max={field.max}
+            min={field.min}
+            name={name}
+            step="0.1"
+            type="range"
+            defaultValue={defaultValue || field.min}
+          />
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <span>{field.min ?? 0}</span>
+            <span>默认 {defaultValue || field.min}</span>
+            <span>{field.max ?? 1}</span>
+          </div>
+        </div>
+        <FieldDescription>
+          范围 {field.min ?? 0} - {field.max ?? 1}，提交时后端会再次校验。
+        </FieldDescription>
+      </Field>
+    );
+  }
+
+  if (field.type === "audio-preview") {
+    return (
+      <Field>
+        <div className="flex items-center gap-3 rounded-md border border-border bg-background p-4 text-sm text-muted-foreground">
+          <FileAudio data-icon="inline-start" />
+          {field.label}会在提交成功后显示在右侧结果区。
+        </div>
+      </Field>
+    );
+  }
+
   if (field.type === "switch") {
     const checked = ["1", "true", "on", "yes", "是", "启用"].includes(value.toLowerCase());
 
@@ -161,7 +273,7 @@ function FieldControl({
       <Input
         id={id}
         name={name}
-        defaultValue={value}
+        defaultValue={defaultValue}
         max={field.max}
         min={field.min}
         placeholder={field.placeholder}
@@ -197,7 +309,7 @@ export default async function ToolDetailPage({
   searchParams
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ task?: string; error?: string; created?: string; failed?: string }>;
+  searchParams: Promise<{ task?: string; audioTask?: string; voice?: string; error?: string; created?: string; failed?: string }>;
 }) {
   const { slug } = await params;
   const tool = await getAiTool(slug).catch(() => null);
@@ -207,18 +319,25 @@ export default async function ToolDetailPage({
   }
 
   const query = await searchParams;
-  const [knowledgeBases, recommendations] = await Promise.all([
-    getKnowledgeBases().catch(() => []),
-    getAiTools(tool.toolCategory?.slug).catch(() => [])
+  const fields = toolFields(tool);
+  const audioTool = isAudioTool(tool, fields);
+  const [knowledgeBases, recommendations, voiceLibrary, audioTask] = await Promise.all([
+    audioTool ? Promise.resolve([]) : getKnowledgeBases().catch(() => []),
+    getAiTools(tool.toolCategory?.slug).catch(() => []),
+    audioTool ? getVoiceLibrary().catch(() => null) : Promise.resolve(null),
+    audioTool && query.audioTask ? getAudioTask(query.audioTask).catch(() => null) : Promise.resolve(null)
   ]);
   const currentTask = query.task
     ? await getAiTask(query.task)
         .then((task) => (task.scenario.slug === tool.slug ? task : null))
         .catch(() => null)
     : null;
+  const currentVoice = query.voice
+    ? voiceLibrary?.customVoices.find((voice) => voice.id === query.voice) ?? null
+    : null;
   const balanceError = query.error?.includes("点数余额不足");
-  const fields = toolFields(tool);
   const relatedTools = recommendations.filter((item) => item.slug !== tool.slug).slice(0, 3);
+  const resultAudioUrl = audioTask ? audioUrl(audioTask) : null;
 
   return (
     <PublicShell>
@@ -293,13 +412,14 @@ export default async function ToolDetailPage({
               <CardDescription>提交前请确认点数余额充足。未登录提交会先进入登录流程。</CardDescription>
             </CardHeader>
             <CardContent>
-              <form action={createToolTaskAction} className="flex flex-col gap-6">
+              <form action={audioTool ? createAudioToolTaskAction : createToolTaskAction} className="flex flex-col gap-6">
                 <input name="scenarioSlug" type="hidden" value={tool.slug} />
+                {audioTool ? <input name="consentStatement" type="hidden" value="我确认上传的音频为本人声音，或我已获得声音权利人的明确授权。我承诺不会将该音色用于冒充他人、诈骗、侵权、虚假宣传或其他违法违规用途。" /> : null}
                 <FieldGroup>
                   {fields.map((field) => (
-                    <FieldControl field={field} key={field.name} task={currentTask} />
+                    <FieldControl field={field} key={field.name} task={currentTask} voiceLibrary={voiceLibrary} />
                   ))}
-                  {knowledgeBases.length > 0 ? (
+                  {!audioTool && knowledgeBases.length > 0 ? (
                     <Field>
                       <FieldLabel htmlFor="knowledgeBaseId">关联知识库</FieldLabel>
                       <Select
@@ -320,8 +440,8 @@ export default async function ToolDetailPage({
                 </FieldGroup>
                 <div className="flex flex-wrap gap-3">
                   <Button type="submit">
-                    <Sparkles data-icon="inline-start" />
-                    生成内容
+                    {audioTool ? <Headphones data-icon="inline-start" /> : <Sparkles data-icon="inline-start" />}
+                    {audioTool ? "生成音频" : "生成内容"}
                   </Button>
                   <Button asChild variant="outline">
                     <Link href={`/login?next=${encodeURIComponent(`/tools/${tool.slug}`)}`}>
@@ -339,7 +459,78 @@ export default async function ToolDetailPage({
               <CardDescription>提交任务后会在这里展示当前结果，也会同步到任务历史。</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
-              {currentTask ? (
+              {audioTask ? (
+                <>
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-background p-4">
+                    <div className="flex flex-col gap-1 text-sm">
+                      <span className="text-muted-foreground">音频任务</span>
+                      <span className="font-mono text-xs">{audioTask.id}</span>
+                    </div>
+                    <Badge variant={audioTask.status === "SUCCEEDED" ? "secondary" : audioTask.status === "FAILED" ? "muted" : "outline"}>
+                      {audioTask.statusName}
+                    </Badge>
+                  </div>
+                  <div className="grid gap-3 text-sm md:grid-cols-3">
+                    <div className="rounded-md border border-border bg-background p-4">
+                      <p className="text-muted-foreground">预估点数</p>
+                      <p className="mt-1 font-medium">{audioTask.estimatedCredits.toLocaleString("zh-CN")} 点</p>
+                    </div>
+                    <div className="rounded-md border border-border bg-background p-4">
+                      <p className="text-muted-foreground">实际消耗</p>
+                      <p className="mt-1 font-medium">{(audioTask.actualCredits ?? 0).toLocaleString("zh-CN")} 点</p>
+                    </div>
+                    <div className="rounded-md border border-border bg-background p-4">
+                      <p className="text-muted-foreground">完成时间</p>
+                      <p className="mt-1 font-medium">{formatDate(audioTask.finishedAt)}</p>
+                    </div>
+                  </div>
+                  {resultAudioUrl ? (
+                    <div className="flex flex-col gap-3 rounded-md border border-border bg-background p-4">
+                      <audio className="w-full" controls src={resultAudioUrl}>
+                        <track kind="captions" />
+                      </audio>
+                      <Button asChild className="w-fit" size="sm" variant="outline">
+                        <a download href={resultAudioUrl}>
+                          下载音频
+                          <FileAudio data-icon="inline-end" />
+                        </a>
+                      </Button>
+                    </div>
+                  ) : null}
+                  {audioTask.status === "FAILED" ? (
+                    <div className="flex items-center gap-3 rounded-md border border-border bg-background p-5 text-sm text-muted-foreground">
+                      <AlertCircle data-icon="inline-start" />
+                      {audioTask.errorMessage ?? "语音任务失败，冻结点数已自动释放。"}
+                    </div>
+                  ) : null}
+                </>
+              ) : currentVoice ? (
+                <>
+                  <div className="flex items-start justify-between gap-4 rounded-md border border-border bg-background p-4">
+                    <div className="flex flex-col gap-1">
+                      <p className="font-medium">{currentVoice.name}</p>
+                      <p className="text-sm text-muted-foreground">{currentVoice.targetModel}</p>
+                    </div>
+                    <Badge variant={currentVoice.status === "READY" ? "secondary" : currentVoice.status === "FAILED" ? "muted" : "outline"}>
+                      {currentVoice.statusName}
+                    </Badge>
+                  </div>
+                  {currentVoice.previewAudioUrl ? <audio className="w-full" controls src={currentVoice.previewAudioUrl} /> : null}
+                  <div className="flex flex-wrap gap-3">
+                    <Button asChild>
+                      <Link href="/dashboard/voices">
+                        <Headphones data-icon="inline-start" />
+                        管理音色
+                      </Link>
+                    </Button>
+                    {currentVoice.status === "READY" ? (
+                      <Button asChild variant="outline">
+                        <Link href={`/tools/article-to-speech?voice=${currentVoice.id}`}>使用该音色合成</Link>
+                      </Button>
+                    ) : null}
+                  </div>
+                </>
+              ) : currentTask ? (
                 <>
                   <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-background p-4">
                     <div className="flex flex-col gap-1 text-sm">
@@ -422,19 +613,21 @@ export default async function ToolDetailPage({
           </section>
         ) : null}
 
-        <Card>
-          <CardHeader>
-            <CardTitle>SSE 流式输出</CardTitle>
-            <CardDescription>用于验证流式生成、逐字显示和中断释放冻结点数。</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <StreamToolForm
-              placeholder={fields.find((field) => field.name === "input")?.placeholder ?? "请输入生成需求"}
-              promptVariables={tool.promptVariables}
-              scenarioId={tool.id}
-            />
-          </CardContent>
-        </Card>
+        {!audioTool ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>SSE 流式输出</CardTitle>
+              <CardDescription>用于验证流式生成、逐字显示和中断释放冻结点数。</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <StreamToolForm
+                placeholder={fields.find((field) => field.name === "input")?.placeholder ?? "请输入生成需求"}
+                promptVariables={tool.promptVariables}
+                scenarioId={tool.id}
+              />
+            </CardContent>
+          </Card>
+        ) : null}
       </section>
     </PublicShell>
   );

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const isPageNavigation = request.method === "GET" || request.method === "HEAD";
 
   if (pathname.startsWith("/admin") && pathname !== "/admin/login" && pathname !== "/admin/setup") {
     const setupStatus = pathname === "/admin/system/env-check" ? null : await readSetupStatus(request);
@@ -12,7 +13,7 @@ export async function proxy(request: NextRequest) {
 
     const adminAccessToken = request.cookies.get("aisaas_admin_access")?.value;
 
-    if (!adminAccessToken) {
+    if (!adminAccessToken && isPageNavigation) {
       return NextResponse.redirect(new URL("/admin/login", request.url));
     }
   }
@@ -20,7 +21,7 @@ export async function proxy(request: NextRequest) {
   if (pathname.startsWith("/dashboard")) {
     const userAccessToken = request.cookies.get("aisaas_user_access")?.value;
 
-    if (!userAccessToken) {
+    if (!userAccessToken && isPageNavigation) {
       return NextResponse.redirect(new URL("/login", request.url));
     }
   }

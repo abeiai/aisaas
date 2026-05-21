@@ -29,6 +29,7 @@ export default async function AdminAiProviderPresetsPage() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <Badge variant="outline">{provider.adapterType}</Badge>
+                <Badge variant="outline">{provider.modality}</Badge>
                 <Badge variant={provider.instance?.status === "ENABLED" ? "secondary" : "muted"}>
                   {provider.instance?.statusName ?? "未启用"}
                 </Badge>

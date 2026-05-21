@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { ArrowLeft, CheckCircle2, KeyRound, TestTube2 } from "lucide-react";
 
 import { AdminShell } from "@/components/shell/admin-shell";
@@ -25,6 +26,10 @@ export default async function AdminAiProviderPresetDetailPage({
   const { id } = await params;
   const provider = await getAdminAiProviderPreset(id);
   const instance = provider.instance;
+
+  if (provider.adapterType === "DASHSCOPE_AUDIO" || provider.modality === "AUDIO") {
+    redirect("/admin/audio/models");
+  }
 
   return (
     <AdminShell
@@ -56,7 +61,17 @@ export default async function AdminAiProviderPresetDetailPage({
                 <Field>
                   <FieldLabel htmlFor="baseUrl">Base URL</FieldLabel>
                   <Input id="baseUrl" name="baseUrl" defaultValue={instance?.baseUrl ?? provider.defaultBaseUrl} required />
-                  <FieldDescription>自定义 OpenAI-compatible 可以改成你的服务地址。</FieldDescription>
+                  <FieldDescription>文本 Provider 使用 HTTP Base URL，语音 Provider 使用阿里云百炼 HTTP 地址。</FieldDescription>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="webSocketUrl">WebSocket URL</FieldLabel>
+                  <Input id="webSocketUrl" name="webSocketUrl" defaultValue={instance?.webSocketUrl ?? provider.defaultWebSocketUrl ?? ""} />
+                  <FieldDescription>仅语音流式合成需要配置，其他 Provider 可留空。</FieldDescription>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="region">地域</FieldLabel>
+                  <Input id="region" name="region" defaultValue={instance?.region ?? provider.region?.split(",")[0] ?? ""} />
+                  <FieldDescription>阿里云语音支持 cn-beijing 或 intl-singapore。</FieldDescription>
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="apiKey">API Key</FieldLabel>
@@ -67,6 +82,7 @@ export default async function AdminAiProviderPresetDetailPage({
               <FieldGroup>
                 <div className="grid gap-3 md:grid-cols-2">
                   <Info label="Adapter" value={provider.adapterType} />
+                  <Info label="模态" value={provider.modality} />
                   <Info label="环境变量名" value={provider.apiKeyEnvName} />
                   <Info label="连接状态" value={instance?.statusName ?? "未启用"} />
                   <Info label="测试结果" value={instance?.lastTestResult?.message ?? "尚未测试"} />

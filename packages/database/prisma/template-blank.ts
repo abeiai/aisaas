@@ -3,6 +3,7 @@ import { aiToolCategories, aiToolTemplates } from "./ai-tool-template-data.js";
 import {
   starterKitDemoArticles,
   starterKitDemoArticleCategories,
+  starterKitDemoAudioPricingRules,
   starterKitDemoPages,
   starterKitDemoPaymentOrderPrefix,
   starterKitLegacyDemoArticleSlugs,
@@ -30,12 +31,14 @@ async function main() {
 
   const workflowResult = await clearDemoWorkflows(prisma);
   const aiResult = await clearDemoAiTools(prisma, toolSlugs, toolCategorySlugs);
+  const audioResult = await clearDemoAudioPricing(prisma);
   const paymentResult = await clearDemoPayments(prisma);
   const cmsResult = await clearDemoCms(prisma, articleSlugs, articleCategorySlugs, pageSlugs);
 
   console.log(`示例 AI 工作流：删除 ${workflowResult.workflows} 个工作流。`);
   console.log(`示例 AI 任务：删除 ${aiResult.tasks} 条任务。`);
   console.log(`示例 AI 工具：删除 ${aiResult.scenarios} 个模板，删除 ${aiResult.categories} 个分类。`);
+  console.log(`示例语音计费：删除 ${audioResult.pricingRules} 条规则。`);
   console.log(`示例订单：删除 ${paymentResult.orders} 个订单，删除 ${paymentResult.notifyLogs} 条回调日志。`);
   console.log(`示例文章：删除 ${cmsResult.articles} 篇，删除 ${cmsResult.categories} 个分类。`);
   console.log(`示例单页：删除 ${cmsResult.pages} 个。`);
@@ -178,6 +181,21 @@ async function clearDemoAiTools(
   };
 }
 
+async function clearDemoAudioPricing(prisma: ReturnType<typeof getPrismaClient>) {
+  const pricingRules = await prisma.audioPricingRule.deleteMany({
+    where: {
+      OR: starterKitDemoAudioPricingRules.map((rule) => ({
+        operationType: rule.operationType,
+        model: rule.model
+      }))
+    }
+  });
+
+  return {
+    pricingRules: pricingRules.count
+  };
+}
+
 async function clearDemoPayments(prisma: ReturnType<typeof getPrismaClient>) {
   const notifyLogs = await prisma.paymentNotifyLog.deleteMany({
     where: {
@@ -226,6 +244,9 @@ async function clearDemoCms(
         in: articleCategorySlugs
       },
       articles: {
+        none: {}
+      },
+      articleLinks: {
         none: {}
       }
     }

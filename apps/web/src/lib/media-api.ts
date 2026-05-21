@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 
 interface ApiResponse<TData> {
@@ -16,6 +15,8 @@ export interface MediaAsset {
   mimeType: string;
   size: number;
   url: string;
+  mediaType: MediaAssetType;
+  sourceType: MediaAssetSource;
   storageProvider: "LOCAL" | "S3";
   createdByAdminId: string | null;
   createdByAdmin: {
@@ -24,6 +25,15 @@ export interface MediaAsset {
     name: string;
   } | null;
   createdAt: string;
+}
+
+export type MediaAssetType = "IMAGE" | "AUDIO" | "VIDEO";
+export type MediaAssetSource = "SYSTEM" | "USER_UPLOAD" | "AI_GENERATED" | "WEB_FETCHED";
+
+interface MediaAssetFilters {
+  mediaType?: MediaAssetType;
+  sourceType?: MediaAssetSource;
+  q?: string;
 }
 
 function getApiBaseUrl() {
@@ -58,28 +68,22 @@ async function apiFetch<TData>(path: string, init: RequestInit = {}) {
   return payload.data;
 }
 
-export async function getAdminMediaAssets() {
-  return apiFetch<MediaAsset[]>("/media/admin/assets");
-}
+export async function getAdminMediaAssets(filters: MediaAssetFilters = {}) {
+  const searchParams = new URLSearchParams();
 
-export async function uploadMediaAction(formData: FormData) {
-  const headers = new Headers();
-  headers.set("Cookie", await getCookieHeader());
-
-  const response = await fetch(`${getApiBaseUrl()}/media/admin/upload`, {
-    method: "POST",
-    headers,
-    body: formData,
-    cache: "no-store"
-  });
-  const payload = (await response.json()) as ApiResponse<MediaAsset | null>;
-
-  if (!response.ok || payload.code !== 0 || payload.data === null) {
-    throw new Error(payload.message || "上传失败");
+  if (filters.mediaType) {
+    searchParams.set("mediaType", filters.mediaType);
   }
 
-  revalidatePath("/admin");
-  revalidatePath("/admin/media");
-  revalidatePath("/admin/articles");
-  revalidatePath("/admin/pages");
+  if (filters.sourceType) {
+    searchParams.set("sourceType", filters.sourceType);
+  }
+
+  if (filters.q?.trim()) {
+    searchParams.set("q", filters.q.trim());
+  }
+
+  const query = searchParams.toString();
+
+  return apiFetch<MediaAsset[]>(`/media/admin/assets${query ? `?${query}` : ""}`);
 }

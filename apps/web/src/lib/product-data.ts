@@ -7,7 +7,9 @@ import {
   LayoutDashboard,
   Lightbulb,
   Megaphone,
+  Mic2,
   PenLine,
+  Radio,
   ReceiptText,
   Rocket,
   Search,
@@ -176,6 +178,18 @@ export const dashboardQuickLinks = [
     description: "查看最近 50 条 AI 任务和结果。",
     icon: ReceiptText,
     href: "/dashboard/tasks"
+  },
+  {
+    title: "音色库",
+    description: "管理系统音色、设计音色和复刻音色。",
+    icon: Mic2,
+    href: "/dashboard/voices"
+  },
+  {
+    title: "音频任务",
+    description: "查看语音合成、声音设计和复刻记录。",
+    icon: Radio,
+    href: "/dashboard/audio-tasks"
   },
   {
     title: "知识库",

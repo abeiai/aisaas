@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import "@incremark/theme/styles.css";
+import "katex/dist/katex.min.css";
+import "vditor/dist/index.css";
 import "./globals.css";
 
 export const metadata: Metadata = {

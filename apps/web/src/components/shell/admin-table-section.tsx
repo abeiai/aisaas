@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { Plus } from "lucide-react";
 
@@ -9,16 +10,20 @@ interface AdminTableSectionProps {
   title: string;
   description: string;
   addLabel?: string;
-  headers: string[];
+  addHref?: string;
+  headers: ReactNode[];
   children: ReactNode;
+  footer?: ReactNode;
 }
 
 export function AdminTableSection({
   title,
   description,
   addLabel,
+  addHref,
   headers,
-  children
+  children,
+  footer
 }: AdminTableSectionProps) {
   return (
     <Card>
@@ -27,7 +32,14 @@ export function AdminTableSection({
           <CardTitle>{title}</CardTitle>
           <CardDescription>{description}</CardDescription>
         </div>
-        {addLabel ? (
+        {addLabel && addHref ? (
+          <Button asChild>
+            <Link href={addHref}>
+              <Plus data-icon="inline-start" />
+              {addLabel}
+            </Link>
+          </Button>
+        ) : addLabel ? (
           <Button>
             <Plus data-icon="inline-start" />
             {addLabel}
@@ -39,25 +51,29 @@ export function AdminTableSection({
           <Table>
             <TableHeader>
               <TableRow>
-                {headers.map((header) => (
-                  <TableHead key={header}>{header}</TableHead>
+                {headers.map((header, index) => (
+                  <TableHead key={index}>{header}</TableHead>
                 ))}
               </TableRow>
             </TableHeader>
             <TableBody>{children}</TableBody>
           </Table>
         </div>
-        <div className="flex flex-col gap-3 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
-          <span>分页：第 1 页 / 共 1 页</span>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm">
-              上一页
-            </Button>
-            <Button variant="outline" size="sm">
-              下一页
-            </Button>
+        {footer ? (
+          footer
+        ) : (
+          <div className="flex flex-col gap-3 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
+            <span>分页：第 1 页 / 共 1 页</span>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm">
+                上一页
+              </Button>
+              <Button variant="outline" size="sm">
+                下一页
+              </Button>
+            </div>
           </div>
-        </div>
+        )}
       </CardContent>
     </Card>
   );

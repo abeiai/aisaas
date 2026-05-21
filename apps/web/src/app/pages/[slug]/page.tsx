@@ -4,10 +4,12 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
 import { PublicShell } from "@/components/shell/public-shell";
+import { PublicModuleRenderer } from "@/components/content-modules/public-module-renderer";
+import { MarkdownContent } from "@/components/markdown/markdown-content";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getPublicPage } from "@/lib/cms-api";
-import { markdownToHtml } from "@/lib/markdown";
+import { getPublicPageComposition } from "@/lib/page-composition-api";
 import { getPublicSystemConfigs } from "@/lib/settings-api";
 
 export const dynamic = "force-dynamic";
@@ -74,10 +76,21 @@ export default async function PageDetail({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const page = await getPublicPage(slug).catch(() => null);
+  const [page, composition] = await Promise.all([
+    getPublicPage(slug).catch(() => null),
+    getPublicPageComposition(slug).catch(() => null)
+  ]);
 
   if (!page) {
     notFound();
+  }
+
+  if (composition) {
+    return (
+      <PublicShell showHeader={composition.showHeader} showFooter={composition.showFooter}>
+        <PublicModuleRenderer modules={composition.items.map((item) => item.module)} />
+      </PublicShell>
+    );
   }
 
   return (
@@ -104,9 +117,9 @@ export default async function PageDetail({
             {page.seoDescription ?? "这是一个已发布的站点单页。"}
           </p>
         </header>
-        <div
-          className="flex flex-col gap-5 border-t border-border pt-8 text-base leading-8 text-foreground"
-          dangerouslySetInnerHTML={{ __html: markdownToHtml(page.content) }}
+        <MarkdownContent
+          className="border-t border-border pt-8 text-base leading-8 text-foreground"
+          content={page.content}
         />
       </article>
     </PublicShell>

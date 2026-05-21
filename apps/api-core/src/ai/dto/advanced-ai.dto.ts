@@ -206,6 +206,16 @@ export class UpdateAiProviderInstanceDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(400)
+  webSocketUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  region?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(4000)
   apiKey?: string;
 

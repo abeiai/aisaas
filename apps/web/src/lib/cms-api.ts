@@ -2,6 +2,7 @@
 
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
 interface ApiResponse<TData> {
   code: number;
@@ -46,6 +47,7 @@ export interface CmsArticle {
   createdAt: string;
   updatedAt: string;
   category?: CmsCategory;
+  categories?: CmsCategory[];
   coverMedia?: {
     id: string;
     url: string;
@@ -156,6 +158,17 @@ export async function getAdminPages() {
   return apiFetch<CmsPage[]>("/cms/pages", {}, { admin: true });
 }
 
+export async function getAdminPagePreview(id: string) {
+  const pages = await getAdminPages();
+  const page = pages.find((item) => item.id === id);
+
+  if (!page) {
+    throw new Error("单页不存在");
+  }
+
+  return page;
+}
+
 export async function getAdminTags() {
   return apiFetch<CmsTag[]>("/cms/tags", {}, { admin: true });
 }
@@ -214,8 +227,12 @@ function revalidateCmsPaths() {
 }
 
 function articleBody(formData: FormData) {
+  const categoryIds = multiText(formData, "categoryIds");
+  const fallbackCategoryId = text(formData, "categoryId");
+
   return {
-    categoryId: text(formData, "categoryId"),
+    categoryId: categoryIds[0] ?? fallbackCategoryId,
+    categoryIds,
     coverMediaId: nullableText(formData, "coverMediaId"),
     title: text(formData, "title"),
     slug: text(formData, "slug"),
@@ -231,6 +248,7 @@ function articleBody(formData: FormData) {
     ogDescription: nullableText(formData, "ogDescription"),
     ogImage: nullableText(formData, "ogImage"),
     scheduledAt: nullableText(formData, "scheduledAt"),
+    publishedAt: nullableText(formData, "publishedAt"),
     tagSlugs: multiText(formData, "tagSlugs"),
     status: text(formData, "status") || "DRAFT"
   };
@@ -252,6 +270,16 @@ function pageBody(formData: FormData) {
     scheduledAt: nullableText(formData, "scheduledAt"),
     status: text(formData, "status") || "DRAFT"
   };
+}
+
+function safeReturnTo(formData: FormData, fallback: "/admin/articles" | "/admin/pages") {
+  const returnTo = text(formData, "returnTo");
+
+  if (returnTo === fallback || returnTo.startsWith(`${fallback}?`)) {
+    return returnTo;
+  }
+
+  return fallback;
 }
 
 export async function createCategoryAction(formData: FormData) {
@@ -285,6 +313,7 @@ export async function deleteCategoryAction(formData: FormData) {
 export async function createArticleAction(formData: FormData) {
   await adminRequest("/cms/articles", "POST", articleBody(formData));
   revalidateCmsPaths();
+  redirect(safeReturnTo(formData, "/admin/articles"));
 }
 
 export async function updateArticleAction(formData: FormData) {
@@ -293,6 +322,7 @@ export async function updateArticleAction(formData: FormData) {
   revalidateCmsPaths();
   revalidatePath(`/articles/${text(formData, "slug")}`);
   revalidatePath(`/admin/articles/${id}/preview`);
+  redirect(safeReturnTo(formData, "/admin/articles"));
 }
 
 export async function deleteArticleAction(formData: FormData) {
@@ -315,6 +345,7 @@ export async function archiveArticleAction(formData: FormData) {
 export async function createPageAction(formData: FormData) {
   await adminRequest("/cms/pages", "POST", pageBody(formData));
   revalidateCmsPaths();
+  redirect(safeReturnTo(formData, "/admin/pages"));
 }
 
 export async function updatePageAction(formData: FormData) {
@@ -322,6 +353,7 @@ export async function updatePageAction(formData: FormData) {
   await adminRequest(`/cms/pages/${id}`, "PATCH", pageBody(formData));
   revalidateCmsPaths();
   revalidatePath(`/pages/${text(formData, "slug")}`);
+  redirect(safeReturnTo(formData, "/admin/pages"));
 }
 
 export async function deletePageAction(formData: FormData) {

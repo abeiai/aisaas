@@ -72,7 +72,14 @@ export default async function ArticlesPage() {
                 <div>
                   <CardHeader>
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline">{article.category?.name ?? "未分类"}</Badge>
+                      {(article.categories && article.categories.length > 0 ? article.categories : article.category ? [article.category] : []).map(
+                        (category) => (
+                          <Badge variant="outline" key={category.id}>
+                            {category.name}
+                          </Badge>
+                        )
+                      )}
+                      {!article.categories?.length && !article.category ? <Badge variant="outline">未分类</Badge> : null}
                       <Badge variant="secondary">已发布</Badge>
                       <span className="text-sm text-muted-foreground">
                         {article.publishedAt

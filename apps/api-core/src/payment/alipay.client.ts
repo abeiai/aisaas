@@ -1,6 +1,7 @@
-import { HttpStatus, Injectable } from "@nestjs/common";
+import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { AppException } from "../common/app-exception.js";
 import { signRsaSha256, toInputJson, verifyRsaSha256 } from "./payment-crypto.js";
+import { PaymentConfigService } from "./payment-config.service.js";
 import type {
   ChannelQueryResult,
   PaymentChannelOrder,
@@ -15,11 +16,21 @@ interface AlipayOrderInput {
 
 @Injectable()
 export class AlipayClient {
-  createPagePayOrder(order: AlipayOrderInput): PaymentChannelOrder {
-    if (!this.isConfigured()) {
+  constructor(
+    @Inject(PaymentConfigService)
+    private readonly paymentConfigService: PaymentConfigService
+  ) {}
+
+  async createPagePayOrder(order: AlipayOrderInput): Promise<PaymentChannelOrder> {
+    const config = await this.paymentConfigService.getAlipayRuntimeConfig();
+
+    if (!config) {
       return {
+        product: "ALIPAY_PAGE",
+        action: "REDIRECT",
         paymentUrl: null,
         qrCodeUrl: null,
+        launchParams: null,
         providerPayload: null,
         paymentMode: "UNCONFIGURED"
       };
@@ -32,12 +43,16 @@ export class AlipayClient {
       product_code: "FAST_INSTANT_TRADE_PAY"
     };
     const params = this.buildSignedParams("alipay.trade.page.pay", bizContent, {
-      notify_url: this.requiredEnv("ALIPAY_NOTIFY_URL")
-    });
+      notify_url: config.notifyUrl,
+      ...(config.returnUrl ? { return_url: config.returnUrl } : {})
+    }, config);
 
     return {
-      paymentUrl: `${this.gatewayUrl()}?${new URLSearchParams(params).toString()}`,
+      product: "ALIPAY_PAGE",
+      action: "REDIRECT",
+      paymentUrl: `${config.gatewayUrl}?${new URLSearchParams(params).toString()}`,
       qrCodeUrl: null,
+      launchParams: null,
       providerPayload: toInputJson({
         method: "alipay.trade.page.pay",
         bizContent
@@ -46,8 +61,50 @@ export class AlipayClient {
     };
   }
 
-  verifyNotify(body: Record<string, unknown>): VerifiedPaymentResult {
-    if (!this.isConfigured()) {
+  async createWapPayOrder(order: AlipayOrderInput): Promise<PaymentChannelOrder> {
+    const config = await this.paymentConfigService.getAlipayRuntimeConfig();
+
+    if (!config) {
+      return {
+        product: "ALIPAY_WAP",
+        action: "REDIRECT",
+        paymentUrl: null,
+        qrCodeUrl: null,
+        launchParams: null,
+        providerPayload: null,
+        paymentMode: "UNCONFIGURED"
+      };
+    }
+
+    const bizContent = {
+      out_trade_no: order.orderNo,
+      total_amount: order.amountCny,
+      subject: `AI SaaS 点数充值 ${order.credits} 点`,
+      product_code: "QUICK_WAP_WAY"
+    };
+    const params = this.buildSignedParams("alipay.trade.wap.pay", bizContent, {
+      notify_url: config.notifyUrl,
+      ...(config.returnUrl ? { return_url: config.returnUrl } : {})
+    }, config);
+
+    return {
+      product: "ALIPAY_WAP",
+      action: "REDIRECT",
+      paymentUrl: `${config.gatewayUrl}?${new URLSearchParams(params).toString()}`,
+      qrCodeUrl: null,
+      launchParams: null,
+      providerPayload: toInputJson({
+        method: "alipay.trade.wap.pay",
+        bizContent
+      }),
+      paymentMode: "REAL"
+    };
+  }
+
+  async verifyNotify(body: Record<string, unknown>): Promise<VerifiedPaymentResult> {
+    const config = await this.paymentConfigService.getAlipayRuntimeConfig();
+
+    if (!config) {
       throw new AppException(50002, "支付宝支付配置缺失", HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
@@ -57,14 +114,14 @@ export class AlipayClient {
       throw new AppException(40001, "支付宝回调缺少签名", HttpStatus.BAD_REQUEST);
     }
 
-    const content = this.alipaySignContent(body);
+    const content = buildAlipaySignContent(body);
 
-    if (!verifyRsaSha256(content, sign, this.requiredEnv("ALIPAY_PUBLIC_KEY"))) {
+    if (!verifyRsaSha256(content, sign, config.publicKey)) {
       throw new AppException(40001, "支付宝回调验签失败", HttpStatus.BAD_REQUEST);
     }
 
     const appId = stringValue(body.app_id);
-    const configuredAppId = this.requiredEnv("ALIPAY_APP_ID");
+    const configuredAppId = config.appId;
 
     if (appId && appId !== configuredAppId) {
       throw new AppException(40001, "支付宝应用编号不匹配", HttpStatus.BAD_REQUEST);
@@ -94,14 +151,16 @@ export class AlipayClient {
   }
 
   async queryOrder(orderNo: string): Promise<ChannelQueryResult> {
-    if (!this.isConfigured()) {
+    const config = await this.paymentConfigService.getAlipayRuntimeConfig();
+
+    if (!config) {
       throw new AppException(50002, "支付宝支付配置缺失", HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
     const params = this.buildSignedParams("alipay.trade.query", {
       out_trade_no: orderNo
-    });
-    const response = await fetch(`${this.gatewayUrl()}?${new URLSearchParams(params).toString()}`);
+    }, {}, config);
+    const response = await fetch(`${config.gatewayUrl}?${new URLSearchParams(params).toString()}`);
     const payload = await response.json() as {
       alipay_trade_query_response?: {
         code?: string;
@@ -132,22 +191,17 @@ export class AlipayClient {
     };
   }
 
-  isConfigured() {
-    return Boolean(
-      process.env.ALIPAY_APP_ID &&
-      process.env.ALIPAY_PRIVATE_KEY &&
-      process.env.ALIPAY_PUBLIC_KEY &&
-      process.env.ALIPAY_NOTIFY_URL
-    );
-  }
-
   private buildSignedParams(
     method: string,
     bizContent: Record<string, unknown>,
-    extra: Record<string, string> = {}
+    extra: Record<string, string>,
+    config: {
+      appId: string;
+      privateKey: string;
+    }
   ) {
     const params: Record<string, string> = {
-      app_id: this.requiredEnv("ALIPAY_APP_ID"),
+      app_id: config.appId,
       method,
       format: "JSON",
       charset: "utf-8",
@@ -157,42 +211,29 @@ export class AlipayClient {
       biz_content: JSON.stringify(bizContent),
       ...extra
     };
-    const signContent = this.alipaySignContent(params);
+    const signContent = buildAlipaySignContent(params);
 
-    params.sign = signRsaSha256(signContent, this.requiredEnv("ALIPAY_PRIVATE_KEY"));
+    params.sign = signRsaSha256(signContent, config.privateKey);
 
     return params;
   }
 
-  private alipaySignContent(params: Record<string, unknown>) {
-    return Object.entries(params)
-      .filter(([key, value]) => key !== "sign" && key !== "sign_type" && value !== undefined && value !== null)
-      .map(([key, value]) => [key, stringValue(value)] as const)
-      .filter(([, value]) => value !== "")
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, value]) => `${key}=${value}`)
-      .join("&");
-  }
+}
 
-  private gatewayUrl() {
-    if (process.env.ALIPAY_GATEWAY_URL) {
-      return process.env.ALIPAY_GATEWAY_URL;
-    }
+export function buildAlipaySignContent(params: Record<string, unknown>) {
+  return Object.entries(params)
+    .filter(([key, value]) => key !== "sign" && value !== undefined && value !== null)
+    .map(([key, value]) => [key, stringValue(value)] as const)
+    .filter(([, value]) => value !== "")
+    .sort(([left], [right]) => {
+      if (left === right) {
+        return 0;
+      }
 
-    return process.env.ALIPAY_ENV === "production"
-      ? "https://openapi.alipay.com/gateway.do"
-      : "https://openapi-sandbox.dl.alipaydev.com/gateway.do";
-  }
-
-  private requiredEnv(name: string) {
-    const value = process.env[name];
-
-    if (!value) {
-      throw new AppException(50002, "支付宝支付配置缺失", HttpStatus.INTERNAL_SERVER_ERROR);
-    }
-
-    return value;
-  }
+      return left < right ? -1 : 1;
+    })
+    .map(([key, value]) => `${key}=${value}`)
+    .join("&");
 }
 
 function formatAlipayTimestamp(value: Date) {

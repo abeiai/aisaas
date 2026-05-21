@@ -27,6 +27,9 @@ export interface AiToolTemplatePlugin {
       options?: string[];
       min?: number;
       max?: number;
+      default?: string | number | boolean;
+      accept?: string[];
+      maxSizeMb?: number;
     }>;
   };
   promptTemplate: string;
@@ -272,7 +275,7 @@ function normalizeTemplate(
 
 function promptVariablesFromSchema(schema: AiToolTemplatePlugin["inputSchema"]) {
   return schema.fields
-    .filter((field) => field.name !== "input")
+    .filter((field) => field.name !== "input" && !["voice-select", "audio-upload", "audio-preview"].includes(field.type))
     .map((field) => ({
       name: field.name,
       label: field.label,

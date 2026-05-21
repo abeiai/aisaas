@@ -1,6 +1,7 @@
 import { RefreshCcw, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 
+import { PaymentProviderLabel } from "@/components/billing/payment-provider-label";
 import { AdminShell } from "@/components/shell/admin-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -94,7 +95,9 @@ export default async function AdminPaymentsPage() {
                             <span className="text-xs text-muted-foreground">{order.user?.email}</span>
                           </div>
                         </TableCell>
-                        <TableCell>{order.providerName}</TableCell>
+                        <TableCell>
+                          <PaymentProviderLabel iconOnly provider={order.provider} providerName={order.providerName} />
+                        </TableCell>
                         <TableCell>¥{order.amountCny}</TableCell>
                         <TableCell>{order.credits.toLocaleString("zh-CN")} 点</TableCell>
                         <TableCell>
@@ -158,7 +161,9 @@ export default async function AdminPaymentsPage() {
                     notifyLogs.map((log) => (
                       <TableRow key={log.id}>
                         <TableCell>{formatDate(log.createdAt)}</TableCell>
-                        <TableCell>{log.providerName}</TableCell>
+                        <TableCell>
+                          <PaymentProviderLabel provider={log.provider} providerName={log.providerName} />
+                        </TableCell>
                         <TableCell className="font-mono text-xs">{log.orderNo ?? "未知"}</TableCell>
                         <TableCell>
                           <Badge variant={log.verifyResult === "SUCCESS" ? "secondary" : "muted"}>

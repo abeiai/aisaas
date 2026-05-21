@@ -4,22 +4,30 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev --port 7341",
-    "build": "next build",
+    "sync:vditor-assets": "node scripts/sync-vditor-assets.mjs",
+    "dev": "node scripts/sync-vditor-assets.mjs && next dev --hostname 0.0.0.0 --port 7341",
+    "build": "node scripts/sync-vditor-assets.mjs && next build",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node -e \"console.log('前台应用暂无测试')\""
   },
   "dependencies": {
+    "@fortawesome/fontawesome-svg-core": "^7.2.0",
+    "@fortawesome/free-brands-svg-icons": "^7.2.0",
+    "@fortawesome/react-fontawesome": "^3.3.1",
+    "@incremark/react": "^1.0.2",
+    "@incremark/theme": "^1.0.2",
     "@radix-ui/react-slot": "1.2.4",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
+    "katex": "^0.16.47",
     "lucide-react": "1.14.0",
     "next": "16.2.6",
     "qrcode": "^1.5.4",
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "tailwind-merge": "3.5.0",
+    "vditor": "^3.11.2",
     "zustand": "5.0.13"
   },
   "devDependencies": {

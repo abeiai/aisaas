@@ -16,6 +16,12 @@ export const starterKitDemoArticleCategories = [
     slug: "ai-writing",
     description: "AI 写作工具、Prompt 设计和内容生产工作流。",
     sortOrder: 3
+  },
+  {
+    name: "语音工具",
+    slug: "voice-product",
+    description: "语音合成、声音设计、声音复刻和音色库运营说明。",
+    sortOrder: 4
   }
 ] as const;
 
@@ -49,6 +55,16 @@ export const starterKitDemoArticles = [
       "AI 工具模板不是简单把一个大文本框扔给用户。更好的方式是把关键变量拆成主题、目标用户、语气、输出格式等字段，让提交前的预期更明确。\n\n在这个 Starter Kit 中，工具模板使用 inputSchema 描述表单字段，后端负责校验必填项，前台工具页负责动态渲染。\n\n这样做的好处是：开发者可以通过 JSON 或代码注册新工具，而不必为每个工具单独写一套页面。",
     seoTitle: "AI 工具模板输入表单设计",
     seoDescription: "介绍 AI SaaS Starter Kit 中 inputSchema、Prompt 模板和工具表单的设计方式。"
+  },
+  {
+    categorySlug: "voice-product",
+    title: "音色库如何管理生成语音和复刻声音",
+    slug: "voice-library-demo-guide",
+    summary: "说明系统音色、用户音色、声音授权、审核状态和语音任务记录之间的关系。",
+    content:
+      "音色库是语音工具产品化后的核心入口。系统音色适合快速生成通用旁白，用户音色则来自声音设计或声音复刻。\n\n声音复刻必须保存授权声明，未审核或被禁用的音色不能用于新的语音合成任务。管理员可以在后台查看样本、授权记录、任务记录和操作日志。\n\n示例数据只包含说明文案和工具模板，不包含真实用户声音样本、公众人物声音或任何真实 API Key。",
+    seoTitle: "音色库管理示例",
+    seoDescription: "了解 AI SaaS Starter Kit 中音色库、声音授权、语音审核和语音任务记录的基础设计。"
   }
 ] as const;
 
@@ -76,6 +92,22 @@ export const starterKitDemoPages = [
       "本页面是 Starter Kit 示例隐私政策，不构成正式法律文本。\n\n正式上线前，请明确说明你收集哪些用户信息、如何使用、如何保存、如何删除，以及第三方服务的调用范围。",
     seoTitle: "隐私政策",
     seoDescription: "AI SaaS Starter Kit 示例隐私政策。"
+  },
+  {
+    title: "语音工具说明",
+    slug: "voice-tools",
+    content:
+      "本示例页说明语音合成、声音设计和声音复刻的产品化方式。\n\n语音合成工具适合文章朗读、课程讲稿、短视频口播和客服欢迎语。声音设计工具可以通过文字描述生成新的品牌音色。声音复刻工具仅允许上传本人声音或已获授权的声音样本，并需要保存授权声明。\n\n示例站不会内置真实声音样本，也不会写入真实 Provider API Key。",
+    seoTitle: "语音工具说明",
+    seoDescription: "介绍语音合成、声音设计、声音复刻工具模板和使用边界。"
+  },
+  {
+    title: "语音安全协议",
+    slug: "voice-safety",
+    content:
+      "使用语音生成和声音复刻能力时，用户必须承诺不冒充他人、不用于诈骗、不侵犯他人声音权益、不生成违法违规内容。\n\n上传声音样本前，应确认该声音属于本人，或已获得声音权利人的明确授权。平台可根据安全策略对复刻音色进行审核、拒绝、禁用或删除。\n\n本页面为 Starter Kit 示例协议，正式上线前应结合业务范围和法律意见替换为正式文本。",
+    seoTitle: "语音安全协议",
+    seoDescription: "AI SaaS Starter Kit 示例语音安全协议，覆盖声音授权、复刻审核和合规使用要求。"
   }
 ] as const;
 
@@ -111,9 +143,44 @@ export const starterKitDemoSystemConfigs = [
     description: "Starter Kit 示例页脚文案。",
     isPublic: true,
     sortOrder: 18
+  },
+  {
+    key: "audioDemoPricingNote",
+    label: "语音计费示例说明",
+    value: "语音合成按字符计费，声音设计和声音复刻按任务计费；失败任务会释放冻结点数。",
+    description: "Starter Kit 语音工具 Demo 的计费说明文案。",
+    isPublic: true,
+    sortOrder: 320
   }
 ] as const;
 
 export const starterKitLegacyDemoArticleSlugs = ["demo"];
 export const starterKitLegacyDemoCategorySlugs = ["product-design"];
 export const starterKitDemoPaymentOrderPrefix = "DEMO-";
+
+export const starterKitDemoAudioPricingRules = [
+  {
+    operationType: "TTS" as const,
+    model: "demo-voice-model",
+    billingMode: "PER_CHARACTER" as const,
+    creditsPerUnit: "4",
+    minimumCredits: 4,
+    modelMultiplier: "1"
+  },
+  {
+    operationType: "VOICE_DESIGN" as const,
+    model: "demo-voice-model",
+    billingMode: "PER_TASK" as const,
+    creditsPerUnit: "180",
+    minimumCredits: 180,
+    modelMultiplier: "1"
+  },
+  {
+    operationType: "VOICE_CLONE" as const,
+    model: "demo-voice-model",
+    billingMode: "PER_TASK" as const,
+    creditsPerUnit: "260",
+    minimumCredits: 260,
+    modelMultiplier: "1"
+  }
+] as const;

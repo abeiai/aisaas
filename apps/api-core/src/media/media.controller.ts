@@ -1,9 +1,11 @@
 import {
+  Body,
   Controller,
   Get,
   Inject,
   Param,
   Post,
+  Query,
   Req,
   Res,
   UploadedFile,
@@ -14,7 +16,7 @@ import { AdminAuthService } from "../admin-auth/admin-auth.service.js";
 import { successResponse } from "../common/api-response.js";
 import { writeAdminOperationLog } from "../security/admin-operation-log.js";
 import type { HeaderRequestLike } from "../security/request-types.js";
-import { localMediaStream, MediaService } from "./media.service.js";
+import { localMediaStream, mediaUploadMaxBytes, MediaService } from "./media.service.js";
 
 interface UploadedFileLike {
   originalname: string;
@@ -31,23 +33,32 @@ export class MediaController {
   ) {}
 
   @Get("admin/assets")
-  async listAssets(@Req() request: unknown) {
+  async listAssets(
+    @Req() request: unknown,
+    @Query("mediaType") mediaType?: string,
+    @Query("sourceType") sourceType?: string,
+    @Query("q") q?: string
+  ) {
     await this.adminAuthService.me(request as never);
 
-    return successResponse(await this.mediaService.listAssets());
+    return successResponse(await this.mediaService.listAssets({ mediaType, sourceType, q }));
   }
 
   @Post("admin/upload")
   @UseInterceptors(
     FileInterceptor("file", {
       limits: {
-        fileSize: Number(process.env.MEDIA_UPLOAD_MAX_BYTES ?? 2 * 1024 * 1024)
+        fileSize: mediaUploadMaxBytes()
       }
     })
   )
-  async upload(@Req() request: unknown, @UploadedFile() file?: UploadedFileLike) {
+  async upload(
+    @Req() request: unknown,
+    @UploadedFile() file?: UploadedFileLike,
+    @Body("sourceType") sourceType?: string
+  ) {
     const admin = await this.adminAuthService.me(request as never);
-    const asset = await this.mediaService.uploadFile(admin.id, file);
+    const asset = await this.mediaService.uploadFile(admin.id, file, sourceType);
 
     await writeAdminOperationLog({
       adminUserId: admin.id,

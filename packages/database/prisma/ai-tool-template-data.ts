@@ -48,6 +48,12 @@ export const aiToolCategories = [
     slug: "image",
     description: "图像生成、视觉理解和创意提示词预留。",
     sortOrder: 80
+  },
+  {
+    name: "语音",
+    slug: "voice",
+    description: "语音合成、声音设计、声音复刻和音频内容生产。",
+    sortOrder: 90
   }
 ] as const;
 
@@ -402,5 +408,373 @@ export const aiToolTemplates = [
     },
     promptTemplate:
       "请用 {{depth}} 能理解的方式解释以下 {{language}} 代码，说明主要逻辑、关键函数、输入输出和潜在风险。\n\n代码：\n{input}"
+  },
+  {
+    name: "文章转语音",
+    slug: "article-to-speech",
+    description: "把文章、公告或长文内容转换为可在线播放和下载的中文语音。",
+    categorySlug: "voice",
+    sortOrder: 210,
+    costCredits: 5,
+    defaultModelAlias: "tts-default",
+    fallbackModelAlias: "tts-fast",
+    requiredCapabilities: ["AUDIO", "TTS"],
+    inputSchema: {
+      fields: [
+        {
+          name: "text",
+          label: "文章内容",
+          type: "textarea",
+          required: true,
+          placeholder: "粘贴需要转换为语音的文章正文，建议单次 300-2000 字。"
+        },
+        {
+          name: "voiceId",
+          label: "选择音色",
+          type: "voice-select",
+          required: false,
+          placeholder: "默认使用系统中文音色"
+        },
+        {
+          name: "speed",
+          label: "语速",
+          type: "slider",
+          min: 0.5,
+          max: 2,
+          default: 1
+        },
+        {
+          name: "format",
+          label: "输出格式",
+          type: "format-select",
+          options: ["mp3", "wav", "opus"],
+          default: "mp3"
+        },
+        {
+          name: "preview",
+          label: "生成音频",
+          type: "audio-preview"
+        }
+      ]
+    },
+    promptTemplate: "文章转语音任务：{input}"
+  },
+  {
+    name: "短视频口播生成",
+    slug: "short-video-voiceover",
+    description: "为短视频脚本生成节奏更利落的口播音频。",
+    categorySlug: "voice",
+    sortOrder: 220,
+    costCredits: 5,
+    defaultModelAlias: "tts-fast",
+    fallbackModelAlias: "tts-default",
+    requiredCapabilities: ["AUDIO", "TTS"],
+    inputSchema: {
+      fields: [
+        {
+          name: "text",
+          label: "口播脚本",
+          type: "textarea",
+          required: true,
+          placeholder: "输入短视频口播脚本，建议 80-300 字。"
+        },
+        {
+          name: "voiceId",
+          label: "口播音色",
+          type: "voice-select",
+          required: false
+        },
+        {
+          name: "speed",
+          label: "语速",
+          type: "slider",
+          min: 0.8,
+          max: 1.6,
+          default: 1.15
+        },
+        {
+          name: "volume",
+          label: "音量",
+          type: "slider",
+          min: 0,
+          max: 2,
+          default: 1
+        },
+        {
+          name: "format",
+          label: "输出格式",
+          type: "format-select",
+          options: ["mp3", "wav"],
+          default: "mp3"
+        },
+        {
+          name: "preview",
+          label: "试听口播",
+          type: "audio-preview"
+        }
+      ]
+    },
+    promptTemplate: "短视频口播语音任务：{input}"
+  },
+  {
+    name: "课程讲稿转语音",
+    slug: "course-script-tts",
+    description: "把课程讲稿、训练营内容或知识讲解转换为稳定清晰的课程语音。",
+    categorySlug: "voice",
+    sortOrder: 230,
+    costCredits: 5,
+    defaultModelAlias: "tts-default",
+    fallbackModelAlias: "tts-fast",
+    requiredCapabilities: ["AUDIO", "TTS"],
+    inputSchema: {
+      fields: [
+        {
+          name: "text",
+          label: "课程讲稿",
+          type: "textarea",
+          required: true,
+          placeholder: "粘贴课程讲稿正文，建议按小节分批生成。"
+        },
+        {
+          name: "voiceId",
+          label: "讲师音色",
+          type: "voice-select",
+          required: false
+        },
+        {
+          name: "speed",
+          label: "讲解语速",
+          type: "slider",
+          min: 0.7,
+          max: 1.4,
+          default: 0.95
+        },
+        {
+          name: "format",
+          label: "输出格式",
+          type: "format-select",
+          options: ["mp3", "wav"],
+          default: "mp3"
+        },
+        {
+          name: "preview",
+          label: "课程音频",
+          type: "audio-preview"
+        }
+      ]
+    },
+    promptTemplate: "课程讲稿转语音任务：{input}"
+  },
+  {
+    name: "绘本朗读音频生成",
+    slug: "picture-book-narration",
+    description: "生成适合儿童绘本、故事和睡前朗读的柔和语音。",
+    categorySlug: "voice",
+    sortOrder: 240,
+    costCredits: 5,
+    defaultModelAlias: "tts-default",
+    fallbackModelAlias: "tts-fast",
+    requiredCapabilities: ["AUDIO", "TTS"],
+    inputSchema: {
+      fields: [
+        {
+          name: "text",
+          label: "绘本文本",
+          type: "textarea",
+          required: true,
+          placeholder: "输入绘本或故事正文，避免包含不适合儿童的内容。"
+        },
+        {
+          name: "voiceId",
+          label: "朗读音色",
+          type: "voice-select",
+          required: false
+        },
+        {
+          name: "speed",
+          label: "朗读语速",
+          type: "slider",
+          min: 0.6,
+          max: 1.3,
+          default: 0.9
+        },
+        {
+          name: "format",
+          label: "输出格式",
+          type: "format-select",
+          options: ["mp3", "wav"],
+          default: "mp3"
+        },
+        {
+          name: "preview",
+          label: "朗读音频",
+          type: "audio-preview"
+        }
+      ]
+    },
+    promptTemplate: "绘本朗读语音任务：{input}"
+  },
+  {
+    name: "客服欢迎语生成",
+    slug: "customer-greeting-voice",
+    description: "为客服、门店或社群欢迎语生成简短清晰的语音。",
+    categorySlug: "voice",
+    sortOrder: 250,
+    costCredits: 5,
+    defaultModelAlias: "tts-fast",
+    fallbackModelAlias: "tts-default",
+    requiredCapabilities: ["AUDIO", "TTS"],
+    inputSchema: {
+      fields: [
+        {
+          name: "text",
+          label: "欢迎语文案",
+          type: "textarea",
+          required: true,
+          placeholder: "例如：欢迎来到我们的在线客服，请简单描述你的问题。"
+        },
+        {
+          name: "voiceId",
+          label: "客服音色",
+          type: "voice-select",
+          required: false
+        },
+        {
+          name: "speed",
+          label: "语速",
+          type: "slider",
+          min: 0.8,
+          max: 1.5,
+          default: 1
+        },
+        {
+          name: "format",
+          label: "输出格式",
+          type: "format-select",
+          options: ["mp3", "wav"],
+          default: "mp3"
+        },
+        {
+          name: "preview",
+          label: "欢迎语音频",
+          type: "audio-preview"
+        }
+      ]
+    },
+    promptTemplate: "客服欢迎语语音任务：{input}"
+  },
+  {
+    name: "品牌声音设计",
+    slug: "brand-voice-design",
+    description: "用中文描述品牌声音人格，生成可保存到个人音色库的设计音色。",
+    categorySlug: "voice",
+    sortOrder: 260,
+    costCredits: 200,
+    defaultModelAlias: "voice-design-default",
+    fallbackModelAlias: "audio-preview",
+    requiredCapabilities: ["AUDIO", "VOICE_DESIGN"],
+    inputSchema: {
+      fields: [
+        {
+          name: "name",
+          label: "音色名称",
+          type: "text",
+          required: true,
+          placeholder: "例如：品牌客服女声"
+        },
+        {
+          name: "prompt",
+          label: "声音描述",
+          type: "textarea",
+          required: true,
+          placeholder: "描述声音性别、年龄感、语速、情绪、品牌气质和使用场景。"
+        },
+        {
+          name: "previewText",
+          label: "试听文本",
+          type: "textarea",
+          required: false,
+          placeholder: "输入一句用于试听品牌声音的文案。"
+        },
+        {
+          name: "preview",
+          label: "设计音色试听",
+          type: "audio-preview"
+        }
+      ]
+    },
+    promptTemplate: "品牌声音设计任务：{{prompt}}"
+  },
+  {
+    name: "我的声音复刻",
+    slug: "my-voice-clone",
+    description: "上传本人或已获授权的声音样本，创建私有复刻音色。",
+    categorySlug: "voice",
+    sortOrder: 270,
+    costCredits: 300,
+    defaultModelAlias: "voice-clone-default",
+    fallbackModelAlias: "audio-preview",
+    requiredCapabilities: ["AUDIO", "VOICE_CLONE"],
+    inputSchema: {
+      fields: [
+        {
+          name: "name",
+          label: "音色名称",
+          type: "text",
+          required: true,
+          placeholder: "例如：我的课程旁白音色"
+        },
+        {
+          name: "sourceAudio",
+          label: "声音样本",
+          type: "audio-upload",
+          required: true,
+          accept: ["audio/mpeg", "audio/mp3", "audio/wav", "audio/webm", "audio/ogg", "audio/mp4", "video/mp4"],
+          maxSizeMb: 20
+        },
+        {
+          name: "description",
+          label: "用途备注",
+          type: "textarea",
+          required: false,
+          placeholder: "说明该音色的合法用途，例如仅用于本人课程讲解。"
+        },
+        {
+          name: "consentType",
+          label: "授权类型",
+          type: "select",
+          required: true,
+          options: ["SELF_VOICE", "AUTHORIZED_VOICE"],
+          default: "SELF_VOICE"
+        },
+        {
+          name: "ownerName",
+          label: "声音权利人姓名",
+          type: "text",
+          required: false,
+          placeholder: "本人声音可不填，授权声音必填。"
+        },
+        {
+          name: "ownerContact",
+          label: "权利人联系方式",
+          type: "text",
+          required: false,
+          placeholder: "授权声音必填，用于审计留存。"
+        },
+        {
+          name: "consentAccepted",
+          label: "我确认上传的音频为本人声音，或已获得声音权利人的明确授权。",
+          type: "switch",
+          required: true,
+          default: false
+        },
+        {
+          name: "preview",
+          label: "复刻音色试听",
+          type: "audio-preview"
+        }
+      ]
+    },
+    promptTemplate: "声音复刻任务：{{name}}。授权类型：{{consentType}}。"
   }
 ] as const;

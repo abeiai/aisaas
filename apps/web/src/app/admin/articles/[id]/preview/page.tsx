@@ -4,11 +4,11 @@ import { redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
 import { AdminShell } from "@/components/shell/admin-shell";
+import { MarkdownContent } from "@/components/markdown/markdown-content";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getAdminArticlePreview } from "@/lib/cms-api";
-import { markdownToHtml } from "@/lib/markdown";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +37,11 @@ export default async function AdminArticlePreviewPage({
   }
 
   const coverUrl = article.coverMedia?.url || article.coverImage;
+  const categories = article.categories && article.categories.length > 0
+    ? article.categories
+    : article.category
+      ? [article.category]
+      : [];
 
   return (
     <AdminShell
@@ -54,7 +59,15 @@ export default async function AdminArticlePreviewPage({
         <Card>
           <CardHeader>
             <div className="flex flex-wrap gap-2">
-              <Badge variant="outline">{article.category?.name ?? "未分类"}</Badge>
+              {categories.length > 0 ? (
+                categories.map((category) => (
+                  <Badge variant="outline" key={category.id}>
+                    {category.name}
+                  </Badge>
+                ))
+              ) : (
+                <Badge variant="outline">未分类</Badge>
+              )}
               <Badge variant={article.status === "PUBLISHED" ? "secondary" : "muted"}>
                 {statusLabel(article.status)}
               </Badge>
@@ -84,9 +97,9 @@ export default async function AdminArticlePreviewPage({
                 ))}
               </div>
             ) : null}
-            <article
-              className="flex flex-col gap-5 border-t border-border pt-8 text-base leading-8"
-              dangerouslySetInnerHTML={{ __html: markdownToHtml(article.content) }}
+            <MarkdownContent
+              className="border-t border-border pt-8 text-base leading-8"
+              content={article.content}
             />
           </CardContent>
         </Card>

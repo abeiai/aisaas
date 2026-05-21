@@ -5,6 +5,16 @@ import { AppException } from "../common/app-exception.js";
 const publicArticleInclude = {
   category: true,
   coverMedia: true,
+  articleCategories: {
+    include: {
+      category: true
+    },
+    orderBy: {
+      category: {
+        sortOrder: "asc"
+      }
+    }
+  },
   articleTags: {
     include: {
       tag: true
@@ -27,19 +37,38 @@ export class PublicContentService {
     const articles = await this.prisma.article.findMany({
       where: {
         status: "PUBLISHED",
-        OR: [
+        AND: [
           {
-            publishedAt: null
+            OR: [
+              {
+                publishedAt: null
+              },
+              {
+                publishedAt: {
+                  lte: new Date()
+                }
+              }
+            ]
           },
           {
-            publishedAt: {
-              lte: new Date()
-            }
+            OR: [
+              {
+                category: {
+                  isVisible: true
+                }
+              },
+              {
+                articleCategories: {
+                  some: {
+                    category: {
+                      isVisible: true
+                    }
+                  }
+                }
+              }
+            ]
           }
-        ],
-        category: {
-          isVisible: true
-        }
+        ]
       },
       orderBy: [{ publishedAt: "desc" }, { updatedAt: "desc" }],
       include: publicArticleInclude
@@ -55,19 +84,38 @@ export class PublicContentService {
       where: {
         slug,
         status: "PUBLISHED",
-        OR: [
+        AND: [
           {
-            publishedAt: null
+            OR: [
+              {
+                publishedAt: null
+              },
+              {
+                publishedAt: {
+                  lte: new Date()
+                }
+              }
+            ]
           },
           {
-            publishedAt: {
-              lte: new Date()
-            }
+            OR: [
+              {
+                category: {
+                  isVisible: true
+                }
+              },
+              {
+                articleCategories: {
+                  some: {
+                    category: {
+                      isVisible: true
+                    }
+                  }
+                }
+              }
+            ]
           }
-        ],
-        category: {
-          isVisible: true
-        }
+        ]
       },
       include: publicArticleInclude
     });
@@ -127,6 +175,40 @@ export class PublicContentService {
     return page;
   }
 
+  async listModules() {
+    return this.prisma.contentModule.findMany({
+      where: {
+        isEnabled: true
+      },
+      include: {
+        items: {
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }]
+        }
+      },
+      orderBy: [{ sortOrder: "asc" }, { updatedAt: "desc" }]
+    });
+  }
+
+  async getModule(slug: string) {
+    const module = await this.prisma.contentModule.findFirst({
+      where: {
+        slug,
+        isEnabled: true
+      },
+      include: {
+        items: {
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }]
+        }
+      }
+    });
+
+    if (!module) {
+      throw new AppException(40401, "模块不存在或未启用", HttpStatus.NOT_FOUND);
+    }
+
+    return module;
+  }
+
   private async publishDueContent() {
     const now = new Date();
     await this.prisma.$transaction([
@@ -162,10 +244,11 @@ export class PublicContentService {
       include: typeof publicArticleInclude;
     }>
   ) {
-    const { articleTags, ...rest } = article;
+    const { articleCategories, articleTags, ...rest } = article;
 
     return {
       ...rest,
+      categories: articleCategories.map((item) => item.category),
       tags: articleTags.map((item) => item.tag)
     };
   }

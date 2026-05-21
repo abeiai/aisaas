@@ -3,10 +3,50 @@ import { createReadStream, existsSync, mkdirSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 import { HttpStatus, Injectable } from "@nestjs/common";
-import { getPrismaClient } from "@aisaas/database";
+import { getPrismaClient, type Prisma } from "@aisaas/database";
 import { AppException } from "../common/app-exception.js";
 
-const allowedMimeTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+const mediaAssetTypes = ["IMAGE", "AUDIO", "VIDEO"] as const;
+const mediaAssetSources = ["SYSTEM", "USER_UPLOAD", "AI_GENERATED", "WEB_FETCHED"] as const;
+
+type MediaAssetTypeValue = (typeof mediaAssetTypes)[number];
+
+const defaultMaxUploadSizeMb: Record<MediaAssetTypeValue, number> = {
+  IMAGE: 10,
+  AUDIO: 20,
+  VIDEO: 200
+};
+
+const maxUploadConfigKeys: Record<MediaAssetTypeValue, string> = {
+  IMAGE: "mediaImageMaxSizeMb",
+  AUDIO: "mediaAudioMaxSizeMb",
+  VIDEO: "mediaVideoMaxSizeMb"
+};
+
+const allowedMimeTypes = new Map<string, MediaAssetTypeValue>([
+  ["image/jpeg", "IMAGE"],
+  ["image/png", "IMAGE"],
+  ["image/webp", "IMAGE"],
+  ["image/gif", "IMAGE"],
+  ["audio/mpeg", "AUDIO"],
+  ["audio/mp3", "AUDIO"],
+  ["audio/wav", "AUDIO"],
+  ["audio/x-wav", "AUDIO"],
+  ["audio/webm", "AUDIO"],
+  ["audio/ogg", "AUDIO"],
+  ["audio/aac", "AUDIO"],
+  ["audio/mp4", "AUDIO"],
+  ["video/mp4", "VIDEO"],
+  ["video/webm", "VIDEO"],
+  ["video/quicktime", "VIDEO"],
+  ["video/x-matroska", "VIDEO"]
+]);
+
+interface MediaAssetFilters {
+  mediaType?: string;
+  sourceType?: string;
+  q?: string;
+}
 
 interface UploadedFileLike {
   originalname: string;
@@ -19,8 +59,39 @@ interface UploadedFileLike {
 export class MediaService {
   private readonly prisma = getPrismaClient();
 
-  async listAssets() {
+  async listAssets(filters: MediaAssetFilters = {}) {
+    const mediaType = parseMediaAssetType(filters.mediaType);
+    const sourceType = parseMediaAssetSource(filters.sourceType);
+    const q = optionalText(filters.q);
+    const where: Prisma.MediaAssetWhereInput = {};
+
+    if (mediaType) {
+      where.mediaType = mediaType;
+    }
+
+    if (sourceType) {
+      where.sourceType = sourceType;
+    }
+
+    if (q) {
+      where.OR = [
+        {
+          originalName: {
+            contains: q,
+            mode: "insensitive"
+          }
+        },
+        {
+          filename: {
+            contains: q,
+            mode: "insensitive"
+          }
+        }
+      ];
+    }
+
     const assets = await this.prisma.mediaAsset.findMany({
+      where,
       include: {
         createdByAdmin: {
           select: {
@@ -33,16 +104,18 @@ export class MediaService {
       orderBy: {
         createdAt: "desc"
       },
-      take: 100
+      take: 240
     });
 
     return assets.map((asset) => ({
       id: asset.id,
       filename: asset.filename,
-      originalName: asset.originalName,
+      originalName: normalizeOriginalName(asset.originalName),
       mimeType: asset.mimeType,
       size: asset.size,
       url: asset.url,
+      mediaType: asset.mediaType,
+      sourceType: asset.sourceType,
       storageProvider: asset.storageProvider,
       createdByAdminId: asset.createdByAdminId,
       createdByAdmin: asset.createdByAdmin,
@@ -50,14 +123,16 @@ export class MediaService {
     }));
   }
 
-  async uploadFile(adminUserId: string, file: UploadedFileLike | undefined) {
+  async uploadFile(adminUserId: string, file: UploadedFileLike | undefined, sourceTypeInput?: string) {
     if (!file) {
       throw new AppException(40001, "请选择要上传的文件", HttpStatus.BAD_REQUEST);
     }
 
-    this.assertAllowedFile(file);
+    const mediaType = await this.assertAllowedFile(file);
+    const sourceType = parseMediaAssetSource(sourceTypeInput) ?? "USER_UPLOAD";
+    const originalName = normalizeOriginalName(file.originalname);
 
-    const filename = this.createFilename(file.originalname, file.mimetype);
+    const filename = this.createFilename(originalName, file.mimetype);
     const provider = uploadDriver() === "s3" ? "S3" : "LOCAL";
     const url =
       provider === "S3"
@@ -67,10 +142,12 @@ export class MediaService {
     const asset = await this.prisma.mediaAsset.create({
       data: {
         filename,
-        originalName: file.originalname,
+        originalName,
         mimeType: file.mimetype,
         size: file.size,
         url,
+        mediaType,
+        sourceType,
         storageProvider: provider,
         createdByAdminId: adminUserId
       },
@@ -88,10 +165,12 @@ export class MediaService {
     return {
       id: asset.id,
       filename: asset.filename,
-      originalName: asset.originalName,
+      originalName: normalizeOriginalName(asset.originalName),
       mimeType: asset.mimeType,
       size: asset.size,
       url: asset.url,
+      mediaType: asset.mediaType,
+      sourceType: asset.sourceType,
       storageProvider: asset.storageProvider,
       createdByAdminId: asset.createdByAdminId,
       createdByAdmin: asset.createdByAdmin,
@@ -125,14 +204,39 @@ export class MediaService {
     };
   }
 
-  private assertAllowedFile(file: UploadedFileLike) {
-    if (!allowedMimeTypes.has(file.mimetype)) {
-      throw new AppException(40001, "仅支持 JPG、PNG、WebP、GIF 图片", HttpStatus.BAD_REQUEST);
+  private async assertAllowedFile(file: UploadedFileLike) {
+    const mediaType = allowedMimeTypes.get(file.mimetype);
+
+    if (!mediaType) {
+      throw new AppException(40001, "仅支持图片、音频、视频文件", HttpStatus.BAD_REQUEST);
     }
 
-    if (file.size <= 0 || file.size > maxUploadBytes()) {
-      throw new AppException(40001, `文件大小不能超过 ${Math.floor(maxUploadBytes() / 1024 / 1024)}MB`, HttpStatus.BAD_REQUEST);
+    const maxBytes = await this.maxUploadBytesFor(mediaType);
+    const maxMb = Math.floor(maxBytes / 1024 / 1024);
+
+    if (file.size <= 0 || file.size > maxBytes) {
+      throw new AppException(
+        40001,
+        `${mediaTypeLabel(mediaType)}文件大小不能超过 ${maxMb}MB`,
+        HttpStatus.BAD_REQUEST
+      );
     }
+
+    return mediaType;
+  }
+
+  private async maxUploadBytesFor(mediaType: MediaAssetTypeValue) {
+    const config = await this.prisma.systemConfig.findUnique({
+      where: {
+        key: maxUploadConfigKeys[mediaType]
+      },
+      select: {
+        value: true
+      }
+    });
+    const maxMb = normalizeUploadSizeMb(config?.value, defaultMaxUploadSizeMb[mediaType]);
+
+    return maxMb * 1024 * 1024;
   }
 
   private createFilename(originalName: string, mimeType: string) {
@@ -217,16 +321,17 @@ function publicApiBaseUrl() {
   return (process.env.PUBLIC_API_BASE_URL ?? process.env.API_PUBLIC_BASE_URL ?? "http://localhost:7342/api").replace(/\/+$/, "");
 }
 
-function maxUploadBytes() {
-  const value = Number(process.env.MEDIA_UPLOAD_MAX_BYTES ?? 2 * 1024 * 1024);
+export function mediaUploadMaxBytes() {
+  const defaultBytes = defaultMaxUploadSizeMb.VIDEO * 1024 * 1024;
+  const value = Number(process.env.MEDIA_UPLOAD_MAX_BYTES ?? defaultBytes);
 
-  return Number.isFinite(value) && value > 0 ? value : 2 * 1024 * 1024;
+  return Number.isFinite(value) && value > defaultBytes ? value : defaultBytes;
 }
 
 function extensionFor(originalName: string, mimeType: string) {
   const extension = extname(originalName).toLowerCase();
 
-  if ([".jpg", ".jpeg", ".png", ".webp", ".gif"].includes(extension)) {
+  if ([".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp3", ".wav", ".webm", ".ogg", ".aac", ".m4a", ".mp4", ".mov", ".mkv"].includes(extension)) {
     return extension === ".jpeg" ? ".jpg" : extension;
   }
 
@@ -234,10 +339,69 @@ function extensionFor(originalName: string, mimeType: string) {
     "image/jpeg": ".jpg",
     "image/png": ".png",
     "image/webp": ".webp",
-    "image/gif": ".gif"
+    "image/gif": ".gif",
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/webm": ".webm",
+    "audio/ogg": ".ogg",
+    "audio/aac": ".aac",
+    "audio/mp4": ".m4a",
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
+    "video/quicktime": ".mov",
+    "video/x-matroska": ".mkv"
   };
 
   return byMimeType[mimeType] ?? ".bin";
+}
+
+function parseMediaAssetType(value?: string) {
+  return mediaAssetTypes.find((item) => item === value) ?? undefined;
+}
+
+function parseMediaAssetSource(value?: string) {
+  return mediaAssetSources.find((item) => item === value) ?? undefined;
+}
+
+function optionalText(value?: string) {
+  const text = value?.trim();
+
+  return text ? text : undefined;
+}
+
+function normalizeUploadSizeMb(value: string | null | undefined, fallback: number) {
+  const sizeMb = Number(String(value ?? "").trim());
+
+  return Number.isInteger(sizeMb) && sizeMb >= 1 && sizeMb <= 200 ? sizeMb : fallback;
+}
+
+function mediaTypeLabel(value: MediaAssetTypeValue) {
+  if (value === "AUDIO") {
+    return "音频";
+  }
+
+  if (value === "VIDEO") {
+    return "视频";
+  }
+
+  return "图片";
+}
+
+function normalizeOriginalName(value: string) {
+  const safeName = basename(value).normalize("NFC");
+  const decoded = Buffer.from(safeName, "latin1").toString("utf8").normalize("NFC");
+
+  if (!decoded.includes("�") && countCjk(decoded) > countCjk(safeName)) {
+    return basename(decoded);
+  }
+
+  return safeName;
+}
+
+function countCjk(value: string) {
+  return Array.from(value).filter((char) => /[\u3400-\u9fff]/.test(char)).length;
 }
 
 function s3Config() {

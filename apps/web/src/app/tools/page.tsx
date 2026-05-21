@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { ArrowRight, Bot, Coins, Sparkles } from "lucide-react";
+import { ArrowRight, Bot, Coins, Mic2, Sparkles, Wand2, Waves } from "lucide-react";
 
 import { PublicShell } from "@/components/shell/public-shell";
 import { Badge } from "@/components/ui/badge";
@@ -43,6 +43,29 @@ export default async function ToolsPage({
         ]
       : [];
   const groups = [...groupedTools, ...fallbackGroup];
+  const audioTools = [
+    {
+      href: "/tools/text-to-speech",
+      title: "语音合成",
+      description: "输入文本，选择音色和模型，生成可在线播放和下载的音频。",
+      icon: Waves,
+      cost: "约 5 点 / 100 字"
+    },
+    {
+      href: "/tools/voice-design",
+      title: "声音设计",
+      description: "用中文描述想要的声音，生成可保存到音色库的新音色。",
+      icon: Wand2,
+      cost: "约 200 点 / 次"
+    },
+    {
+      href: "/tools/voice-clone",
+      title: "声音复刻",
+      description: "上传已授权的声音样本，创建仅自己可见的复刻音色。",
+      icon: Mic2,
+      cost: "约 300 点 / 次"
+    }
+  ];
 
   return (
     <PublicShell>
@@ -79,6 +102,41 @@ export default async function ToolsPage({
         </div>
 
         <div className="flex flex-col gap-10">
+          <section className="flex flex-col gap-4">
+            <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+              <Mic2 />
+              语音工具
+            </div>
+            <div className="grid gap-4 md:grid-cols-3">
+              {audioTools.map((tool) => (
+                <Card key={tool.href}>
+                  <CardHeader>
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex size-10 items-center justify-center rounded-md bg-secondary">
+                        <tool.icon />
+                      </div>
+                      <Badge variant="secondary">可使用</Badge>
+                    </div>
+                    <CardTitle>{tool.title}</CardTitle>
+                    <CardDescription>{tool.description}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-5">
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Coins data-icon="inline-start" />
+                      {tool.cost}
+                    </div>
+                    <Button asChild>
+                      <Link href={tool.href}>
+                        立即使用
+                        <ArrowRight data-icon="inline-end" />
+                      </Link>
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </section>
+
           {groups.map((category) => (
             <section className="flex flex-col gap-4" key={category.name}>
               <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">

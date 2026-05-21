@@ -204,7 +204,20 @@ export default async function AdminHomePage() {
                   {articles.map((article) => (
                     <TableRow key={article.slug}>
                       <TableCell className="font-medium">{article.title}</TableCell>
-                      <TableCell>{article.category?.name ?? "未分类"}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {(article.categories && article.categories.length > 0 ? article.categories : article.category ? [article.category] : []).map(
+                            (category) => (
+                              <Badge variant="outline" key={category.id}>
+                                {category.name}
+                              </Badge>
+                            )
+                          )}
+                          {!article.categories?.length && !article.category ? (
+                            <span className="text-sm text-muted-foreground">未分类</span>
+                          ) : null}
+                        </div>
+                      </TableCell>
                       <TableCell>
                         <Badge variant={article.status === "PUBLISHED" ? "secondary" : "muted"}>
                           {article.status === "PUBLISHED"

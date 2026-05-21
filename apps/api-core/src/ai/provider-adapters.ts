@@ -7,7 +7,8 @@ export type ProviderAdapterType =
   | "OPENAI_COMPATIBLE"
   | "CUSTOM_OPENAI_COMPATIBLE"
   | "ANTHROPIC"
-  | "GEMINI";
+  | "GEMINI"
+  | "DASHSCOPE_AUDIO";
 
 export interface ProviderAdapter {
   readonly type: ProviderAdapterType;
@@ -24,6 +25,9 @@ export interface ProviderTestInput {
   apiKeyEncrypted: string;
   modelName: string;
   timeoutMs: number;
+  gatewayBaseUrl?: string;
+  webSocketUrl?: string | null;
+  region?: string | null;
 }
 
 export interface ProviderTestResult {
@@ -42,10 +46,23 @@ export interface ProviderTextInput {
   temperature: number;
   maxTokens: number;
   timeoutMs: number;
+  attachments?: ProviderTextAttachment[];
+  reasoningSwitchSupported?: boolean;
+  reasoningEnabled?: boolean;
+  searchEnabled?: boolean;
+}
+
+export interface ProviderTextAttachment {
+  name: string;
+  type: string;
+  mimeType: string;
+  size: number;
+  dataUrl?: string;
 }
 
 export interface ProviderStreamInput extends ProviderTextInput {
   onDelta: (text: string) => void;
+  onReasoningDelta?: (text: string) => void;
   signal?: AbortSignal;
 }
 
@@ -59,6 +76,7 @@ export interface ProviderTextResult {
   finishReason?: string | null;
   errorCode?: string | null;
   latencyMs?: number | null;
+  reasoningContent?: string;
 }
 
 export interface ProviderEmbeddingInput {
@@ -91,6 +109,8 @@ export interface ProviderUsageInput {
 interface AiGatewayResponse {
   output?: unknown;
   text?: unknown;
+  reasoningText?: unknown;
+  reasoningContent?: unknown;
   usage?: {
     inputTokens?: unknown;
     outputTokens?: unknown;
@@ -113,6 +133,10 @@ export function getProviderAdapter(type: string | null | undefined): ProviderAda
 
   if (type === "GEMINI") {
     return new GeminiProviderAdapter();
+  }
+
+  if (type === "DASHSCOPE_AUDIO") {
+    return new DashScopeAudioProviderAdapter();
   }
 
   return new OpenAiCompatibleProviderAdapter(
@@ -189,12 +213,17 @@ class OpenAiCompatibleProviderAdapter implements ProviderAdapter {
           messages: [
             {
               role: "user",
-              content: input.prompt
+              content: openAiCompatibleUserContent(input)
             }
           ],
           input: input.input,
           temperature: input.temperature,
-          maxTokens: input.maxTokens
+          maxTokens: input.maxTokens,
+          timeoutMs: input.timeoutMs,
+          attachments: input.attachments,
+          reasoningSwitchSupported: Boolean(input.reasoningSwitchSupported),
+          reasoningEnabled: Boolean(input.reasoningEnabled),
+          searchEnabled: Boolean(input.searchEnabled)
         }),
         signal: controller.signal
       });
@@ -240,101 +269,122 @@ class OpenAiCompatibleProviderAdapter implements ProviderAdapter {
 
   async streamText(input: ProviderStreamInput): Promise<ProviderTextResult> {
     const startedAt = Date.now();
-    const response = await fetch(`${input.gatewayBaseUrl}/v1/text/stream`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "text/event-stream"
-      },
-      body: JSON.stringify({
-        scenarioSlug: input.scenarioSlug,
-        baseUrl: input.baseUrl,
-        apiKey: decryptSecret(input.apiKeyEncrypted),
-        modelName: input.modelName,
-        prompt: input.prompt,
-        messages: [
-          {
-            role: "user",
-            content: input.prompt
-          }
-        ],
-        input: input.input,
-        temperature: input.temperature,
-        maxTokens: input.maxTokens
-      }),
-      signal: input.signal
-    });
-
-    if (!response.ok || !response.body) {
-      throw new ProviderAdapterException(`HTTP_${response.status}`, "AI Gateway 流式调用失败");
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let text = "";
-    let donePayload: (AiGatewayResponse & { done?: boolean }) | null = null;
-
-    while (true) {
-      const { done, value } = await reader.read();
-
-      if (done) {
-        break;
-      }
-
-      buffer += decoder.decode(value, {
-        stream: true
+    try {
+      const response = await fetch(`${input.gatewayBaseUrl}/v1/text/stream`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream"
+        },
+        body: JSON.stringify({
+          scenarioSlug: input.scenarioSlug,
+          baseUrl: input.baseUrl,
+          apiKey: decryptSecret(input.apiKeyEncrypted),
+          modelName: input.modelName,
+          prompt: input.prompt,
+          messages: [
+            {
+              role: "user",
+              content: openAiCompatibleUserContent(input)
+            }
+          ],
+          input: input.input,
+          temperature: input.temperature,
+          maxTokens: input.maxTokens,
+          timeoutMs: input.timeoutMs,
+          attachments: input.attachments,
+          reasoningSwitchSupported: Boolean(input.reasoningSwitchSupported),
+          reasoningEnabled: Boolean(input.reasoningEnabled),
+          searchEnabled: Boolean(input.searchEnabled)
+        }),
+        signal: input.signal
       });
 
-      const parts = buffer.split("\n\n");
-      buffer = parts.pop() ?? "";
+      if (!response.ok || !response.body) {
+        throw new ProviderAdapterException(`HTTP_${response.status}`, "AI Gateway 流式调用失败");
+      }
 
-      for (const part of parts) {
-        const line = part
-          .split("\n")
-          .find((item) => item.startsWith("data:"))
-          ?.replace(/^data:\s*/, "");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let text = "";
+      let reasoningContent = "";
+      let donePayload: (AiGatewayResponse & { done?: boolean }) | null = null;
 
-        if (!line) {
-          continue;
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          break;
         }
 
-        const payload = JSON.parse(line) as AiGatewayResponse & {
-          done?: boolean;
-        };
+        buffer += decoder.decode(value, {
+          stream: true
+        });
 
-        if (typeof payload.errorMessage === "string" && payload.errorMessage) {
-          throw new ProviderAdapterException(payload.errorCode ?? "STREAM_ERROR", "AI 流式生成失败，请稍后重试");
-        }
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
 
-        const chunk = textOutput(payload);
+        for (const part of parts) {
+          const line = part
+            .split("\n")
+            .find((item) => item.startsWith("data:"))
+            ?.replace(/^data:\s*/, "");
 
-        if (chunk) {
-          text += chunk;
-          input.onDelta(chunk);
-        }
+          if (!line) {
+            continue;
+          }
 
-        if (payload.done) {
-          donePayload = payload;
+          const payload = JSON.parse(line) as AiGatewayResponse & {
+            done?: boolean;
+          };
+
+          if (typeof payload.errorMessage === "string" && payload.errorMessage) {
+            throw new ProviderAdapterException(payload.errorCode ?? "STREAM_ERROR", payload.errorMessage);
+          }
+
+          const reasoningChunk = reasoningDeltaOutput(payload);
+          const chunk = deltaOutput(payload);
+
+          if (reasoningChunk) {
+            reasoningContent += reasoningChunk;
+            input.onReasoningDelta?.(reasoningChunk);
+          }
+
+          if (chunk) {
+            text += chunk;
+            input.onDelta(chunk);
+          }
+
+          if (payload.done) {
+            donePayload = payload;
+          }
         }
       }
-    }
 
-    if (!text.trim()) {
-      throw new ProviderAdapterException("EMPTY_OUTPUT", "AI Provider 返回内容为空");
-    }
+      if (!text.trim()) {
+        throw new ProviderAdapterException("EMPTY_OUTPUT", "AI Provider 返回内容为空");
+      }
 
-    return {
-      text,
-      usage: usageFromGateway(donePayload),
-      usageCredits: typeof donePayload?.usageCredits === "number" ? donePayload.usageCredits : undefined,
-      provider: stringValue(donePayload?.provider),
-      model: stringValue(donePayload?.model),
-      requestId: donePayload?.requestId ?? null,
-      finishReason: donePayload?.finishReason ?? null,
-      errorCode: donePayload?.errorCode ?? null,
-      latencyMs: Date.now() - startedAt
-    };
+      return {
+        text,
+        reasoningContent,
+        usage: usageFromGateway(donePayload),
+        usageCredits: typeof donePayload?.usageCredits === "number" ? donePayload.usageCredits : undefined,
+        provider: stringValue(donePayload?.provider),
+        model: stringValue(donePayload?.model),
+        requestId: donePayload?.requestId ?? null,
+        finishReason: donePayload?.finishReason ?? null,
+        errorCode: donePayload?.errorCode ?? null,
+        latencyMs: Date.now() - startedAt
+      };
+    } catch (error) {
+      if (error instanceof ProviderAdapterException || (error instanceof Error && error.name === "AbortError")) {
+        throw error;
+      }
+
+      throw new ProviderAdapterException("AI_GATEWAY_STREAM_ERROR", "AI Gateway 流式调用失败");
+    }
   }
 
   async generateEmbedding(): Promise<ProviderEmbeddingResult> {
@@ -353,7 +403,9 @@ class OpenAiCompatibleProviderAdapter implements ProviderAdapter {
 class ReservedProviderAdapter implements ProviderAdapter {
   constructor(readonly type: ProviderAdapterType) {}
 
-  async testConnection(): Promise<ProviderTestResult> {
+  async testConnection(input: ProviderTestInput): Promise<ProviderTestResult> {
+    void input;
+
     return {
       success: false,
       message: `${adapterName(this.type)} Adapter 已预留，暂未启用`
@@ -393,6 +445,61 @@ class GeminiProviderAdapter extends ReservedProviderAdapter {
   }
 }
 
+class DashScopeAudioProviderAdapter extends ReservedProviderAdapter {
+  constructor() {
+    super("DASHSCOPE_AUDIO");
+  }
+
+  override async testConnection(input: ProviderTestInput): Promise<ProviderTestResult> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), input.timeoutMs);
+
+    try {
+      const response = await fetch(`${normalizeBaseUrl(input.gatewayBaseUrl ?? "http://localhost:7343")}/audio/providers/dashscope/test`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          baseUrl: input.baseUrl,
+          webSocketUrl: input.webSocketUrl,
+          apiKey: decryptSecret(input.apiKeyEncrypted),
+          region: input.region,
+          model: input.modelName,
+          timeoutMs: input.timeoutMs
+        }),
+        signal: controller.signal
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        success?: boolean;
+        message?: string;
+        detail?: {
+          errorMessage?: string;
+        };
+      } | null;
+
+      if (!response.ok) {
+        return {
+          success: false,
+          message: payload?.detail?.errorMessage ?? "阿里云语音 Provider 连接失败"
+        };
+      }
+
+      return {
+        success: payload?.success !== false,
+        message: typeof payload?.message === "string" && payload.message ? payload.message : "连接成功"
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error && error.name === "AbortError" ? "连接超时" : "AI Gateway 语音接口无法访问"
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+}
+
 export class ProviderAdapterException extends Error {
   constructor(
     readonly code: string,
@@ -415,7 +522,8 @@ function adapterName(type: ProviderAdapterType) {
     OPENAI_COMPATIBLE: "OpenAI-compatible",
     CUSTOM_OPENAI_COMPATIBLE: "自定义 OpenAI-compatible",
     ANTHROPIC: "Anthropic",
-    GEMINI: "Gemini"
+    GEMINI: "Gemini",
+    DASHSCOPE_AUDIO: "阿里云百炼语音"
   };
 
   return names[type];
@@ -455,6 +563,18 @@ function textOutput(payload: AiGatewayResponse | null) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function deltaOutput(payload: AiGatewayResponse | null) {
+  const value = payload?.output ?? payload?.text;
+
+  return typeof value === "string" ? value : "";
+}
+
+function reasoningDeltaOutput(payload: AiGatewayResponse | null) {
+  const value = payload?.reasoningText ?? payload?.reasoningContent;
+
+  return typeof value === "string" ? value : "";
+}
+
 function gatewayErrorMessage(payload: AiGatewayResponse | null) {
   if (typeof payload?.errorMessage === "string" && payload.errorMessage) {
     return payload.errorMessage;
@@ -477,4 +597,36 @@ function integerValue(value: unknown) {
 
 function normalizeBaseUrl(value: string) {
   return value.trim().replace(/\/+$/, "");
+}
+
+function openAiCompatibleUserContent(input: ProviderTextInput) {
+  const imageParts = (input.attachments ?? [])
+    .filter((attachment) => isInlineImageAttachment(attachment))
+    .map((attachment) => ({
+      type: "image_url",
+      image_url: {
+        url: attachment.dataUrl
+      }
+    }));
+
+  if (imageParts.length === 0) {
+    return input.prompt;
+  }
+
+  return [
+    {
+      type: "text",
+      text: input.prompt
+    },
+    ...imageParts
+  ];
+}
+
+function isInlineImageAttachment(attachment: ProviderTextAttachment) {
+  return (
+    attachment.type === "image" &&
+    attachment.mimeType.startsWith("image/") &&
+    typeof attachment.dataUrl === "string" &&
+    attachment.dataUrl.startsWith("data:image/")
+  );
 }

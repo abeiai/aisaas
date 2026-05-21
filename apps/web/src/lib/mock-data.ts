@@ -5,14 +5,20 @@ import {
   FolderTree,
   Home,
   Image,
+  LayoutTemplate,
   LayoutDashboard,
+  PanelsTopLeft,
+  Mic2,
   Newspaper,
   ReceiptText,
+  CreditCard,
   Activity,
   ScrollText,
   Settings,
+  ShieldCheck,
   Tags,
-  Users
+  Users,
+  type LucideIcon
 } from "lucide-react";
 
 export const articles = [
@@ -107,107 +113,218 @@ export const categories = [
   }
 ];
 
-export const adminNavItems = [
+export type AdminNavItem = {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+};
+
+export type AdminNavGroup = {
+  key: string;
+  label: string;
+  icon: LucideIcon;
+  items: AdminNavItem[];
+};
+
+export const adminHomeNavItem: AdminNavItem = {
+  href: "/admin",
+  label: "后台首页",
+  icon: LayoutDashboard
+};
+
+export const adminFrontendNavItem: AdminNavItem = {
+  href: "/",
+  label: "返回前台",
+  icon: Home
+};
+
+export const adminNavGroups: AdminNavGroup[] = [
   {
-    href: "/admin",
-    label: "后台首页",
-    icon: LayoutDashboard
+    key: "content",
+    label: "内容管理",
+    icon: FolderTree,
+    items: [
+      {
+        href: "/admin/categories",
+        label: "文章分类",
+        icon: FolderTree
+      },
+      {
+        href: "/admin/articles",
+        label: "文章管理",
+        icon: Newspaper
+      },
+      {
+        href: "/admin/tags",
+        label: "文章标签",
+        icon: Tags
+      },
+      {
+        href: "/admin/media",
+        label: "媒体资源",
+        icon: Image
+      },
+      {
+        href: "/admin/modules",
+        label: "模块管理",
+        icon: LayoutTemplate
+      },
+      {
+        href: "/admin/page-compositions",
+        label: "页面编排",
+        icon: PanelsTopLeft
+      },
+      {
+        href: "/admin/pages",
+        label: "单页管理",
+        icon: FileText
+      }
+    ]
   },
   {
-    href: "/admin/categories",
-    label: "文章分类",
-    icon: FolderTree
+    key: "tools",
+    label: "工具应用",
+    icon: Bot,
+    items: [
+      {
+        href: "/admin/ai/tool-categories",
+        label: "工具分类",
+        icon: FolderTree
+      },
+      {
+        href: "/admin/ai/tool-templates",
+        label: "工具模板",
+        icon: Bot
+      }
+    ]
   },
   {
-    href: "/admin/articles",
-    label: "文章管理",
-    icon: Newspaper
+    key: "business",
+    label: "业务管理",
+    icon: Users,
+    items: [
+      {
+        href: "/admin/users",
+        label: "用户运营",
+        icon: Users
+      },
+      {
+        href: "/admin/payments",
+        label: "支付订单",
+        icon: ReceiptText
+      }
+    ]
   },
   {
-    href: "/admin/tags",
-    label: "文章标签",
-    icon: Tags
+    key: "ai",
+    label: "智能中枢",
+    icon: BrainCircuit,
+    items: [
+      {
+        href: "/admin/ai-tasks",
+        label: "AI 任务",
+        icon: BrainCircuit
+      },
+      {
+        href: "/admin/ai/usage",
+        label: "用量成本",
+        icon: Activity
+      },
+      {
+        href: "/admin/ai/config",
+        label: "AI 配置",
+        icon: Settings
+      },
+      {
+        href: "/admin/audio/models",
+        label: "语音模型",
+        icon: Bot
+      },
+      {
+        href: "/admin/audio/voices",
+        label: "音色库",
+        icon: Mic2
+      },
+      {
+        href: "/admin/audio/tasks",
+        label: "语音任务",
+        icon: Activity
+      },
+      {
+        href: "/admin/audio/pricing",
+        label: "语音计费",
+        icon: ReceiptText
+      },
+      {
+        href: "/admin/audio/reviews",
+        label: "语音审核",
+        icon: ShieldCheck
+      },
+      {
+        href: "/admin/audio/usage",
+        label: "语音用量",
+        icon: Activity
+      },
+      {
+        href: "/admin/audio/safety",
+        label: "语音安全",
+        icon: ShieldCheck
+      },
+      {
+        href: "/admin/ai-scenarios",
+        label: "AI 场景",
+        icon: Bot
+      },
+      {
+        href: "/admin/ai/providers",
+        label: "AI Provider",
+        icon: Bot
+      },
+      {
+        href: "/admin/ai/model-aliases",
+        label: "模型别名",
+        icon: Bot
+      },
+      {
+        href: "/admin/ai-workflows",
+        label: "AI 工作流",
+        icon: BrainCircuit
+      }
+    ]
   },
   {
-    href: "/admin/media",
-    label: "媒体资源",
-    icon: Image
-  },
-  {
-    href: "/admin/pages",
-    label: "单页管理",
-    icon: FileText
-  },
-  {
-    href: "/admin/users",
-    label: "用户运营",
-    icon: Users
-  },
-  {
-    href: "/admin/payments",
-    label: "支付订单",
-    icon: ReceiptText
-  },
-  {
-    href: "/admin/ai-tasks",
-    label: "AI 任务",
-    icon: BrainCircuit
-  },
-  {
-    href: "/admin/ai/usage",
-    label: "用量成本",
-    icon: Activity
-  },
-  {
-    href: "/admin/ai-scenarios",
-    label: "AI 场景",
-    icon: Bot
-  },
-  {
-    href: "/admin/ai/tool-categories",
-    label: "工具分类",
-    icon: FolderTree
-  },
-  {
-    href: "/admin/ai/tool-templates",
-    label: "工具模板",
-    icon: Bot
-  },
-  {
-    href: "/admin/ai/providers",
-    label: "AI Provider",
-    icon: Bot
-  },
-  {
-    href: "/admin/ai/model-aliases",
-    label: "模型别名",
-    icon: Bot
-  },
-  {
-    href: "/admin/ai-workflows",
-    label: "AI 工作流",
-    icon: BrainCircuit
-  },
-  {
-    href: "/admin/operation-logs",
-    label: "操作日志",
-    icon: ScrollText
-  },
-  {
-    href: "/admin/settings",
-    label: "系统设置",
-    icon: Settings
-  },
-  {
-    href: "/admin/system/env-check",
-    label: "环境检查",
-    icon: Settings
-  },
-  {
-    href: "/",
-    label: "返回前台",
-    icon: Home
+    key: "config",
+    label: "其他配置",
+    icon: Settings,
+    items: [
+      {
+        href: "/admin/operation-logs",
+        label: "操作日志",
+        icon: ScrollText
+      },
+      {
+        href: "/admin/settings",
+        label: "系统设置",
+        icon: Settings
+      },
+      {
+        href: "/admin/payment-config",
+        label: "支付配置",
+        icon: CreditCard
+      },
+      {
+        href: "/admin/system/env-check",
+        label: "环境检查",
+        icon: Settings
+      }
+    ]
   }
+];
+
+export const adminNavItems: AdminNavItem[] = [
+  adminHomeNavItem,
+  ...adminNavGroups.flatMap((group) => group.items),
+  adminFrontendNavItem
 ];
 
 export const dashboardActivities = [

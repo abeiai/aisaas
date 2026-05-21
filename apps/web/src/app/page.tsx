@@ -3,11 +3,13 @@ import type { Metadata } from "next";
 import { ArrowRight, CheckCircle2, Newspaper } from "lucide-react";
 
 import { PublicShell } from "@/components/shell/public-shell";
+import { PublicModuleRenderer } from "@/components/content-modules/public-module-renderer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getPublicArticles } from "@/lib/cms-api";
 import { conversionSteps, featureGroups, productTools } from "@/lib/product-data";
+import { getPublicHomeComposition } from "@/lib/page-composition-api";
 import { getPublicSystemConfigs } from "@/lib/settings-api";
 
 export const dynamic = "force-dynamic";
@@ -60,6 +62,16 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function HomePage() {
+  const composition = await getPublicHomeComposition().catch(() => null);
+
+  if (composition) {
+    return (
+      <PublicShell showHeader={composition.showHeader} showFooter={composition.showFooter}>
+        <PublicModuleRenderer modules={composition.items.map((item) => item.module)} />
+      </PublicShell>
+    );
+  }
+
   const [articles, settings] = await Promise.all([
     getPublicArticles().catch(() => []),
     getPublicSystemConfigs().catch(() => [])
@@ -262,7 +274,16 @@ export default async function HomePage() {
                 )}
               </div>
               <CardHeader>
-                <Badge variant="outline">{article.category?.name ?? "未分类"}</Badge>
+                <div className="flex flex-wrap gap-2">
+                  {(article.categories && article.categories.length > 0 ? article.categories : article.category ? [article.category] : []).map(
+                    (category) => (
+                      <Badge variant="outline" key={category.id}>
+                        {category.name}
+                      </Badge>
+                    )
+                  )}
+                  {!article.categories?.length && !article.category ? <Badge variant="outline">未分类</Badge> : null}
+                </div>
                 <CardTitle>{article.title}</CardTitle>
                 <CardDescription>{article.summary}</CardDescription>
               </CardHeader>

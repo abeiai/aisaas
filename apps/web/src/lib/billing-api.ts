@@ -1,6 +1,8 @@
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import type { JsapiParams } from "@/components/billing/wechat-jsapi-launcher";
 
 interface ApiResponse<TData> {
   code: number;
@@ -9,6 +11,9 @@ interface ApiResponse<TData> {
 }
 
 export type PaymentProvider = "ALIPAY" | "WECHAT_PAY";
+export type PaymentScene = "DESKTOP_WEB" | "MOBILE_WEB" | "WECHAT_BROWSER";
+export type PaymentProduct = "ALIPAY_PAGE" | "ALIPAY_WAP" | "WECHAT_NATIVE" | "WECHAT_H5" | "WECHAT_JSAPI";
+export type PaymentAction = "REDIRECT" | "QR_CODE" | "WECHAT_JSAPI";
 export type PaymentOrderStatus = "CREATED" | "PAYING" | "PAID" | "CLOSED" | "FAILED";
 
 export interface Wallet {
@@ -32,6 +37,9 @@ export interface PaymentOrder {
   } | null;
   provider: PaymentProvider;
   providerName: string;
+  scene: PaymentScene;
+  product: PaymentProduct;
+  action: PaymentAction;
   orderNo: string;
   amountCny: string;
   credits: number;
@@ -40,6 +48,7 @@ export interface PaymentOrder {
   providerTradeNo: string | null;
   paymentUrl: string | null;
   qrCodeUrl: string | null;
+  launchParams: JsapiParams | null;
   providerPayload: unknown;
   notifyRaw: unknown;
   paymentMode: "REAL" | "UNCONFIGURED";
@@ -59,6 +68,10 @@ export interface LedgerEntry {
   balanceAfter: number;
   relatedOrderId: string | null;
   relatedTaskId: string | null;
+  relatedAudioTaskId: string | null;
+  relatedTaskType: string | null;
+  operationType: "TTS" | "VOICE_CLONE" | "VOICE_DESIGN" | null;
+  operationTypeName: string | null;
   idempotencyKey: string;
   note: string | null;
   createdAt: string;
@@ -70,6 +83,17 @@ export interface LedgerEntry {
     credits: number;
     status: PaymentOrderStatus;
   } | null;
+}
+
+export interface AvailablePaymentProduct {
+  provider: PaymentProvider;
+  providerName: string;
+  scene: PaymentScene;
+  sceneName: string;
+  product: PaymentProduct;
+  productName: string;
+  description: string;
+  requiresAuthorization: boolean;
 }
 
 export const rechargePackages = [
@@ -143,6 +167,10 @@ export async function getPaymentOrder(id: string) {
   return apiFetch<PaymentOrder>(`/payment/orders/${id}`);
 }
 
+export async function getAvailablePaymentProducts() {
+  return apiFetch<AvailablePaymentProduct[]>("/payment/products");
+}
+
 function text(formData: FormData, name: string) {
   return String(formData.get(name) ?? "").trim();
 }
@@ -155,13 +183,19 @@ export async function createPaymentOrderAction(formData: FormData) {
   "use server";
 
   let target: string;
+  const requestHeaders = await headers();
 
   try {
     const order = await apiFetch<PaymentOrder>("/payment/orders", {
       method: "POST",
+      headers: {
+        "x-client-user-agent": requestHeaders.get("user-agent") ?? "",
+        "x-client-ip": requestHeaders.get("x-forwarded-for") ?? ""
+      },
       body: JSON.stringify({
         provider: text(formData, "provider"),
-        packageCode: text(formData, "packageCode")
+        packageCode: text(formData, "packageCode"),
+        scene: text(formData, "scene")
       })
     });
     target = `/dashboard/billing?order=${order.id}`;

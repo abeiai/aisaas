@@ -1,12 +1,20 @@
+from __future__ import annotations
+
 import json
 import time
 import urllib.error
 import urllib.request
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 from starlette.responses import StreamingResponse
+
+from app.audio_gateway.providers.dashscope_audio_adapter import (
+    DashScopeAudioAdapter,
+    DashScopeAudioConfig,
+    DashScopeAudioError,
+)
 
 app = FastAPI(title="AI SaaS AI Gateway", version="0.0.0")
 
@@ -16,9 +24,22 @@ def health() -> dict[str, str]:
     return {"service": "ai-gateway", "status": "ok"}
 
 
+@app.get("/audio/health")
+def audio_health() -> dict[str, str]:
+    return {"service": "ai-gateway", "module": "audio", "status": "ok"}
+
+
 class ChatMessage(BaseModel):
     role: str = Field(min_length=1, max_length=30)
-    content: str = Field(min_length=1, max_length=8000)
+    content: str | list[dict[str, Any]]
+
+
+class TextAttachment(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    type: str = Field(min_length=1, max_length=30)
+    mimeType: str = Field(min_length=1, max_length=120)
+    size: int = Field(default=0, ge=0, le=10 * 1024 * 1024)
+    dataUrl: str | None = Field(default=None, max_length=15 * 1024 * 1024)
 
 
 class Usage(BaseModel):
@@ -37,6 +58,11 @@ class TextGenerateRequest(BaseModel):
     input: str = Field(min_length=1, max_length=2000)
     temperature: float = 0.7
     maxTokens: int = 800
+    timeoutMs: int = Field(default=45000, ge=1000, le=180000)
+    attachments: list[TextAttachment] | None = None
+    reasoningSwitchSupported: bool = False
+    reasoningEnabled: bool = False
+    searchEnabled: bool = False
 
 
 class TextGenerateResponse(BaseModel):
@@ -52,6 +78,47 @@ class TextGenerateResponse(BaseModel):
     latencyMs: int
 
 
+class DashScopeAudioProviderConfig(BaseModel):
+    baseUrl: str = Field(min_length=1, max_length=400)
+    webSocketUrl: str | None = Field(default=None, max_length=400)
+    apiKey: str = Field(min_length=1, max_length=4000)
+    region: str | None = Field(default=None, max_length=40)
+    timeoutMs: int = Field(default=45000, ge=1000, le=120000)
+
+
+class DashScopeAudioTestRequest(DashScopeAudioProviderConfig):
+    model: str = Field(min_length=1, max_length=120)
+
+
+class DashScopeCloneVoiceRequest(DashScopeAudioProviderConfig):
+    targetModel: str = Field(min_length=1, max_length=120)
+    sourceAudioUrl: str = Field(min_length=1, max_length=1000)
+    name: str = Field(min_length=1, max_length=80)
+    prefix: str | None = Field(default=None, max_length=24)
+
+
+class DashScopeDesignVoiceRequest(DashScopeAudioProviderConfig):
+    targetModel: str = Field(min_length=1, max_length=120)
+    voicePrompt: str = Field(min_length=1, max_length=1000)
+    name: str = Field(min_length=1, max_length=80)
+    previewText: str | None = Field(default=None, max_length=300)
+
+
+class DashScopeVoiceRequest(DashScopeAudioProviderConfig):
+    providerVoiceId: str = Field(min_length=1, max_length=160)
+
+
+class DashScopeTtsRequest(DashScopeAudioProviderConfig):
+    model: str = Field(min_length=1, max_length=120)
+    voice: str = Field(min_length=1, max_length=160)
+    text: str = Field(min_length=1, max_length=8000)
+    format: str = Field(default="mp3", min_length=2, max_length=12)
+    sampleRate: int | None = Field(default=None, ge=8000, le=48000)
+    speed: float | None = Field(default=None, ge=0.5, le=2)
+    pitch: float | None = Field(default=None, ge=-500, le=500)
+    volume: float | None = Field(default=None, ge=0, le=2)
+
+
 @app.post("/v1/text/generate")
 def generate_text(payload: TextGenerateRequest) -> TextGenerateResponse:
     if not payload.baseUrl or not payload.apiKey or not payload.modelName:
@@ -64,7 +131,8 @@ def generate_text(payload: TextGenerateRequest) -> TextGenerateResponse:
     if not output:
         raise provider_error("EMPTY_OUTPUT", "AI Provider 返回内容为空")
 
-    usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
+    raw_usage = response.get("usage")
+    usage: dict[str, Any] = raw_usage if isinstance(raw_usage, dict) else {}
     finish_reason = extract_finish_reason(response)
 
     return TextGenerateResponse(
@@ -89,25 +157,10 @@ def generate_text(payload: TextGenerateRequest) -> TextGenerateResponse:
 def stream_text(payload: TextGenerateRequest) -> StreamingResponse:
     def event_stream():
         try:
-            result = generate_text(payload)
-
-            for index in range(0, len(result.text), 8):
-                chunk = result.text[index : index + 8]
-                yield sse_event({"text": chunk, "done": False})
-                time.sleep(0.01)
-
-            yield sse_event(
-                {
-                    "text": "",
-                    "done": True,
-                    "usage": result.usage.dict() if result.usage else None,
-                    "usageCredits": result.usageCredits,
-                    "provider": result.provider,
-                    "model": result.model,
-                    "finishReason": result.finishReason,
-                    "requestId": result.requestId,
-                }
-            )
+            if not payload.baseUrl or not payload.apiKey or not payload.modelName:
+                yield from stream_mock_text(payload)
+            else:
+                yield from stream_openai_compatible(payload)
         except HTTPException as error:
             detail = error.detail if isinstance(error.detail, dict) else {}
             yield sse_event(
@@ -121,16 +174,106 @@ def stream_text(payload: TextGenerateRequest) -> StreamingResponse:
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+@app.post("/audio/providers/dashscope/test")
+def test_dashscope_audio(payload: DashScopeAudioTestRequest) -> dict[str, Any]:
+    try:
+        return dashscope_audio_adapter(payload).test_connection(payload.model)
+    except DashScopeAudioError as error:
+        raise audio_provider_error(error) from error
+
+
+@app.post("/audio/voices/clone")
+def clone_voice(payload: DashScopeCloneVoiceRequest) -> dict[str, Any]:
+    try:
+        return dashscope_audio_adapter(payload).create_cloned_voice(
+            target_model=payload.targetModel,
+            source_audio_url=payload.sourceAudioUrl,
+            name=payload.name,
+            prefix=payload.prefix,
+        )
+    except DashScopeAudioError as error:
+        raise audio_provider_error(error) from error
+
+
+@app.post("/audio/voices/design")
+def design_voice(payload: DashScopeDesignVoiceRequest) -> dict[str, Any]:
+    try:
+        return dashscope_audio_adapter(payload).create_designed_voice(
+            target_model=payload.targetModel,
+            voice_prompt=payload.voicePrompt,
+            name=payload.name,
+            preview_text=payload.previewText,
+        )
+    except DashScopeAudioError as error:
+        raise audio_provider_error(error) from error
+
+
+@app.get("/audio/voices/{provider_voice_id}")
+def query_voice(
+    provider_voice_id: str,
+    base_url: str = Header(alias="X-DashScope-Base-Url"),
+    api_key: str = Header(alias="X-DashScope-Api-Key"),
+    web_socket_url: str | None = Header(default=None, alias="X-DashScope-WebSocket-Url"),
+    region: str | None = Header(default=None, alias="X-DashScope-Region"),
+    timeout_ms: int = Header(default=45000, alias="X-DashScope-Timeout-Ms"),
+) -> dict[str, Any]:
+    try:
+        payload = DashScopeVoiceRequest(
+            providerVoiceId=provider_voice_id,
+            baseUrl=base_url,
+            apiKey=api_key,
+            webSocketUrl=web_socket_url,
+            region=region,
+            timeoutMs=timeout_ms,
+        )
+        return dashscope_audio_adapter(payload).query_voice(provider_voice_id)
+    except DashScopeAudioError as error:
+        raise audio_provider_error(error) from error
+
+
+@app.delete("/audio/voices/{provider_voice_id}")
+def delete_voice(
+    provider_voice_id: str,
+    base_url: str = Header(alias="X-DashScope-Base-Url"),
+    api_key: str = Header(alias="X-DashScope-Api-Key"),
+    web_socket_url: str | None = Header(default=None, alias="X-DashScope-WebSocket-Url"),
+    region: str | None = Header(default=None, alias="X-DashScope-Region"),
+    timeout_ms: int = Header(default=45000, alias="X-DashScope-Timeout-Ms"),
+) -> dict[str, Any]:
+    try:
+        payload = DashScopeVoiceRequest(
+            providerVoiceId=provider_voice_id,
+            baseUrl=base_url,
+            apiKey=api_key,
+            webSocketUrl=web_socket_url,
+            region=region,
+            timeoutMs=timeout_ms,
+        )
+        return dashscope_audio_adapter(payload).delete_voice(provider_voice_id)
+    except DashScopeAudioError as error:
+        raise audio_provider_error(error) from error
+
+
+@app.post("/audio/tts")
+def synthesize_speech(payload: DashScopeTtsRequest) -> dict[str, Any]:
+    try:
+        return dashscope_audio_adapter(payload).synthesize_speech(
+            model=payload.model,
+            voice=payload.voice,
+            text=payload.text,
+            format=payload.format,
+            sample_rate=payload.sampleRate,
+            speed=payload.speed,
+            pitch=payload.pitch,
+            volume=payload.volume,
+        )
+    except DashScopeAudioError as error:
+        raise audio_provider_error(error) from error
+
+
 def call_openai_compatible(payload: TextGenerateRequest) -> tuple[dict[str, Any], str | None]:
     endpoint = chat_completions_url(payload.baseUrl or "")
-    request_body = {
-        "model": payload.modelName,
-        "messages": [message.dict() for message in payload.messages] if payload.messages else [
-            {"role": "user", "content": payload.prompt}
-        ],
-        "temperature": payload.temperature,
-        "max_tokens": payload.maxTokens,
-    }
+    request_body = openai_compatible_request_body(payload)
     request = urllib.request.Request(
         endpoint,
         data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
@@ -143,7 +286,7 @@ def call_openai_compatible(payload: TextGenerateRequest) -> tuple[dict[str, Any]
     )
 
     try:
-        with urllib.request.urlopen(request, timeout=45) as response:
+        with urllib.request.urlopen(request, timeout=timeout_seconds(payload)) as response:
             body = response.read().decode("utf-8")
             request_id = response.headers.get("x-request-id") or response.headers.get("x-request-id".title())
     except urllib.error.HTTPError as error:
@@ -163,6 +306,188 @@ def call_openai_compatible(payload: TextGenerateRequest) -> tuple[dict[str, Any]
         raise provider_error("INVALID_PROVIDER_RESPONSE", "AI Provider 返回格式不正确")
 
     return parsed, request_id
+
+
+def stream_openai_compatible(payload: TextGenerateRequest):
+    endpoint = chat_completions_url(payload.baseUrl or "")
+    request_body = openai_compatible_request_body(payload, stream=True)
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {payload.apiKey}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+        },
+        method="POST",
+    )
+    raw_usage: dict[str, Any] = {}
+    text_parts: list[str] = []
+    finish_reason: str | None = None
+    request_id: str | None = None
+
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds(payload)) as response:
+            request_id = response.headers.get("x-request-id") or response.headers.get("x-request-id".title())
+
+            for raw_line in response:
+                line = raw_line.decode("utf-8", errors="ignore").strip()
+
+                if not line or not line.startswith("data:"):
+                    continue
+
+                data = line.removeprefix("data:").strip()
+
+                if data == "[DONE]":
+                    break
+
+                parsed = safe_json(data)
+
+                if not isinstance(parsed, dict):
+                    continue
+
+                chunk_usage = parsed.get("usage")
+
+                if isinstance(chunk_usage, dict):
+                    raw_usage = chunk_usage
+
+                chunk_finish_reason = extract_finish_reason(parsed)
+
+                if chunk_finish_reason:
+                    finish_reason = chunk_finish_reason
+
+                reasoning_text = extract_stream_reasoning_delta(parsed)
+                text = extract_stream_delta(parsed)
+
+                if reasoning_text:
+                    yield sse_event({"reasoningText": reasoning_text, "done": False})
+
+                if not text:
+                    continue
+
+                text_parts.append(text)
+                yield sse_event({"text": text, "done": False})
+    except urllib.error.HTTPError as error:
+        detail = safe_json(error.read().decode("utf-8", errors="ignore"))
+        raise provider_error(
+            provider_error_code(detail, error.code),
+            provider_error_message(detail, error.code),
+        ) from error
+    except TimeoutError as error:
+        raise provider_error("PROVIDER_TIMEOUT", "AI Provider 请求超时") from error
+    except OSError as error:
+        raise provider_error("PROVIDER_NETWORK_ERROR", "AI Provider 网络请求失败") from error
+
+    if not "".join(text_parts).strip():
+        raise provider_error("EMPTY_OUTPUT", "AI Provider 返回内容为空")
+
+    yield sse_event(
+        {
+            "text": "",
+            "done": True,
+            "usage": usage_to_dict(usage_from_provider(raw_usage)),
+            "usageCredits": None,
+            "provider": provider_name(payload.baseUrl or ""),
+            "model": payload.modelName,
+            "finishReason": finish_reason,
+            "requestId": request_id,
+        }
+    )
+
+
+def stream_mock_text(payload: TextGenerateRequest):
+    result = mock_generate(payload)
+
+    for index in range(0, len(result.text), 8):
+        chunk = result.text[index : index + 8]
+        yield sse_event({"text": chunk, "done": False})
+        time.sleep(0.01)
+
+    yield sse_event(
+        {
+            "text": "",
+            "done": True,
+            "usage": usage_to_dict(result.usage) if result.usage else None,
+            "usageCredits": result.usageCredits,
+            "provider": result.provider,
+            "model": result.model,
+            "finishReason": result.finishReason,
+            "requestId": result.requestId,
+        }
+    )
+
+
+def openai_compatible_request_body(payload: TextGenerateRequest, stream: bool = False) -> dict[str, Any]:
+    request_body: dict[str, Any] = {
+        "model": payload.modelName,
+        "messages": openai_compatible_messages(payload),
+        "temperature": payload.temperature,
+        "max_tokens": payload.maxTokens,
+    }
+
+    if stream:
+        request_body["stream"] = True
+        request_body["stream_options"] = {"include_usage": True}
+
+    if should_send_qwen_thinking_switch(payload):
+        request_body["enable_thinking"] = bool(payload.reasoningEnabled)
+
+    return request_body
+
+
+def openai_compatible_messages(payload: TextGenerateRequest) -> list[dict[str, Any]]:
+    if payload.messages:
+        return [chat_message_to_dict(message) for message in payload.messages]
+
+    content_parts: list[dict[str, Any]] = [{"type": "text", "text": payload.prompt}]
+
+    for attachment in payload.attachments or []:
+        if not is_inline_image_attachment(attachment):
+            continue
+
+        content_parts.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": attachment.dataUrl,
+                },
+            }
+        )
+
+    if len(content_parts) == 1:
+        return [{"role": "user", "content": payload.prompt}]
+
+    return [{"role": "user", "content": content_parts}]
+
+
+def chat_message_to_dict(message: ChatMessage) -> dict[str, Any]:
+    if hasattr(message, "model_dump"):
+        return message.model_dump()
+
+    return message.dict()
+
+
+def is_inline_image_attachment(attachment: TextAttachment) -> bool:
+    return (
+        attachment.type == "image"
+        and attachment.mimeType.startswith("image/")
+        and isinstance(attachment.dataUrl, str)
+        and attachment.dataUrl.startswith("data:image/")
+    )
+
+
+def usage_to_dict(usage: Usage | None) -> dict[str, int | None] | None:
+    if usage is None:
+        return None
+
+    if hasattr(usage, "model_dump"):
+        return usage.model_dump()
+
+    return usage.dict()
+
+
+def timeout_seconds(payload: TextGenerateRequest) -> int:
+    return max(1, min(round(payload.timeoutMs / 1000), 180))
 
 
 def mock_generate(payload: TextGenerateRequest) -> TextGenerateResponse:
@@ -239,6 +564,84 @@ def extract_finish_reason(response: dict[str, Any]) -> str | None:
     return None
 
 
+def extract_stream_delta(response: dict[str, Any]) -> str:
+    choices = response.get("choices")
+
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        return ""
+
+    first_choice = choices[0]
+    delta = first_choice.get("delta")
+
+    if isinstance(delta, dict):
+        content = delta.get("content")
+
+        if isinstance(content, str):
+            return content
+
+        if isinstance(content, list):
+            return "".join(part.get("text", "") for part in content if isinstance(part, dict))
+
+    message = first_choice.get("message")
+
+    if isinstance(message, dict) and isinstance(message.get("content"), str):
+        return message["content"]
+
+    if isinstance(first_choice.get("text"), str):
+        return first_choice["text"]
+
+    return ""
+
+
+def extract_stream_reasoning_delta(response: dict[str, Any]) -> str:
+    choices = response.get("choices")
+
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        return ""
+
+    first_choice = choices[0]
+    delta = first_choice.get("delta")
+
+    if isinstance(delta, dict):
+        for key in ("reasoning_content", "reasoning", "reasoning_text"):
+            value = delta.get(key)
+
+            if isinstance(value, str):
+                return value
+
+    message = first_choice.get("message")
+
+    if isinstance(message, dict):
+        value = message.get("reasoning_content")
+
+        if isinstance(value, str):
+            return value
+
+    return ""
+
+
+def should_send_qwen_thinking_switch(payload: TextGenerateRequest) -> bool:
+    model_name = (payload.modelName or "").lower()
+    base_url = (payload.baseUrl or "").lower()
+
+    if not payload.reasoningSwitchSupported:
+        return False
+
+    return model_name.startswith("qwen") or "dashscope.aliyuncs.com" in base_url
+
+
+def usage_from_provider(usage: dict[str, Any]) -> Usage:
+    input_tokens = usage.get("prompt_tokens", usage.get("input_tokens"))
+    output_tokens = usage.get("completion_tokens", usage.get("output_tokens"))
+    total_tokens = usage.get("total_tokens")
+
+    return Usage(
+        inputTokens=int_value(input_tokens),
+        outputTokens=int_value(output_tokens),
+        totalTokens=int_value(total_tokens),
+    )
+
+
 def safe_json(value: str) -> Any:
     try:
         return json.loads(value)
@@ -248,6 +651,9 @@ def safe_json(value: str) -> Any:
 
 def provider_error_code(detail: Any, status_code: int) -> str:
     if isinstance(detail, dict):
+        if isinstance(detail.get("code"), str):
+            return detail["code"]
+
         error = detail.get("error")
         if isinstance(error, dict) and isinstance(error.get("code"), str):
             return error["code"]
@@ -257,6 +663,9 @@ def provider_error_code(detail: Any, status_code: int) -> str:
 
 def provider_error_message(detail: Any, status_code: int) -> str:
     if isinstance(detail, dict):
+        if isinstance(detail.get("message"), str):
+            return detail["message"]
+
         error = detail.get("error")
         if isinstance(error, dict) and isinstance(error.get("message"), str):
             return error["message"]
@@ -271,6 +680,28 @@ def provider_error(error_code: str, message: str) -> HTTPException:
             "errorCode": error_code,
             "errorMessage": message,
         },
+    )
+
+
+def audio_provider_error(error: DashScopeAudioError) -> HTTPException:
+    return HTTPException(
+        status_code=error.status_code,
+        detail={
+            "errorCode": error.error_code,
+            "errorMessage": error.message,
+        },
+    )
+
+
+def dashscope_audio_adapter(payload: DashScopeAudioProviderConfig) -> DashScopeAudioAdapter:
+    return DashScopeAudioAdapter(
+        DashScopeAudioConfig(
+            base_url=payload.baseUrl,
+            web_socket_url=payload.webSocketUrl,
+            api_key=payload.apiKey,
+            region=payload.region,
+            timeout_seconds=max(1, round(payload.timeoutMs / 1000)),
+        )
     )
 
 

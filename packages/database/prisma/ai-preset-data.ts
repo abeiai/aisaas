@@ -6,7 +6,31 @@ export const aiCapabilityTags = [
   "VISION",
   "EMBEDDING",
   "IMAGE_GENERATION",
+  "IMAGE_EDIT",
+  "IMAGE_INPUT",
+  "REFERENCE_IMAGE",
+  "BATCH_IMAGE",
+  "VIDEO_GENERATION",
+  "TEXT_TO_VIDEO",
+  "IMAGE_TO_VIDEO",
+  "REFERENCE_VIDEO",
+  "VIDEO_EDIT",
+  "VIDEO_INPUT",
+  "REFERENCE_FILE",
+  "REFERENCE_AUDIO",
   "AUDIO",
+  "TTS",
+  "VOICE_CLONE",
+  "VOICE_DESIGN",
+  "STREAMING_TTS",
+  "SYSTEM_VOICE",
+  "CUSTOM_VOICE",
+  "TIMESTAMP",
+  "SSML",
+  "INSTRUCT",
+  "MULTILINGUAL",
+  "CHINA_MAINLAND",
+  "INTERNATIONAL",
   "TOOLS",
   "STREAMING",
   "LONG_CONTEXT",
@@ -52,6 +76,11 @@ export const defaultModelAliases = [
     description: "图片生成或视觉创意产出。"
   },
   {
+    aliasKey: "video-generation",
+    displayName: "视频生成模型",
+    description: "体验区视频生成、图生视频、参考生视频和视频编辑使用。"
+  },
+  {
     aliasKey: "speech-to-text",
     displayName: "语音转文字模型",
     description: "音频转写和语音识别。"
@@ -60,6 +89,31 @@ export const defaultModelAliases = [
     aliasKey: "text-to-speech",
     displayName: "文字转语音模型",
     description: "语音合成和播报场景。"
+  },
+  {
+    aliasKey: "tts-default",
+    displayName: "默认语音合成模型",
+    description: "语音合成默认模型，用于常规中文播报和内容配音。"
+  },
+  {
+    aliasKey: "tts-fast",
+    displayName: "快速语音合成模型",
+    description: "低延迟语音合成模型，用于预览和快速生成。"
+  },
+  {
+    aliasKey: "voice-clone-default",
+    displayName: "默认声音复刻模型",
+    description: "声音复刻任务默认模型，创建自定义音色时使用。"
+  },
+  {
+    aliasKey: "voice-design-default",
+    displayName: "默认声音设计模型",
+    description: "声音设计任务默认模型，用于根据描述生成音色。"
+  },
+  {
+    aliasKey: "audio-preview",
+    displayName: "音频预览模型",
+    description: "语音工具预览试听和低成本试生成使用。"
   }
 ];
 
@@ -131,6 +185,157 @@ export const providerPresets = [
     region: "CHINA",
     models: [
       {
+        modelKey: "happyhorse-1-0-t2v",
+        displayName: "HappyHorse 1.0 文生视频",
+        providerModelName: "happyhorse-1.0-t2v",
+        capabilityTags: ["VIDEO_GENERATION", "TEXT_TO_VIDEO", "CHINA_FRIENDLY"],
+        recommendedAlias: "video-generation"
+      },
+      {
+        modelKey: "happyhorse-1-0-i2v",
+        displayName: "HappyHorse 1.0 图生视频",
+        providerModelName: "happyhorse-1.0-i2v",
+        capabilityTags: ["VIDEO_GENERATION", "IMAGE_TO_VIDEO", "IMAGE_INPUT", "REFERENCE_IMAGE", "CHINA_FRIENDLY"],
+        supportsVision: true,
+        recommendedAlias: "video-generation"
+      },
+      {
+        modelKey: "happyhorse-1-0-r2v",
+        displayName: "HappyHorse 1.0 参考生视频",
+        providerModelName: "happyhorse-1.0-r2v",
+        capabilityTags: ["VIDEO_GENERATION", "IMAGE_TO_VIDEO", "IMAGE_INPUT", "REFERENCE_IMAGE", "REFERENCE_FILE", "CHINA_FRIENDLY"],
+        supportsVision: true,
+        recommendedAlias: "video-generation"
+      },
+      {
+        modelKey: "happyhorse-1-0-video-edit",
+        displayName: "HappyHorse 1.0 视频编辑",
+        providerModelName: "happyhorse-1.0-video-edit",
+        capabilityTags: ["VIDEO_GENERATION", "VIDEO_EDIT", "VIDEO_INPUT", "REFERENCE_IMAGE", "REFERENCE_FILE", "CHINA_FRIENDLY"],
+        supportsVision: true,
+        recommendedAlias: "video-generation"
+      },
+      {
+        modelKey: "wan2-7-t2v",
+        displayName: "Wan2.7 文生视频",
+        providerModelName: "wan2.7-t2v",
+        capabilityTags: ["VIDEO_GENERATION", "TEXT_TO_VIDEO", "REFERENCE_AUDIO", "CHINA_FRIENDLY"],
+        recommendedAlias: "video-generation"
+      },
+      {
+        modelKey: "wan2-7-t2v-2026-04-25",
+        displayName: "Wan2.7 文生视频 2026-04-25",
+        providerModelName: "wan2.7-t2v-2026-04-25",
+        capabilityTags: ["VIDEO_GENERATION", "TEXT_TO_VIDEO", "REFERENCE_AUDIO", "CHINA_FRIENDLY"],
+        recommendedAlias: "video-generation"
+      },
+      {
+        modelKey: "wan2-7-i2v",
+        displayName: "Wan2.7 图生视频",
+        providerModelName: "wan2.7-i2v",
+        capabilityTags: [
+          "VIDEO_GENERATION",
+          "IMAGE_TO_VIDEO",
+          "IMAGE_INPUT",
+          "VIDEO_INPUT",
+          "REFERENCE_IMAGE",
+          "REFERENCE_VIDEO",
+          "REFERENCE_AUDIO",
+          "REFERENCE_FILE",
+          "CHINA_FRIENDLY"
+        ],
+        supportsVision: true,
+        recommendedAlias: "video-generation"
+      },
+      {
+        modelKey: "wan2-7-i2v-2026-04-25",
+        displayName: "Wan2.7 图生视频 2026-04-25",
+        providerModelName: "wan2.7-i2v-2026-04-25",
+        capabilityTags: [
+          "VIDEO_GENERATION",
+          "IMAGE_TO_VIDEO",
+          "IMAGE_INPUT",
+          "VIDEO_INPUT",
+          "REFERENCE_IMAGE",
+          "REFERENCE_VIDEO",
+          "REFERENCE_AUDIO",
+          "REFERENCE_FILE",
+          "CHINA_FRIENDLY"
+        ],
+        supportsVision: true,
+        recommendedAlias: "video-generation"
+      },
+      {
+        modelKey: "wan2-7-r2v",
+        displayName: "Wan2.7 参考生视频",
+        providerModelName: "wan2.7-r2v",
+        capabilityTags: [
+          "VIDEO_GENERATION",
+          "IMAGE_TO_VIDEO",
+          "IMAGE_INPUT",
+          "VIDEO_INPUT",
+          "REFERENCE_IMAGE",
+          "REFERENCE_VIDEO",
+          "REFERENCE_AUDIO",
+          "REFERENCE_FILE",
+          "CHINA_FRIENDLY"
+        ],
+        supportsVision: true,
+        recommendedAlias: "video-generation"
+      },
+      {
+        modelKey: "wan2-7-videoedit",
+        displayName: "Wan2.7 视频编辑",
+        providerModelName: "wan2.7-videoedit",
+        capabilityTags: ["VIDEO_GENERATION", "VIDEO_EDIT", "VIDEO_INPUT", "REFERENCE_IMAGE", "REFERENCE_FILE", "CHINA_FRIENDLY"],
+        supportsVision: true,
+        recommendedAlias: "video-generation"
+      },
+      {
+        modelKey: "wan2.7-image-pro",
+        displayName: "Wan2.7 Image Pro",
+        providerModelName: "wan2.7-image-pro",
+        capabilityTags: ["IMAGE_GENERATION", "IMAGE_EDIT", "IMAGE_INPUT", "REFERENCE_IMAGE", "BATCH_IMAGE", "CHINA_FRIENDLY"],
+        supportsImageGeneration: true,
+        supportsVision: true,
+        recommendedAlias: "image-generation"
+      },
+      {
+        modelKey: "wan2.7-image",
+        displayName: "Wan2.7 Image",
+        providerModelName: "wan2.7-image",
+        capabilityTags: ["IMAGE_GENERATION", "IMAGE_EDIT", "IMAGE_INPUT", "REFERENCE_IMAGE", "BATCH_IMAGE", "LOW_COST", "CHINA_FRIENDLY"],
+        supportsImageGeneration: true,
+        supportsVision: true,
+        recommendedAlias: "image-generation"
+      },
+      {
+        modelKey: "z-image-turbo",
+        displayName: "Z-Image Turbo",
+        providerModelName: "z-image-turbo",
+        capabilityTags: ["IMAGE_GENERATION", "LOW_COST", "CHINA_FRIENDLY"],
+        supportsImageGeneration: true,
+        recommendedAlias: "image-generation"
+      },
+      {
+        modelKey: "qwen-image-2.0-pro",
+        displayName: "Qwen Image 2.0 Pro",
+        providerModelName: "qwen-image-2.0-pro",
+        capabilityTags: ["IMAGE_GENERATION", "IMAGE_EDIT", "IMAGE_INPUT", "REFERENCE_IMAGE", "BATCH_IMAGE", "CHINA_FRIENDLY"],
+        supportsImageGeneration: true,
+        supportsVision: true,
+        recommendedAlias: "image-generation"
+      },
+      {
+        modelKey: "qwen-image-2.0",
+        displayName: "Qwen Image 2.0",
+        providerModelName: "qwen-image-2.0",
+        capabilityTags: ["IMAGE_GENERATION", "IMAGE_EDIT", "IMAGE_INPUT", "REFERENCE_IMAGE", "BATCH_IMAGE", "LOW_COST", "CHINA_FRIENDLY"],
+        supportsImageGeneration: true,
+        supportsVision: true,
+        recommendedAlias: "image-generation"
+      },
+      {
         modelKey: "qwen-plus",
         displayName: "Qwen Plus",
         providerModelName: "qwen-plus",
@@ -138,6 +343,37 @@ export const providerPresets = [
         supportsStreaming: true,
         supportsTools: true,
         recommendedAlias: "default-chat"
+      },
+      {
+        modelKey: "qwen3.6-plus",
+        displayName: "Qwen3.6 Plus",
+        providerModelName: "qwen3.6-plus",
+        capabilityTags: ["TEXT", "VISION", "REASONING", "TOOLS", "STREAMING", "LONG_CONTEXT", "CHINA_FRIENDLY"],
+        contextWindow: 1000000,
+        supportsStreaming: true,
+        supportsVision: true,
+        supportsTools: true,
+        recommendedAlias: "default-chat"
+      },
+      {
+        modelKey: "qwen3.6-flash",
+        displayName: "Qwen3.6 Flash",
+        providerModelName: "qwen3.6-flash",
+        capabilityTags: ["TEXT", "REASONING", "TOOLS", "STREAMING", "LONG_CONTEXT", "LOW_COST", "CHINA_FRIENDLY"],
+        contextWindow: 1000000,
+        supportsStreaming: true,
+        supportsTools: true,
+        recommendedAlias: "fast-chat"
+      },
+      {
+        modelKey: "qwen3.6-max",
+        displayName: "Qwen3.6 Max Preview",
+        providerModelName: "qwen3.6-max-preview",
+        capabilityTags: ["TEXT", "REASONING", "TOOLS", "STREAMING", "LONG_CONTEXT", "CHINA_FRIENDLY"],
+        contextWindow: 256000,
+        supportsStreaming: true,
+        supportsTools: true,
+        recommendedAlias: "reasoning"
       },
       {
         modelKey: "qwen-vl-plus",
@@ -257,6 +493,126 @@ export const providerPresets = [
         capabilityTags: ["TEXT", "STREAMING"],
         supportsStreaming: true,
         recommendedAlias: "default-chat"
+      }
+    ]
+  },
+  {
+    providerKey: "aliyun_dashscope_audio",
+    displayName: "阿里云百炼语音",
+    adapterType: "DASHSCOPE_AUDIO",
+    modality: "AUDIO",
+    defaultBaseUrl: "https://dashscope.aliyuncs.com/api/v1",
+    defaultWebSocketUrl: "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
+    apiKeyEnvName: "DASHSCOPE_API_KEY",
+    docsUrl: "https://help.aliyun.com/zh/model-studio/text-to-speech",
+    region: "cn-beijing,intl-singapore",
+    models: [
+      {
+        modelKey: "cosyvoice-v3-5-plus",
+        displayName: "CosyVoice v3.5 Plus",
+        providerModelName: "cosyvoice-v3.5-plus",
+        capabilityTags: [
+          "AUDIO",
+          "TTS",
+          "VOICE_CLONE",
+          "VOICE_DESIGN",
+          "STREAMING_TTS",
+          "CUSTOM_VOICE",
+          "TIMESTAMP",
+          "SSML",
+          "INSTRUCT",
+          "MULTILINGUAL",
+          "CHINA_MAINLAND",
+          "INTERNATIONAL"
+        ],
+        supportsStreaming: true,
+        supportsAudio: true,
+        recommendedAlias: "tts-default"
+      },
+      {
+        modelKey: "cosyvoice-v3-5-flash",
+        displayName: "CosyVoice v3.5 Flash",
+        providerModelName: "cosyvoice-v3.5-flash",
+        capabilityTags: [
+          "AUDIO",
+          "TTS",
+          "VOICE_CLONE",
+          "VOICE_DESIGN",
+          "STREAMING_TTS",
+          "CUSTOM_VOICE",
+          "MULTILINGUAL",
+          "CHINA_MAINLAND",
+          "INTERNATIONAL"
+        ],
+        supportsStreaming: true,
+        supportsAudio: true,
+        recommendedAlias: "tts-fast"
+      },
+      {
+        modelKey: "cosyvoice-v3-plus",
+        displayName: "CosyVoice v3 Plus",
+        providerModelName: "cosyvoice-v3-plus",
+        capabilityTags: [
+          "AUDIO",
+          "TTS",
+          "VOICE_CLONE",
+          "VOICE_DESIGN",
+          "STREAMING_TTS",
+          "SYSTEM_VOICE",
+          "CUSTOM_VOICE",
+          "TIMESTAMP",
+          "SSML",
+          "MULTILINGUAL",
+          "CHINA_MAINLAND",
+          "INTERNATIONAL"
+        ],
+        supportsStreaming: true,
+        supportsAudio: true,
+        recommendedAlias: "voice-clone-default"
+      },
+      {
+        modelKey: "cosyvoice-v3-flash",
+        displayName: "CosyVoice v3 Flash",
+        providerModelName: "cosyvoice-v3-flash",
+        capabilityTags: [
+          "AUDIO",
+          "TTS",
+          "VOICE_CLONE",
+          "VOICE_DESIGN",
+          "STREAMING_TTS",
+          "CUSTOM_VOICE",
+          "MULTILINGUAL",
+          "CHINA_MAINLAND",
+          "INTERNATIONAL"
+        ],
+        supportsStreaming: true,
+        supportsAudio: true,
+        recommendedAlias: "audio-preview"
+      },
+      {
+        modelKey: "cosyvoice-v2",
+        displayName: "CosyVoice v2",
+        providerModelName: "cosyvoice-v2",
+        capabilityTags: ["AUDIO", "TTS", "VOICE_CLONE", "CUSTOM_VOICE", "STREAMING_TTS", "CHINA_MAINLAND"],
+        supportsStreaming: true,
+        supportsAudio: true,
+        recommendedAlias: "voice-design-default"
+      },
+      {
+        modelKey: "cosyvoice-v1",
+        displayName: "CosyVoice v1",
+        providerModelName: "cosyvoice-v1",
+        capabilityTags: ["AUDIO", "TTS", "VOICE_CLONE", "CUSTOM_VOICE", "STREAMING_TTS", "CHINA_MAINLAND"],
+        supportsStreaming: true,
+        supportsAudio: true
+      },
+      {
+        modelKey: "sambert",
+        displayName: "Sambert",
+        providerModelName: "sambert",
+        capabilityTags: ["AUDIO", "TTS", "SYSTEM_VOICE", "SSML", "CHINA_MAINLAND"],
+        supportsAudio: true,
+        recommendedAlias: "text-to-speech"
       }
     ]
   }

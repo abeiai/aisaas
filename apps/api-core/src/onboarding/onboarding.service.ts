@@ -66,7 +66,7 @@ export class OnboardingService {
     const hasAiProvider = aiProviderCount > 0;
     const hasEnabledModel = enabledModelCount > 0;
     const hasDefaultModelAlias = Boolean(defaultAlias?.modelInstanceId);
-    const hasPaymentConfig = paymentConfigured();
+    const hasPaymentConfig = await this.paymentConfigured();
     const hasBaseSeed = systemConfigCount >= 5 && cmsSeedCount > 0;
     const hasPresetTools = toolTemplateCount > 0;
     const checks: SetupCheck[] = [
@@ -321,6 +321,7 @@ export class OnboardingService {
     const database = await this.databaseState();
     const redis = await this.redisState();
     const aiProviderCount = await this.configuredAiProviderCount();
+    const hasPaymentConfig = await this.paymentConfigured();
 
     return [
       database,
@@ -330,8 +331,8 @@ export class OnboardingService {
       {
         key: "payment",
         label: "支付配置状态",
-        status: paymentConfigured() ? "已配置" : "未配置",
-        detail: paymentConfigured() ? "已检测到支付宝或微信支付必要变量" : "生产前需配置 ALIPAY_* 或 WECHAT_PAY_*"
+        status: hasPaymentConfig ? "已配置" : "未配置",
+        detail: hasPaymentConfig ? "已检测到正式启用的支付方式" : "生产前需在后台完成支付配置并正式启用"
       },
       {
         key: "aiProvider",
@@ -456,6 +457,73 @@ export class OnboardingService {
       detail: redisPreview(redisUrl)
     };
   }
+
+  private async paymentConfigured() {
+    const configs = await this.prisma.systemConfig.findMany({
+      where: {
+        key: {
+          in: [
+            "paymentAlipayEnabled",
+            "paymentAlipayAppId",
+            "paymentAlipayPrivateKeyEncrypted",
+            "paymentAlipayPublicKeyEncrypted",
+            "paymentAlipayNotifyUrl",
+            "paymentAlipayPageEnabled",
+            "paymentAlipayWapEnabled",
+            "paymentWechatEnabled",
+            "paymentWechatAppId",
+            "paymentWechatMerchantId",
+            "paymentWechatApiV3KeyEncrypted",
+            "paymentWechatMerchantPrivateKeyEncrypted",
+            "paymentWechatMerchantSerialNo",
+            "paymentWechatNotifyUrl",
+            "paymentWechatPublicKeyEncrypted",
+            "paymentWechatPublicKeyId",
+            "paymentWechatAppSecretEncrypted",
+            "paymentWechatJsapiOauthCallbackUrl",
+            "paymentWechatNativeEnabled",
+            "paymentWechatH5Enabled",
+            "paymentWechatJsapiEnabled"
+          ]
+        }
+      },
+      select: {
+        key: true,
+        value: true
+      }
+    });
+    const values = new Map(configs.map((config) => [config.key, config.value]));
+    const alipay = Boolean(
+      values.get("paymentAlipayEnabled") === "true" &&
+      values.get("paymentAlipayAppId") &&
+      values.get("paymentAlipayPrivateKeyEncrypted") &&
+      values.get("paymentAlipayPublicKeyEncrypted") &&
+      values.get("paymentAlipayNotifyUrl") &&
+      (values.get("paymentAlipayPageEnabled") === "true" || values.get("paymentAlipayWapEnabled") === "true")
+    );
+    const wechat = Boolean(
+      values.get("paymentWechatEnabled") === "true" &&
+      values.get("paymentWechatAppId") &&
+      values.get("paymentWechatMerchantId") &&
+      values.get("paymentWechatApiV3KeyEncrypted") &&
+      values.get("paymentWechatMerchantPrivateKeyEncrypted") &&
+      values.get("paymentWechatMerchantSerialNo") &&
+      values.get("paymentWechatNotifyUrl") &&
+      values.get("paymentWechatPublicKeyEncrypted") &&
+      values.get("paymentWechatPublicKeyId") &&
+      (
+        values.get("paymentWechatNativeEnabled") === "true" ||
+        values.get("paymentWechatH5Enabled") === "true" ||
+        (
+          values.get("paymentWechatJsapiEnabled") === "true" &&
+          values.get("paymentWechatAppSecretEncrypted") &&
+          values.get("paymentWechatJsapiOauthCallbackUrl")
+        )
+      )
+    );
+
+    return alipay || wechat || process.env.ENABLE_MOCK_PAYMENT_NOTIFY === "1";
+  }
 }
 
 function envItem(key: string, label: string, configured: boolean, detail?: string) {
@@ -465,25 +533,6 @@ function envItem(key: string, label: string, configured: boolean, detail?: strin
     status: configured ? "已配置" : "未配置",
     detail: detail ?? (configured ? "已配置，内容已隐藏" : "未配置")
   };
-}
-
-function paymentConfigured() {
-  const alipay = Boolean(
-    process.env.ALIPAY_APP_ID &&
-      process.env.ALIPAY_PRIVATE_KEY &&
-      process.env.ALIPAY_PUBLIC_KEY &&
-      process.env.ALIPAY_NOTIFY_URL
-  );
-  const wechat = Boolean(
-    process.env.WECHAT_PAY_MCH_ID &&
-      process.env.WECHAT_PAY_APP_ID &&
-      process.env.WECHAT_PAY_API_V3_KEY &&
-      process.env.WECHAT_PAY_PRIVATE_KEY &&
-      process.env.WECHAT_PAY_SERIAL_NO &&
-      process.env.WECHAT_PAY_NOTIFY_URL
-  );
-
-  return alipay || wechat || process.env.ENABLE_MOCK_PAYMENT_NOTIFY === "1";
 }
 
 function s3Configured() {

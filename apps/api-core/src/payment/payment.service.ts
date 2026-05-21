@@ -5,10 +5,15 @@ import { AppException } from "../common/app-exception.js";
 import { CreatePaymentOrderDto } from "./dto/create-payment-order.dto.js";
 import { AlipayClient } from "./alipay.client.js";
 import { amountToCents, WechatPayClient } from "./wechat-pay.client.js";
+import { PaymentConfigService } from "./payment-config.service.js";
+import { detectPaymentScene, paymentProductName, paymentSceneName, resolvePaymentProduct } from "./payment-scene.js";
 import { toInputJson } from "./payment-crypto.js";
+import { getClientIp, getHeaderValue, getUserAgent, type HeaderRequestLike } from "../security/request-types.js";
 import type {
   ChannelQueryResult,
+  PaymentProduct,
   PaymentProvider,
+  PaymentScene,
   VerifiedPaymentResult
 } from "./payment-channel.types.js";
 
@@ -36,6 +41,7 @@ export const creditPackages = [
 ] as const;
 
 type CreditPackage = (typeof creditPackages)[number];
+type AvailablePaymentProduct = Awaited<ReturnType<PaymentConfigService["listAvailableProducts"]>>[number];
 
 interface NotifyInput {
   provider: PaymentProvider;
@@ -49,28 +55,51 @@ export class PaymentService {
   private readonly prisma = getPrismaClient();
 
   constructor(
+    @Inject(PaymentConfigService)
+    private readonly paymentConfigService: PaymentConfigService,
     @Inject(AlipayClient)
     private readonly alipayClient: AlipayClient,
     @Inject(WechatPayClient)
     private readonly wechatPayClient: WechatPayClient
   ) {}
 
-  async createOrder(userId: string, dto: CreatePaymentOrderDto) {
+  async createOrder(userId: string, dto: CreatePaymentOrderDto, request?: HeaderRequestLike) {
+    const userAgent = this.clientUserAgent(request);
+    const clientIp = this.clientIp(request);
+    const scene = dto.scene ?? detectPaymentScene(userAgent);
+    const product = resolvePaymentProduct(dto.provider, scene);
+
+    if (!product) {
+      throw new AppException(40004, "当前环境不支持所选支付方式", HttpStatus.BAD_REQUEST);
+    }
+
+    const productAvailable = await this.paymentConfigService.isProductAvailable(product);
+
+    if (!productAvailable && !this.isMockPaymentAllowed()) {
+      throw new AppException(40004, "支付方式未启用或配置不完整", HttpStatus.BAD_REQUEST);
+    }
+
     const selectedPackage = this.getPackage(dto.packageCode);
     const order = await this.prisma.paymentOrder.create({
       data: {
         userId,
         provider: dto.provider,
+        scene,
+        product,
+        action: this.paymentAction(product),
         orderNo: this.createOrderNo(),
         amountCny: selectedPackage.amountCny,
         credits: selectedPackage.credits,
+        clientIp,
+        userAgent,
         status: "CREATED"
       }
     });
-    const channelOrder = await this.createChannelOrder(dto.provider, {
+    const channelOrder = await this.createChannelOrder(product, userId, {
       orderNo: order.orderNo,
       amountCny: order.amountCny.toString(),
-      credits: order.credits
+      credits: order.credits,
+      clientIp
     });
     const updatedOrder = await this.prisma.paymentOrder.update({
       where: {
@@ -78,8 +107,11 @@ export class PaymentService {
       },
       data: {
         status: channelOrder.paymentMode === "REAL" ? "PAYING" : "CREATED",
+        product: channelOrder.product,
+        action: channelOrder.action,
         paymentUrl: channelOrder.paymentUrl,
         qrCodeUrl: channelOrder.qrCodeUrl,
+        launchParams: channelOrder.launchParams ?? undefined,
         providerPayload: channelOrder.providerPayload ?? undefined
       }
     });
@@ -176,7 +208,7 @@ export class PaymentService {
     let verified: VerifiedPaymentResult;
 
     try {
-      verified = this.alipayClient.verifyNotify(body);
+      verified = await this.alipayClient.verifyNotify(body);
     } catch (error) {
       await this.logFailedNotify("ALIPAY", body, headers, error);
       throw error;
@@ -201,7 +233,7 @@ export class PaymentService {
     let verified: VerifiedPaymentResult;
 
     try {
-      verified = this.wechatPayClient.verifyNotify(body, request);
+      verified = await this.wechatPayClient.verifyNotify(body, request);
     } catch (error) {
       await this.logFailedNotify("WECHAT_PAY", body, headers, error);
       throw error;
@@ -519,18 +551,55 @@ export class PaymentService {
   }
 
   private async createChannelOrder(
-    provider: PaymentProvider,
+    product: PaymentProduct,
+    userId: string,
     order: {
       orderNo: string;
       amountCny: string;
       credits: number;
+      clientIp: string | null;
     }
   ) {
-    if (provider === "ALIPAY") {
+    if (product === "ALIPAY_PAGE") {
       return this.alipayClient.createPagePayOrder(order);
     }
 
-    return this.wechatPayClient.createNativeOrder(order);
+    if (product === "ALIPAY_WAP") {
+      return this.alipayClient.createWapPayOrder(order);
+    }
+
+    if (product === "WECHAT_NATIVE") {
+      return this.wechatPayClient.createNativeOrder(order);
+    }
+
+    if (product === "WECHAT_H5") {
+      if (!order.clientIp) {
+        throw new AppException(40001, "微信 H5 支付缺少客户端 IP", HttpStatus.BAD_REQUEST);
+      }
+
+      return this.wechatPayClient.createH5Order({
+        ...order,
+        clientIp: order.clientIp
+      });
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: {
+        id: userId
+      },
+      select: {
+        wechatOpenId: true
+      }
+    });
+
+    if (!user?.wechatOpenId) {
+      throw new AppException(40004, "请先完成微信授权后再发起支付", HttpStatus.BAD_REQUEST);
+    }
+
+    return this.wechatPayClient.createJsapiOrder({
+      ...order,
+      openId: user.wechatOpenId
+    });
   }
 
   private async queryChannelOrder(provider: PaymentProvider, orderNo: string) {
@@ -599,6 +668,9 @@ export class PaymentService {
     id: string;
     userId: string;
     provider: PaymentProvider;
+    scene: PaymentScene;
+    product: PaymentProduct;
+    action: "REDIRECT" | "QR_CODE" | "WECHAT_JSAPI";
     orderNo: string;
     amountCny: { toString(): string };
     credits: number;
@@ -606,6 +678,7 @@ export class PaymentService {
     providerTradeNo: string | null;
     paymentUrl?: string | null;
     qrCodeUrl?: string | null;
+    launchParams?: Prisma.JsonValue | null;
     providerPayload?: Prisma.JsonValue | null;
     notifyRaw?: Prisma.JsonValue | null;
     paidAt: Date | null;
@@ -617,7 +690,7 @@ export class PaymentService {
       nickname: string;
     };
   }) {
-    const configured = this.isProviderConfigured(order.provider);
+    const realPayment = Boolean(order.paymentUrl || order.qrCodeUrl);
 
     return {
       id: order.id,
@@ -625,6 +698,9 @@ export class PaymentService {
       user: order.user ?? null,
       provider: order.provider,
       providerName: this.providerName(order.provider),
+      scene: order.scene,
+      product: order.product,
+      action: order.action,
       orderNo: order.orderNo,
       amountCny: order.amountCny.toString(),
       credits: order.credits,
@@ -633,12 +709,13 @@ export class PaymentService {
       providerTradeNo: order.providerTradeNo,
       paymentUrl: order.paymentUrl ?? null,
       qrCodeUrl: order.qrCodeUrl ?? null,
+      launchParams: order.launchParams ?? null,
       providerPayload: order.providerPayload ?? null,
       notifyRaw: order.notifyRaw ?? null,
       paidAt: order.paidAt,
       createdAt: order.createdAt,
       updatedAt: order.updatedAt,
-      paymentMode: configured ? "REAL" : "UNCONFIGURED",
+      paymentMode: realPayment ? "REAL" : "UNCONFIGURED",
       mockPaymentUrl: `https://mock-pay.local/${order.provider.toLowerCase()}/${order.orderNo}`,
       mockQrCodeUrl: `mock://payment/${order.provider.toLowerCase()}/${order.orderNo}`
     };
@@ -660,8 +737,119 @@ export class PaymentService {
     return names[status] ?? status;
   }
 
-  private isProviderConfigured(provider: PaymentProvider) {
-    return provider === "ALIPAY" ? this.alipayClient.isConfigured() : this.wechatPayClient.isConfigured();
+  async listAvailableProducts(userId: string) {
+    const [configuredProducts, user] = await Promise.all([
+      this.paymentConfigService.listAvailableProducts(),
+      this.prisma.user.findUnique({
+        where: {
+          id: userId
+        },
+        select: {
+          wechatOpenId: true
+        }
+      })
+    ]);
+    const products = this.isMockPaymentAllowed()
+      ? this.withMockPaymentProducts(configuredProducts)
+      : configuredProducts;
+    const configuredProductNames = new Set(configuredProducts.map((product) => product.product));
+
+    return products.map((product) => ({
+      ...product,
+      requiresAuthorization: configuredProductNames.has(product.product) && product.product === "WECHAT_JSAPI" && !user?.wechatOpenId
+    }));
+  }
+
+  private withMockPaymentProducts(products: AvailablePaymentProduct[]) {
+    const existingProducts = new Set(products.map((product) => product.product));
+    const mockProducts: AvailablePaymentProduct[] = [
+      {
+        provider: "ALIPAY",
+        providerName: "支付宝",
+        scene: "DESKTOP_WEB",
+        sceneName: paymentSceneName("DESKTOP_WEB"),
+        product: "ALIPAY_PAGE",
+        productName: paymentProductName("ALIPAY_PAGE"),
+        description: "本地模拟支付宝电脑网站支付"
+      },
+      {
+        provider: "ALIPAY",
+        providerName: "支付宝",
+        scene: "MOBILE_WEB",
+        sceneName: paymentSceneName("MOBILE_WEB"),
+        product: "ALIPAY_WAP",
+        productName: paymentProductName("ALIPAY_WAP"),
+        description: "本地模拟支付宝手机网站支付"
+      },
+      {
+        provider: "WECHAT_PAY",
+        providerName: "微信支付",
+        scene: "DESKTOP_WEB",
+        sceneName: paymentSceneName("DESKTOP_WEB"),
+        product: "WECHAT_NATIVE",
+        productName: paymentProductName("WECHAT_NATIVE"),
+        description: "本地模拟微信 Native 扫码支付"
+      },
+      {
+        provider: "WECHAT_PAY",
+        providerName: "微信支付",
+        scene: "MOBILE_WEB",
+        sceneName: paymentSceneName("MOBILE_WEB"),
+        product: "WECHAT_H5",
+        productName: paymentProductName("WECHAT_H5"),
+        description: "本地模拟微信 H5 支付"
+      },
+      {
+        provider: "WECHAT_PAY",
+        providerName: "微信支付",
+        scene: "WECHAT_BROWSER",
+        sceneName: paymentSceneName("WECHAT_BROWSER"),
+        product: "WECHAT_JSAPI",
+        productName: paymentProductName("WECHAT_JSAPI"),
+        description: "本地模拟微信 JSAPI 支付"
+      }
+    ];
+
+    return [
+      ...products,
+      ...mockProducts.filter((product) => !existingProducts.has(product.product))
+    ];
+  }
+
+  private isMockPaymentAllowed() {
+    return process.env.ENABLE_MOCK_PAYMENT_NOTIFY === "1" && process.env.NODE_ENV !== "production";
+  }
+
+  private paymentAction(product: PaymentProduct) {
+    if (product === "WECHAT_NATIVE") {
+      return "QR_CODE" as const;
+    }
+
+    if (product === "WECHAT_JSAPI") {
+      return "WECHAT_JSAPI" as const;
+    }
+
+    return "REDIRECT" as const;
+  }
+
+  private clientIp(request?: HeaderRequestLike) {
+    if (!request) {
+      return null;
+    }
+
+    const forwarded = getHeaderValue(request.headers["x-client-ip"])?.trim();
+
+    return forwarded || getClientIp(request);
+  }
+
+  private clientUserAgent(request?: HeaderRequestLike) {
+    if (!request) {
+      return null;
+    }
+
+    const forwarded = getHeaderValue(request.headers["x-client-user-agent"])?.trim();
+
+    return forwarded || getUserAgent(request);
   }
 
   private extractString(value: unknown) {

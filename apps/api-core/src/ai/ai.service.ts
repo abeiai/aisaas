@@ -1,5 +1,5 @@
 import { HttpStatus, Injectable } from "@nestjs/common";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   decryptSecret,
   encryptSecret,
@@ -21,8 +21,16 @@ import {
   UpsertAiToolCategoryDto
 } from "./dto/advanced-ai.dto.js";
 import { CreateAiProviderDto, UpdateAiProviderDto } from "./dto/ai-provider.dto.js";
+import { CreateAiChatDto } from "./dto/create-ai-chat.dto.js";
 import { CreateAiTaskDto } from "./dto/create-ai-task.dto.js";
-import { getProviderAdapter, ProviderAdapterException, type ProviderAdapterType } from "./provider-adapters.js";
+import { CreateImageGenerationDto } from "./dto/create-image-generation.dto.js";
+import { CreateVideoGenerationDto } from "./dto/create-video-generation.dto.js";
+import {
+  getProviderAdapter,
+  ProviderAdapterException,
+  type ProviderAdapterType,
+  type ProviderTextAttachment
+} from "./provider-adapters.js";
 
 type AiTaskStatus =
   | "CREATED"
@@ -34,6 +42,13 @@ type AiTaskStatus =
   | "COMPENSATED";
 
 type CreditReservationStatus = "RESERVED" | "SETTLED" | "RELEASED" | "EXPIRED" | "FAILED";
+const audioRecommendedAliasKeys = [
+  "tts-default",
+  "tts-fast",
+  "voice-clone-default",
+  "voice-design-default",
+  "audio-preview"
+] as const;
 
 interface AiScenarioRecord {
   id: string;
@@ -72,7 +87,17 @@ interface AiToolCategoryRecord {
   updatedAt: Date;
 }
 
-export type ToolInputFieldType = "text" | "textarea" | "select" | "number" | "switch";
+export type ToolInputFieldType =
+  | "text"
+  | "textarea"
+  | "select"
+  | "number"
+  | "switch"
+  | "voice-select"
+  | "audio-upload"
+  | "slider"
+  | "audio-preview"
+  | "format-select";
 
 export interface ToolInputField {
   name: string;
@@ -83,6 +108,9 @@ export interface ToolInputField {
   options: string[];
   min?: number;
   max?: number;
+  defaultValue?: string | number | boolean;
+  accept?: string[];
+  maxSizeMb?: number;
 }
 
 export interface ToolInputSchema {
@@ -174,6 +202,64 @@ interface ProviderResult {
   errorCode?: string | null;
   latencyMs?: number | null;
   billingModel?: ActiveAiModel | null;
+  reasoningContent?: string;
+}
+
+export interface ImageGenerationResult {
+  id: string;
+  prompt: string;
+  modelId: string;
+  modelName: string;
+  providerName: string;
+  width: number;
+  height: number;
+  count: number;
+  createdAt: string;
+  requestId: string | null;
+  images: Array<{
+    id: string;
+    url: string;
+    alt: string;
+  }>;
+}
+
+interface DashScopeImageResponse {
+  request_id?: unknown;
+  code?: unknown;
+  message?: unknown;
+  output?: unknown;
+  usage?: unknown;
+}
+
+export interface VideoGenerationResult {
+  id: string;
+  prompt: string;
+  modelId: string;
+  modelName: string;
+  providerName: string;
+  ratio: string;
+  resolution: string;
+  duration: number;
+  createdAt: string;
+  requestId: string | null;
+  providerTaskId: string;
+  status: string;
+  statusName: string;
+  videoUrl: string | null;
+  errorMessage: string | null;
+}
+
+interface DashScopeVideoResponse {
+  request_id?: unknown;
+  code?: unknown;
+  message?: unknown;
+  output?: unknown;
+  usage?: unknown;
+}
+
+interface TextGenerationOptions {
+  reasoningEnabled?: boolean;
+  searchEnabled?: boolean;
 }
 
 interface ActiveAiModel {
@@ -391,6 +477,555 @@ export class AiService {
     }
 
     return this.toScenario(tool);
+  }
+
+  async listChatModels() {
+    const models = await this.prisma.aiModelInstance.findMany({
+      where: {
+        isEnabled: true,
+        providerInstance: {
+          status: "ENABLED"
+        }
+      },
+      include: {
+        aliases: true,
+        providerInstance: {
+          include: {
+            credential: true,
+            providerPreset: true
+          }
+        }
+      },
+      orderBy: [
+        {
+          updatedAt: "desc"
+        },
+        {
+          createdAt: "desc"
+        }
+      ]
+    });
+    const configuredModels = models
+      .filter((model) => {
+        const capabilityTags = jsonStringArray(model.capabilityTags);
+
+        return Boolean(model.providerInstance.credential) && capabilityTags.includes("TEXT");
+      })
+      .map((model) => ({
+        id: model.id,
+        displayName: model.displayName,
+        providerName: model.providerInstance.name,
+        providerPresetName: model.providerInstance.providerPreset.displayName,
+        modelName: model.providerModelName,
+        capabilityTags: jsonStringArray(model.capabilityTags),
+        aliases: model.aliases.map((alias) => ({
+          aliasKey: alias.aliasKey,
+          displayName: alias.displayName
+        })),
+        isMock: false
+      }));
+
+    return [
+      {
+        id: "mock",
+        displayName: "本地演示模型",
+        providerName: "AI SaaS",
+        providerPresetName: "内置体验",
+        modelName: "mock-chat",
+        capabilityTags: ["TEXT", "STREAMING"],
+        aliases: [],
+        isMock: true
+      },
+      ...configuredModels
+    ];
+  }
+
+  async listImageModels() {
+    const models = await this.prisma.aiModelInstance.findMany({
+      where: {
+        isEnabled: true,
+        providerInstance: {
+          status: "ENABLED"
+        }
+      },
+      include: {
+        aliases: true,
+        providerInstance: {
+          include: {
+            credential: true,
+            providerPreset: true
+          }
+        }
+      },
+      orderBy: [
+        {
+          updatedAt: "desc"
+        },
+        {
+          createdAt: "desc"
+        }
+      ]
+    });
+
+    return models
+      .filter((model) => {
+        const capabilityTags = jsonStringArray(model.capabilityTags);
+
+        return Boolean(model.providerInstance.credential) && capabilityTags.includes("IMAGE_GENERATION");
+      })
+      .map((model) => {
+        const capabilityTags = jsonStringArray(model.capabilityTags);
+        const supportsReferenceImages = ["VISION", "MULTIMODAL", "IMAGE_INPUT", "REFERENCE_IMAGE", "IMAGE_REFERENCE"].some((tag) =>
+          capabilityTags.includes(tag)
+        );
+
+        return {
+          id: model.id,
+          displayName: model.displayName,
+          providerName: model.providerInstance.name,
+          providerPresetName: model.providerInstance.providerPreset.displayName,
+          modelName: model.providerModelName,
+          capabilityTags,
+          aliases: model.aliases.map((alias) => ({
+            aliasKey: alias.aliasKey,
+            displayName: alias.displayName
+          })),
+          maxReferenceImages: supportsReferenceImages ? imageReferenceLimit(model.providerModelName, capabilityTags) : 0,
+          maxOutputImages: imageOutputLimit(capabilityTags, model.providerModelName),
+          isMock: false
+        };
+      })
+      .sort((left, right) => imageGenerationModelPriority(left.modelName) - imageGenerationModelPriority(right.modelName));
+  }
+
+  async generateImage(userId: string, dto: CreateImageGenerationDto): Promise<ImageGenerationResult> {
+    void userId;
+
+    const prompt = dto.prompt.trim();
+    const model = await this.getImageGenerationModel(dto.modelInstanceId);
+    const capabilityTags = jsonStringArray(model.capabilityTags);
+    const maxReferenceImages = imageReferenceLimit(model.providerModelName, capabilityTags);
+    const referenceImages = normalizeImageReferences(dto.referenceImages, maxReferenceImages);
+    const count = Math.max(1, Math.min(dto.count || 1, imageOutputLimit(capabilityTags, model.providerModelName)));
+    const width = Math.max(512, Math.min(dto.width || 1024, 4096));
+    const height = Math.max(512, Math.min(dto.height || 1024, 4096));
+    const response = await this.callDashScopeImageGeneration({
+      baseUrl: model.providerInstance.baseUrl,
+      apiKeyEncrypted: model.providerInstance.credential!.apiKeyEncrypted,
+      modelName: model.providerModelName,
+      prompt,
+      width,
+      height,
+      count,
+      referenceImages
+    });
+    const imageUrls = extractDashScopeImageUrls(response);
+
+    if (imageUrls.length === 0) {
+      throw new AppException(50201, "图片生成接口未返回图片，请稍后重试。", HttpStatus.BAD_GATEWAY);
+    }
+
+    return {
+      id: randomUUID(),
+      prompt,
+      modelId: model.id,
+      modelName: model.displayName,
+      providerName: model.providerInstance.name,
+      width,
+      height,
+      count: imageUrls.length,
+      createdAt: new Date().toISOString(),
+      requestId: stringValue(response.request_id) ?? null,
+      images: imageUrls.map((url, index) => ({
+        id: randomUUID(),
+        url,
+        alt: `${prompt.slice(0, 80)} - ${index + 1}`
+      }))
+    };
+  }
+
+  private async getImageGenerationModel(modelInstanceId: string) {
+    const model = await this.prisma.aiModelInstance.findUnique({
+      where: {
+        id: modelInstanceId
+      },
+      include: {
+        providerInstance: {
+          include: {
+            credential: true,
+            providerPreset: true
+          }
+        }
+      }
+    });
+
+    if (!model) {
+      throw new AppException(40401, "所选图片模型不存在", HttpStatus.NOT_FOUND);
+    }
+
+    const capabilityTags = jsonStringArray(model.capabilityTags);
+
+    if (!model.isEnabled || model.providerInstance.status !== "ENABLED") {
+      throw new AppException(40001, "所选图片模型或 Provider 未启用，请先在后台完成配置。", HttpStatus.BAD_REQUEST);
+    }
+
+    if (!model.providerInstance.credential) {
+      throw new AppException(40001, "图片生成 Provider 尚未配置 API Key，请先在后台填写。", HttpStatus.BAD_REQUEST);
+    }
+
+    if (!capabilityTags.includes("IMAGE_GENERATION")) {
+      throw new AppException(40001, "所选模型不支持图片生成，请重新选择模型。", HttpStatus.BAD_REQUEST);
+    }
+
+    if (!isDashScopeImageGenerationModel(model.providerModelName)) {
+      throw new AppException(40001, "当前仅支持阿里云百炼图片生成模型。", HttpStatus.BAD_REQUEST);
+    }
+
+    return model;
+  }
+
+  private async callDashScopeImageGeneration(input: {
+    baseUrl: string;
+    apiKeyEncrypted: string;
+    modelName: string;
+    prompt: string;
+    width: number;
+    height: number;
+    count: number;
+    referenceImages: ProviderTextAttachment[];
+  }) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), aiImageTimeoutMs());
+    const content = [
+      ...input.referenceImages.map((image) => ({
+        image: image.dataUrl
+      })),
+      {
+        text: input.prompt
+      }
+    ];
+
+    try {
+      const response = await fetch(dashScopeImageEndpoint(input.baseUrl), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${decryptSecret(input.apiKeyEncrypted)}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: input.modelName,
+          input: {
+            messages: [
+              {
+                role: "user",
+                content
+              }
+            ]
+          },
+          parameters: {
+            size: `${input.width}*${input.height}`,
+            n: input.count,
+            watermark: false
+          }
+        }),
+        signal: controller.signal
+      });
+      const payload = (await response.json().catch(() => null)) as DashScopeImageResponse | null;
+
+      if (!response.ok || !payload) {
+        throw new AppException(
+          50201,
+          dashScopeImageErrorMessage(payload, response.status),
+          HttpStatus.BAD_GATEWAY
+        );
+      }
+
+      if (typeof payload.code === "string" && payload.code) {
+        throw new AppException(50201, dashScopeImageErrorMessage(payload, response.status), HttpStatus.BAD_GATEWAY);
+      }
+
+      return payload;
+    } catch (error) {
+      if (error instanceof AppException) {
+        throw error;
+      }
+
+      throw new AppException(
+        50201,
+        error instanceof Error && error.name === "AbortError" ? "图片生成接口请求超时，请稍后重试。" : "图片生成接口调用失败，请稍后重试。",
+        HttpStatus.BAD_GATEWAY
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async listVideoModels() {
+    const models = await this.prisma.aiModelInstance.findMany({
+      where: {
+        isEnabled: true,
+        providerInstance: {
+          status: "ENABLED"
+        }
+      },
+      include: {
+        aliases: true,
+        providerInstance: {
+          include: {
+            credential: true,
+            providerPreset: true
+          }
+        }
+      },
+      orderBy: [
+        {
+          updatedAt: "desc"
+        },
+        {
+          createdAt: "desc"
+        }
+      ]
+    });
+
+    return models
+      .filter((model) => {
+        const capabilityTags = jsonStringArray(model.capabilityTags);
+
+        return Boolean(model.providerInstance.credential) && capabilityTags.includes("VIDEO_GENERATION");
+      })
+      .map((model) => {
+        const capabilityTags = jsonStringArray(model.capabilityTags);
+
+        return {
+          id: model.id,
+          displayName: model.displayName,
+          providerName: model.providerInstance.name,
+          providerPresetName: model.providerInstance.providerPreset.displayName,
+          modelName: model.providerModelName,
+          capabilityTags,
+          aliases: model.aliases.map((alias) => ({
+            aliasKey: alias.aliasKey,
+            displayName: alias.displayName
+          })),
+          maxReferenceFiles: videoReferenceLimit(model.providerModelName, capabilityTags),
+          acceptedReferenceTypes: videoReferenceAccept(model.providerModelName, capabilityTags),
+          defaultDuration: videoDefaultDuration(model.providerModelName),
+          isMock: false
+        };
+      })
+      .sort((left, right) => videoGenerationModelPriority(left.modelName) - videoGenerationModelPriority(right.modelName));
+  }
+
+  async generateVideo(userId: string, dto: CreateVideoGenerationDto): Promise<VideoGenerationResult> {
+    void userId;
+
+    const prompt = dto.prompt.trim();
+    const model = await this.getVideoGenerationModel(dto.modelInstanceId);
+    const capabilityTags = jsonStringArray(model.capabilityTags);
+    const maxReferenceFiles = videoReferenceLimit(model.providerModelName, capabilityTags);
+    const referenceFiles = normalizeVideoReferences(dto.referenceFiles, maxReferenceFiles, model.providerModelName, capabilityTags);
+    const duration = Math.max(3, Math.min(dto.duration ?? videoDefaultDuration(model.providerModelName), 10));
+    const ratio = normalizedVideoRatio(dto.ratio);
+    const resolution = normalizedVideoResolution(dto.resolution);
+    const response = await this.callDashScopeVideoGeneration({
+      baseUrl: model.providerInstance.baseUrl,
+      apiKeyEncrypted: model.providerInstance.credential!.apiKeyEncrypted,
+      modelName: model.providerModelName,
+      prompt,
+      ratio,
+      resolution,
+      duration,
+      referenceFiles
+    });
+    const providerTaskId = dashScopeTaskId(response);
+    const videoUrl = extractDashScopeVideoUrls(response)[0] ?? null;
+
+    if (!providerTaskId && !videoUrl) {
+      throw new AppException(50201, "视频生成接口未返回任务编号，请稍后重试。", HttpStatus.BAD_GATEWAY);
+    }
+
+    return {
+      id: randomUUID(),
+      prompt,
+      modelId: model.id,
+      modelName: model.displayName,
+      providerName: model.providerInstance.name,
+      ratio,
+      resolution,
+      duration,
+      createdAt: new Date().toISOString(),
+      requestId: stringValue(response.request_id) ?? null,
+      providerTaskId: providerTaskId ?? randomUUID(),
+      status: videoUrl ? "SUCCEEDED" : "RUNNING",
+      statusName: videoUrl ? "生成完成" : "任务已提交",
+      videoUrl,
+      errorMessage: null
+    };
+  }
+
+  async getVideoGenerationTask(userId: string, taskId: string, modelInstanceId: string) {
+    void userId;
+
+    const normalizedTaskId = emptyToNull(taskId);
+    if (!normalizedTaskId) {
+      throw new AppException(40001, "视频任务编号不能为空", HttpStatus.BAD_REQUEST);
+    }
+
+    const model = await this.getVideoGenerationModel(modelInstanceId);
+    const response = await this.queryDashScopeVideoTask({
+      baseUrl: model.providerInstance.baseUrl,
+      apiKeyEncrypted: model.providerInstance.credential!.apiKeyEncrypted,
+      taskId: normalizedTaskId
+    });
+    const status = dashScopeVideoStatus(response);
+    const videoUrl = extractDashScopeVideoUrls(response)[0] ?? null;
+    const errorMessage = dashScopeVideoTaskError(response);
+
+    return {
+      providerTaskId: normalizedTaskId,
+      status,
+      statusName: videoTaskStatusName(status),
+      videoUrl,
+      errorMessage,
+      requestId: stringValue(response.request_id) ?? null
+    };
+  }
+
+  private async getVideoGenerationModel(modelInstanceId: string) {
+    const model = await this.prisma.aiModelInstance.findUnique({
+      where: {
+        id: modelInstanceId
+      },
+      include: {
+        providerInstance: {
+          include: {
+            credential: true,
+            providerPreset: true
+          }
+        }
+      }
+    });
+
+    if (!model) {
+      throw new AppException(40401, "所选视频模型不存在", HttpStatus.NOT_FOUND);
+    }
+
+    const capabilityTags = jsonStringArray(model.capabilityTags);
+
+    if (!model.isEnabled || model.providerInstance.status !== "ENABLED") {
+      throw new AppException(40001, "所选视频模型或 Provider 未启用，请先在后台完成配置。", HttpStatus.BAD_REQUEST);
+    }
+
+    if (!model.providerInstance.credential) {
+      throw new AppException(40001, "视频生成 Provider 尚未配置 API Key，请先在后台填写。", HttpStatus.BAD_REQUEST);
+    }
+
+    if (!capabilityTags.includes("VIDEO_GENERATION")) {
+      throw new AppException(40001, "所选模型不支持视频生成，请重新选择模型。", HttpStatus.BAD_REQUEST);
+    }
+
+    if (!isDashScopeVideoGenerationModel(model.providerModelName)) {
+      throw new AppException(40001, "当前仅支持阿里云百炼视频生成模型。", HttpStatus.BAD_REQUEST);
+    }
+
+    return model;
+  }
+
+  private async callDashScopeVideoGeneration(input: {
+    baseUrl: string;
+    apiKeyEncrypted: string;
+    modelName: string;
+    prompt: string;
+    ratio: string;
+    resolution: string;
+    duration: number;
+    referenceFiles: ProviderTextAttachment[];
+  }) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), aiVideoTimeoutMs());
+
+    try {
+      const response = await fetch(dashScopeVideoEndpoint(input.baseUrl), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${decryptSecret(input.apiKeyEncrypted)}`,
+          "Content-Type": "application/json",
+          "X-DashScope-Async": "enable"
+        },
+        body: JSON.stringify({
+          model: input.modelName,
+          input: dashScopeVideoInput(input.modelName, input.prompt, input.referenceFiles),
+          parameters: {
+            size: videoSizeFromRatio(input.ratio, input.resolution),
+            duration: input.duration,
+            watermark: false,
+            prompt_extend: true
+          }
+        }),
+        signal: controller.signal
+      });
+      const payload = (await response.json().catch(() => null)) as DashScopeVideoResponse | null;
+
+      if (!response.ok || !payload) {
+        throw new AppException(50201, dashScopeVideoErrorMessage(payload, response.status), HttpStatus.BAD_GATEWAY);
+      }
+
+      if (typeof payload.code === "string" && payload.code) {
+        throw new AppException(50201, dashScopeVideoErrorMessage(payload, response.status), HttpStatus.BAD_GATEWAY);
+      }
+
+      return payload;
+    } catch (error) {
+      if (error instanceof AppException) {
+        throw error;
+      }
+
+      throw new AppException(
+        50201,
+        error instanceof Error && error.name === "AbortError" ? "视频生成接口请求超时，请稍后重试。" : "视频生成接口调用失败，请稍后重试。",
+        HttpStatus.BAD_GATEWAY
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private async queryDashScopeVideoTask(input: {
+    baseUrl: string;
+    apiKeyEncrypted: string;
+    taskId: string;
+  }) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), aiVideoTaskTimeoutMs());
+
+    try {
+      const response = await fetch(dashScopeTaskEndpoint(input.baseUrl, input.taskId), {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${decryptSecret(input.apiKeyEncrypted)}`
+        },
+        signal: controller.signal
+      });
+      const payload = (await response.json().catch(() => null)) as DashScopeVideoResponse | null;
+
+      if (!response.ok || !payload) {
+        throw new AppException(50201, dashScopeVideoErrorMessage(payload, response.status), HttpStatus.BAD_GATEWAY);
+      }
+
+      return payload;
+    } catch (error) {
+      if (error instanceof AppException) {
+        throw error;
+      }
+
+      throw new AppException(
+        50201,
+        error instanceof Error && error.name === "AbortError" ? "视频任务查询超时，请稍后重试。" : "视频任务查询失败，请稍后重试。",
+        HttpStatus.BAD_GATEWAY
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   async updateScenario(id: string, dto: UpdateAiScenarioDto) {
@@ -677,7 +1312,8 @@ export class AiService {
     }
 
     const promptInput = await this.preparePromptInput(userId, scenario, dto);
-    const activeModel = await this.getModelForScenario(scenario);
+    const activeModel = await this.getModelForScenario(scenario, dto.modelInstanceId);
+    const attachments = attachmentsForModel(activeModel, normalizeProviderAttachments(dto.attachments));
     const reservedTask = await this.reserveCredits(userId, scenario, input, activeModel, promptInput);
 
     await this.prisma.aiTask.update({
@@ -695,7 +1331,8 @@ export class AiService {
         promptInput.renderedPrompt,
         scenario,
         reservedTask.id,
-        activeModel
+        activeModel,
+        attachments
       );
       const actualCredits = this.normalizeActualCredits(
         promptInput.renderedPrompt,
@@ -732,7 +1369,8 @@ export class AiService {
     }
 
     const promptInput = await this.preparePromptInput(userId, scenario, dto);
-    const activeModel = await this.getModelForScenario(scenario);
+    const activeModel = await this.getModelForScenario(scenario, dto.modelInstanceId);
+    const attachments = attachmentsForModel(activeModel, normalizeProviderAttachments(dto.attachments));
     const reservedTask = await this.reserveCredits(userId, scenario, input, activeModel, promptInput);
 
     await this.prisma.aiTask.update({
@@ -758,7 +1396,12 @@ export class AiService {
         reservedTask.id,
         activeModel,
         onEvent,
-        signal
+        attachments,
+        signal,
+        {
+          reasoningEnabled: dto.reasoningEnabled,
+          searchEnabled: dto.searchEnabled
+        }
       );
       const actualCredits = this.normalizeActualCredits(
         promptInput.renderedPrompt,
@@ -788,6 +1431,33 @@ export class AiService {
 
       return task;
     }
+  }
+
+  async createChatStream(
+    userId: string,
+    dto: CreateAiChatDto,
+    onEvent: (event: Record<string, unknown>) => void,
+    signal?: AbortSignal
+  ) {
+    const scenario = await this.ensureExperienceChatScenario();
+    const history = this.normalizeChatHistory(dto.messages);
+
+    return this.createTaskStream(
+      userId,
+      {
+        scenarioId: scenario.id,
+        input: dto.input,
+        variables: {
+          history
+        },
+        modelInstanceId: dto.modelInstanceId?.trim() || "mock",
+        attachments: dto.attachments,
+        reasoningEnabled: dto.reasoningEnabled,
+        searchEnabled: dto.searchEnabled
+      },
+      onEvent,
+      signal
+    );
   }
 
   async getTask(userId: string, id: string) {
@@ -1206,16 +1876,44 @@ export class AiService {
       throw new AppException(40401, "AI Provider Preset 不存在", HttpStatus.NOT_FOUND);
     }
 
+    const existingInstance = preset.instances[0] ?? null;
     const apiKey = dto.apiKey?.trim();
-    const instance = preset.instances[0]
+    const connectionConfigChanged =
+      !existingInstance ||
+      Boolean(apiKey) ||
+      (dto.baseUrl !== undefined && normalizeBaseUrl(dto.baseUrl) !== existingInstance.baseUrl) ||
+      (dto.webSocketUrl !== undefined && emptyToNull(dto.webSocketUrl) !== existingInstance.webSocketUrl) ||
+      (dto.region !== undefined && emptyToNull(dto.region) !== existingInstance.region);
+    const requiresVerifiedEnable = preset.adapterType === "DASHSCOPE_AUDIO";
+    const previousTestSucceeded = providerTestSucceeded(existingInstance?.lastTestResult ?? null);
+    const requiresRetest =
+      requiresVerifiedEnable &&
+      (connectionConfigChanged || (dto.status === "ENABLED" && !previousTestSucceeded));
+    const nextStatus =
+      requiresVerifiedEnable && dto.status === "ENABLED" && requiresRetest
+        ? "DISABLED"
+        : requiresVerifiedEnable && connectionConfigChanged && existingInstance?.status === "ENABLED"
+          ? "DISABLED"
+          : dto.status;
+    const resetTestResult = requiresRetest
+      ? ({
+          success: false,
+          message: "配置已保存，请点击“测试连接”；测试成功后会自动启用 Provider。"
+        } satisfies Prisma.InputJsonValue)
+      : undefined;
+    const instance = existingInstance
       ? await this.prisma.aiProviderInstance.update({
           where: {
-            id: preset.instances[0].id
+            id: existingInstance.id
           },
           data: {
             name: dto.name?.trim(),
             baseUrl: dto.baseUrl === undefined ? undefined : normalizeBaseUrl(dto.baseUrl),
-            status: dto.status
+            webSocketUrl: dto.webSocketUrl === undefined ? undefined : emptyToNull(dto.webSocketUrl),
+            region: dto.region === undefined ? undefined : emptyToNull(dto.region),
+            status: nextStatus,
+            lastTestedAt: requiresRetest ? null : undefined,
+            lastTestResult: resetTestResult
           }
         })
       : await this.prisma.aiProviderInstance.create({
@@ -1223,7 +1921,11 @@ export class AiService {
             providerPresetId: preset.id,
             name: dto.name?.trim() || preset.displayName,
             baseUrl: normalizeBaseUrl(dto.baseUrl || preset.defaultBaseUrl),
-            status: dto.status ?? "DISABLED"
+            webSocketUrl: emptyToNull(dto.webSocketUrl) ?? preset.defaultWebSocketUrl,
+            region: emptyToNull(dto.region) ?? preset.region?.split(",")[0] ?? null,
+            status: nextStatus ?? "DISABLED",
+            lastTestedAt: resetTestResult ? null : undefined,
+            lastTestResult: resetTestResult
           }
         });
 
@@ -1277,6 +1979,8 @@ export class AiService {
           providerPresetId: preset.id,
           name: preset.displayName,
           baseUrl: preset.defaultBaseUrl,
+          webSocketUrl: preset.defaultWebSocketUrl,
+          region: preset.region?.split(",")[0] ?? null,
           status: "DISABLED"
         }
       }));
@@ -1285,7 +1989,7 @@ export class AiService {
       dto.capabilityTags ?? jsonStringArray(modelPreset.capabilityTags)
     );
 
-    await this.prisma.aiModelInstance.upsert({
+    const modelInstance = await this.prisma.aiModelInstance.upsert({
       where: {
         providerInstanceId_providerModelName: {
           providerInstanceId: instance.id,
@@ -1311,6 +2015,8 @@ export class AiService {
         isEnabled: dto.isEnabled ?? true
       }
     });
+
+    await this.bindRecommendedAudioAlias(modelPreset.recommendedAlias, modelInstance.id, capabilityTags);
 
     return this.getProviderPreset(providerPresetId);
   }
@@ -1432,6 +2138,58 @@ export class AiService {
     return this.listModelAliases();
   }
 
+  private async bindRecommendedAudioAlias(
+    aliasKey: string | null,
+    modelInstanceId: string,
+    capabilityTags: string[]
+  ) {
+    if (!aliasKey || !isAudioRecommendedAliasKey(aliasKey)) {
+      return;
+    }
+
+    const requiredCapability = audioRecommendedAliasCapability(aliasKey);
+    if (requiredCapability && !capabilityTags.includes(requiredCapability)) {
+      return;
+    }
+
+    const alias = await this.prisma.aiModelAlias.findUnique({
+      where: {
+        aliasKey
+      },
+      include: {
+        modelInstance: {
+          include: {
+            providerInstance: {
+              include: {
+                providerPreset: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (alias?.modelInstanceId) {
+      return;
+    }
+
+    await this.prisma.aiModelAlias.upsert({
+      where: {
+        aliasKey
+      },
+      update: {
+        displayName: alias?.displayName ?? audioRecommendedAliasName(aliasKey),
+        description: alias?.description ?? null,
+        modelInstanceId
+      },
+      create: {
+        aliasKey,
+        displayName: audioRecommendedAliasName(aliasKey),
+        modelInstanceId
+      }
+    });
+  }
+
   async testProviderInstance(providerPresetId: string) {
     const preset = await this.prisma.aiProviderPreset.findUnique({
       where: {
@@ -1444,8 +2202,7 @@ export class AiService {
             modelInstances: {
               where: {
                 isEnabled: true
-              },
-              take: 1
+              }
             }
           },
           take: 1,
@@ -1461,16 +2218,23 @@ export class AiService {
       throw new AppException(40401, "AI Provider 实例不存在", HttpStatus.NOT_FOUND);
     }
 
-    if (!instance.credential) {
+    const apiKey = this.resolveProviderTestApiKey(
+      preset.apiKeyEnvName,
+      instance.credential?.apiKeyEncrypted ?? null
+    );
+
+    if (!apiKey.apiKeyEncrypted) {
       const result = {
         success: false,
-        message: "尚未配置 API Key"
+        message:
+          apiKey.message ??
+          `尚未配置 API Key，请在后台填写或配置环境变量 ${preset.apiKeyEnvName}`
       };
       await this.saveProviderTestResult(instance.id, result, "TEST_FAILED");
       return result;
     }
 
-    const modelName = instance.modelInstances[0]?.providerModelName;
+    const modelName = selectProviderTestModelName(preset.adapterType, instance.modelInstances);
 
     if (!modelName) {
       const result = {
@@ -1484,8 +2248,11 @@ export class AiService {
     const adapter = getProviderAdapter(preset.adapterType);
     const result = await adapter.testConnection({
       baseUrl: instance.baseUrl,
-      apiKeyEncrypted: instance.credential.apiKeyEncrypted,
+      webSocketUrl: instance.webSocketUrl,
+      region: instance.region ?? preset.region,
+      apiKeyEncrypted: apiKey.apiKeyEncrypted,
       modelName,
+      gatewayBaseUrl: process.env.AI_GATEWAY_BASE_URL ?? "http://localhost:7343",
       timeoutMs: Number(process.env.AI_PROVIDER_TEST_TIMEOUT_MS ?? 8000)
     });
 
@@ -1549,6 +2316,10 @@ export class AiService {
     };
 
     for (const field of schema.fields) {
+      if (field.type === "audio-preview") {
+        continue;
+      }
+
       const rawValue = field.name === "input" ? input : normalized[field.name] ?? "";
       const value = String(rawValue ?? "").trim();
 
@@ -1560,7 +2331,7 @@ export class AiService {
         continue;
       }
 
-      if (field.type === "number") {
+      if (field.type === "number" || field.type === "slider") {
         const numberValue = Number(value);
 
         if (!Number.isFinite(numberValue)) {
@@ -1580,7 +2351,12 @@ export class AiService {
         }
       }
 
-      if (field.type === "select" && value && field.options.length > 0 && !field.options.includes(value)) {
+      if (
+        (field.type === "select" || field.type === "format-select") &&
+        value &&
+        field.options.length > 0 &&
+        !field.options.includes(value)
+      ) {
         throw new AppException(40001, `${field.label}选项无效`, HttpStatus.BAD_REQUEST);
       }
 
@@ -1654,9 +2430,13 @@ export class AiService {
         continue;
       }
 
-      if (!["text", "textarea", "select", "number", "switch"].includes(type)) {
+      if (!isToolInputFieldType(type)) {
         if (strict) {
-          throw new AppException(40001, "输入字段 type 只支持 text、textarea、select、number、switch", HttpStatus.BAD_REQUEST);
+          throw new AppException(
+            40001,
+            "输入字段 type 只支持 text、textarea、select、number、switch、voice-select、audio-upload、slider、audio-preview、format-select",
+            HttpStatus.BAD_REQUEST
+          );
         }
 
         continue;
@@ -1666,9 +2446,11 @@ export class AiService {
         ? record.options.map((option) => String(option ?? "").trim()).filter(Boolean).slice(0, 20)
         : [];
 
-      if (type === "select" && options.length === 0) {
+      const normalizedOptions = type === "format-select" && options.length === 0 ? ["mp3", "wav", "opus"] : options;
+
+      if ((type === "select" || type === "format-select") && normalizedOptions.length === 0) {
         if (strict) {
-          throw new AppException(40001, `${label} 的 select 选项不能为空`, HttpStatus.BAD_REQUEST);
+          throw new AppException(40001, `${label} 的选项不能为空`, HttpStatus.BAD_REQUEST);
         }
 
         continue;
@@ -1676,10 +2458,19 @@ export class AiService {
 
       const min = optionalNumber(record.min);
       const max = optionalNumber(record.max);
+      const maxSizeMb = optionalNumber(record.maxSizeMb);
 
       if (min !== undefined && max !== undefined && min > max) {
         if (strict) {
           throw new AppException(40001, `${label} 的最小值不能大于最大值`, HttpStatus.BAD_REQUEST);
+        }
+
+        continue;
+      }
+
+      if (type === "slider" && (min === undefined || max === undefined)) {
+        if (strict) {
+          throw new AppException(40001, `${label} 的 slider 必须配置 min 和 max`, HttpStatus.BAD_REQUEST);
         }
 
         continue;
@@ -1692,9 +2483,12 @@ export class AiService {
         type,
         required: record.required === true,
         placeholder: String(record.placeholder ?? "").trim().slice(0, 200),
-        options,
+        options: normalizedOptions,
         min,
-        max
+        max,
+        defaultValue: normalizedDefaultValue(record.default, type),
+        accept: normalizeStringArray(record.accept, 20),
+        maxSizeMb: maxSizeMb === undefined ? undefined : Math.max(1, Math.min(200, Math.round(maxSizeMb)))
       });
     }
 
@@ -2194,6 +2988,113 @@ export class AiService {
     });
   }
 
+  private async ensureExperienceChatScenario() {
+    return this.prisma.aiScenario.upsert({
+      where: {
+        slug: "experience-ai-chat"
+      },
+      update: {
+        promptTemplate: this.experienceChatPromptTemplate(),
+        promptVariables: [
+          {
+            name: "history",
+            label: "历史对话",
+            required: false,
+            placeholder: ""
+          }
+        ],
+        requiredCapabilities: ["TEXT", "STREAMING"],
+        costCredits: 0,
+        isEnabled: true,
+        templateVersion: "2026.05.17"
+      },
+      create: {
+        name: "AI 对话",
+        slug: "experience-ai-chat",
+        description: "体验区基础 AI 对话能力。",
+        promptTemplate: this.experienceChatPromptTemplate(),
+        promptVariables: [
+          {
+            name: "history",
+            label: "历史对话",
+            required: false,
+            placeholder: ""
+          }
+        ],
+        requiredCapabilities: ["TEXT", "STREAMING"],
+        costCredits: 0,
+        isEnabled: true,
+        sortOrder: 0,
+        isBuiltIn: true,
+        templateVersion: "2026.05.17"
+      },
+      include: {
+        modelBinding: true
+      }
+    });
+  }
+
+  private experienceChatPromptTemplate() {
+    return [
+      "你是 AI SaaS 体验区中的中文 AI 助手。",
+      "请使用简体中文回答，优先给出清晰、可执行、结构化的回复。",
+      "如果历史对话为空，就直接回答用户最新问题。",
+      "",
+      "输出格式必须严格遵守：",
+      "1. 只输出合法 GitHub Flavored Markdown，不要把多个标题、段落或列表项挤在同一行。",
+      "2. 标题必须单独成行，使用 `## 标题` 或 `### 标题`，井号后必须有一个空格。",
+      "3. 列表项必须单独成行，使用 `- 内容`；不要输出空列表项。",
+      "4. 加粗标签使用 `**公式**：`、`**说明**：` 这种完整配对格式，禁止输出 `公式*：`、`*公式：`、`*示例：`。",
+      "5. `**公式**：` 和 `**说明**：` 必须作为独立段落，不要写成 `标题**公式**：`、`\\]**说明**：` 或 `说明内容### 下一标题`。",
+      "",
+      "数学公式必须严格遵守：",
+      "1. 行内公式只使用 `\\( ... \\)`。",
+      "2. 独立公式块只使用下面格式，公式块前后保留空行：",
+      "\\[",
+      "...",
+      "\\]",
+      "3. 禁止使用 `$...$` 或 `$$...$$`。",
+      "4. 禁止输出 `\\left$`、`\\right$`；需要括号时使用 `\\left(` 和 `\\right)`。",
+      "5. TeX 命令和变量需要分开，写 `\\partial F_x`、`\\partial x`、`\\approx x`，不要写 `\\partialF_x`、`\\partialx`、`\\approxx`。",
+      "6. 多变量微积分公式优先使用这些写法：",
+      "\\[",
+      "\\nabla f = \\left(\\frac{\\partial f}{\\partial x}, \\frac{\\partial f}{\\partial y}, \\frac{\\partial f}{\\partial z}\\right)",
+      "\\]",
+      "\\[",
+      "\\nabla \\cdot \\mathbf{F} = \\frac{\\partial F_x}{\\partial x} + \\frac{\\partial F_y}{\\partial y} + \\frac{\\partial F_z}{\\partial z}",
+      "\\]",
+      "\\[",
+      "\\nabla \\times \\mathbf{F} = \\left(\\frac{\\partial F_z}{\\partial y} - \\frac{\\partial F_y}{\\partial z}, \\frac{\\partial F_x}{\\partial z} - \\frac{\\partial F_z}{\\partial x}, \\frac{\\partial F_y}{\\partial x} - \\frac{\\partial F_x}{\\partial y}\\right)",
+      "\\]",
+      "7. 回复前自检：不能留下未配对的 `$`、`\\[`、`\\]`，不能留下红色错误公式或裸露的 TeX 命令。",
+      "",
+      "历史对话：",
+      "{{history}}",
+      "",
+      "用户最新问题：",
+      "{{input}}"
+    ].join("\n");
+  }
+
+  private normalizeChatHistory(messages: CreateAiChatDto["messages"]) {
+    if (!Array.isArray(messages)) {
+      return "无";
+    }
+
+    const history = messages
+      .slice(-12)
+      .map((message) => {
+        const role = message?.role === "assistant" ? "AI" : "用户";
+        const content = String(message?.content ?? "").trim().slice(0, 1000);
+
+        return content ? `${role}：${content}` : "";
+      })
+      .filter(Boolean)
+      .join("\n");
+
+    return history || "无";
+  }
+
   private async streamGenerateText(
     input: string,
     prompt: string,
@@ -2201,10 +3102,15 @@ export class AiService {
     taskId: string,
     activeModel: ActiveAiModel | null,
     onEvent: (event: Record<string, unknown>) => void,
-    signal?: AbortSignal
+    attachments: ProviderTextAttachment[] = [],
+    signal?: AbortSignal,
+    options: TextGenerationOptions = {}
   ): Promise<ProviderResult> {
     if (activeModel) {
       const adapter = getProviderAdapter(activeModel.adapterType);
+      const reasoningSwitchSupported = modelHasCapability(activeModel, "REASONING");
+      const reasoningEnabled = Boolean(options.reasoningEnabled && reasoningSwitchSupported);
+      const searchEnabled = Boolean(options.searchEnabled && modelHasAnyCapability(activeModel, ["SEARCH", "WEB_SEARCH", "BROWSING", "TOOLS"]));
 
       try {
         const result = await adapter.streamText({
@@ -2218,10 +3124,20 @@ export class AiService {
           temperature: aiTemperature(),
           maxTokens: aiMaxTokens(),
           timeoutMs: aiGatewayTimeoutMs(),
+          attachments,
+          reasoningSwitchSupported,
+          reasoningEnabled,
+          searchEnabled,
           signal,
           onDelta: (text) => {
             onEvent({
               type: "delta",
+              text
+            });
+          },
+          onReasoningDelta: (text) => {
+            onEvent({
+              type: "reasoning_delta",
               text
             });
           }
@@ -2294,10 +3210,11 @@ export class AiService {
     prompt: string,
     scenario: AiScenarioRecord,
     taskId: string,
-    activeModel: ActiveAiModel | null
+    activeModel: ActiveAiModel | null,
+    attachments: ProviderTextAttachment[] = []
   ): Promise<ProviderResult> {
     try {
-      return await this.generateText(input, prompt, scenario, taskId, activeModel);
+      return await this.generateText(input, prompt, scenario, taskId, activeModel, attachments);
     } catch (error) {
       const fallbackModelAlias = scenario.modelBinding?.fallbackModelAlias || activeModel?.fallbackModelAlias;
 
@@ -2311,7 +3228,7 @@ export class AiService {
             errorMessage: `主模型 ${activeModel.modelName} 失败，开始 fallback`
           });
 
-          return this.generateText(input, prompt, scenario, taskId, fallbackModel);
+          return this.generateText(input, prompt, scenario, taskId, fallbackModel, attachmentsForModel(fallbackModel, attachments));
         }
       }
 
@@ -2333,7 +3250,7 @@ export class AiService {
         errorMessage: `主模型 ${activeModel.modelName} 失败，开始 fallback`
       });
 
-      return this.generateText(input, prompt, scenario, taskId, fallbackModel);
+      return this.generateText(input, prompt, scenario, taskId, fallbackModel, attachmentsForModel(fallbackModel, attachments));
     }
   }
 
@@ -2342,7 +3259,8 @@ export class AiService {
     prompt: string,
     scenario: AiScenarioRecord,
     taskId: string,
-    activeModel: ActiveAiModel | null
+    activeModel: ActiveAiModel | null,
+    attachments: ProviderTextAttachment[] = []
   ): Promise<ProviderResult> {
     if (!activeModel) {
       const startedAt = Date.now();
@@ -2382,7 +3300,8 @@ export class AiService {
         input,
         temperature: aiTemperature(),
         maxTokens: aiMaxTokens(),
-        timeoutMs: aiGatewayTimeoutMs()
+        timeoutMs: aiGatewayTimeoutMs(),
+        attachments
       });
 
       await this.writeAiCallLog(taskId, activeModel, {
@@ -2421,20 +3340,38 @@ export class AiService {
       throw new AppException(50201, "AI 生成失败，请稍后重试", HttpStatus.BAD_GATEWAY);
     }
 
+    if (scenario.slug === "experience-ai-chat") {
+      const text = [
+        `我理解你的问题是：${input}`,
+        "",
+        "这是体验区的基础 AI 对话能力，适合快速验证模型选择、上下文对话和流式输出是否正常。",
+        "后续可以在这个栏目继续扩展联网搜索、文件问答、图片理解、语音对话等更多 AI 能力。"
+      ].join("\n");
+
+      return {
+        text,
+        usage: estimateMockTokenUsage(prompt ?? input, text),
+        usageCredits: estimateMockUsageCredits(prompt ?? input, scenario.costCredits),
+        billingModel: null
+      };
+    }
+
     const promptPreview = prompt && prompt !== input ? `\n\n已渲染 Prompt：${prompt.slice(0, 220)}` : "";
+    const text = [
+      `主题：${input}`,
+      "",
+      "这是一版面向简体中文用户的运营文案草稿，建议先突出用户痛点，再用清晰的产品收益承接行动。",
+      "",
+      "推荐表达：",
+      `- 用一句话说明「${input}」能解决什么问题。`,
+      "- 补充 2-3 个具体使用场景，避免空泛承诺。",
+      "- 结尾引导用户进入工具页或立即保存草稿。",
+      promptPreview
+    ].join("\n");
 
     return {
-      text: [
-        `主题：${input}`,
-        "",
-        "这是一版面向简体中文用户的运营文案草稿，建议先突出用户痛点，再用清晰的产品收益承接行动。",
-        "",
-        "推荐表达：",
-        `- 用一句话说明「${input}」能解决什么问题。`,
-        "- 补充 2-3 个具体使用场景，避免空泛承诺。",
-        "- 结尾引导用户进入工具页或立即保存草稿。",
-        promptPreview
-      ].join("\n"),
+      text,
+      usage: estimateMockTokenUsage(prompt ?? input, text),
       usageCredits: estimateMockUsageCredits(prompt ?? input, scenario.costCredits),
       billingModel: null
     };
@@ -2492,7 +3429,20 @@ export class AiService {
     });
   }
 
-  private async getModelForScenario(scenario: AiScenarioRecord): Promise<ActiveAiModel | null> {
+  private async getModelForScenario(
+    scenario: AiScenarioRecord,
+    selectedModelInstanceId?: string | null
+  ): Promise<ActiveAiModel | null> {
+    const normalizedSelectedModelId = selectedModelInstanceId?.trim();
+
+    if (normalizedSelectedModelId === "mock") {
+      return null;
+    }
+
+    if (normalizedSelectedModelId) {
+      return this.getModelByInstanceId(normalizedSelectedModelId, scenario);
+    }
+
     if (scenario.modelBinding?.defaultModelAlias) {
       return this.getModelByAlias(scenario.modelBinding.defaultModelAlias, scenario, true);
     }
@@ -2506,6 +3456,31 @@ export class AiService {
     }
 
     return this.getActiveModel();
+  }
+
+  private async getModelByInstanceId(
+    modelInstanceId: string,
+    scenario: AiScenarioRecord
+  ): Promise<ActiveAiModel> {
+    const model = await this.prisma.aiModelInstance.findUnique({
+      where: {
+        id: modelInstanceId
+      },
+      include: {
+        providerInstance: {
+          include: {
+            providerPreset: true,
+            credential: true
+          }
+        }
+      }
+    });
+
+    if (!model) {
+      throw new AppException(40401, "所选模型不存在", HttpStatus.NOT_FOUND);
+    }
+
+    return this.activeModelFromInstance(model, scenario, null);
   }
 
   private async getModelByAlias(
@@ -2545,7 +3520,34 @@ export class AiService {
       );
     }
 
-    const model = alias.modelInstance;
+    return this.activeModelFromInstance(alias.modelInstance, scenario, aliasKey);
+  }
+
+  private activeModelFromInstance(
+    model: {
+      id: string;
+      displayName: string;
+      providerModelName: string;
+      capabilityTags: Prisma.JsonValue;
+      inputPrice: { toString(): string };
+      outputPrice: { toString(): string };
+      isEnabled: boolean;
+      providerInstance: {
+        id: string;
+        name: string;
+        baseUrl: string;
+        status: string;
+        credential: {
+          apiKeyEncrypted: string;
+        } | null;
+        providerPreset: {
+          adapterType: ProviderAdapterType;
+        };
+      };
+    },
+    scenario: AiScenarioRecord,
+    aliasKey: string | null
+  ): ActiveAiModel {
     const providerInstance = model.providerInstance;
 
     if (!model.isEnabled || providerInstance.status !== "ENABLED") {
@@ -2564,7 +3566,7 @@ export class AiService {
     if (missing.length > 0) {
       throw new AppException(
         40001,
-        `当前默认模型不支持${missing.map(capabilityLabel).join("、")}，请在后台配置支持对应能力的模型。`,
+        `当前模型不支持${missing.map(capabilityLabel).join("、")}，请重新选择模型或在后台调整配置。`,
         HttpStatus.BAD_REQUEST
       );
     }
@@ -2862,6 +3864,60 @@ export class AiService {
     }
   }
 
+  private encryptedEnvApiKey(envName: string) {
+    const apiKey = process.env[envName]?.trim();
+
+    return apiKey ? this.encryptApiKey(apiKey) : null;
+  }
+
+  private resolveProviderTestApiKey(envName: string, encrypted: string | null) {
+    if (encrypted) {
+      try {
+        decryptSecret(encrypted);
+        return {
+          apiKeyEncrypted: encrypted,
+          message: null
+        };
+      } catch {
+        const fallback = this.safeEncryptedEnvApiKey(envName);
+
+        if (fallback.apiKeyEncrypted) {
+          return fallback;
+        }
+
+        return {
+          apiKeyEncrypted: null,
+          message: fallback.message ?? "已保存的 API Key 无法解密，请重新填写 API Key 或确认 SECRET_ENCRYPTION_KEY"
+        };
+      }
+    }
+
+    return this.safeEncryptedEnvApiKey(envName);
+  }
+
+  private safeEncryptedEnvApiKey(envName: string) {
+    const apiKey = process.env[envName]?.trim();
+
+    if (!apiKey) {
+      return {
+        apiKeyEncrypted: null,
+        message: `尚未配置 API Key，请在后台填写或配置环境变量 ${envName}`
+      };
+    }
+
+    try {
+      return {
+        apiKeyEncrypted: this.encryptApiKey(apiKey),
+        message: null
+      };
+    } catch (error) {
+      return {
+        apiKeyEncrypted: null,
+        message: error instanceof Error ? error.message : "环境变量 API Key 加密失败"
+      };
+    }
+  }
+
   private shouldSimulateFailure(input: string) {
     const normalized = input.toLowerCase();
 
@@ -2870,6 +3926,10 @@ export class AiService {
 
   private providerErrorMessage(error: unknown) {
     if (error instanceof AppException) {
+      return error.message;
+    }
+
+    if (error instanceof ProviderAdapterException) {
       return error.message;
     }
 
@@ -3055,7 +4115,9 @@ export class AiService {
     providerKey: string;
     displayName: string;
     adapterType: string;
+    modality: string;
     defaultBaseUrl: string;
+    defaultWebSocketUrl: string | null;
     apiKeyEnvName: string;
     docsUrl: string | null;
     region: string | null;
@@ -3091,6 +4153,8 @@ export class AiService {
       providerPresetId: string;
       name: string;
       baseUrl: string;
+      webSocketUrl: string | null;
+      region: string | null;
       status: string;
       lastTestedAt: Date | null;
       lastTestResult: Prisma.JsonValue | null;
@@ -3132,7 +4196,9 @@ export class AiService {
       providerKey: preset.providerKey,
       displayName: preset.displayName,
       adapterType: preset.adapterType,
+      modality: preset.modality,
       defaultBaseUrl: preset.defaultBaseUrl,
+      defaultWebSocketUrl: preset.defaultWebSocketUrl,
       apiKeyEnvName: preset.apiKeyEnvName,
       docsUrl: preset.docsUrl,
       region: preset.region,
@@ -3155,6 +4221,8 @@ export class AiService {
     providerPresetId: string;
     name: string;
     baseUrl: string;
+    webSocketUrl: string | null;
+    region: string | null;
     status: string;
     lastTestedAt: Date | null;
     lastTestResult: Prisma.JsonValue | null;
@@ -3195,6 +4263,8 @@ export class AiService {
       providerPresetId: instance.providerPresetId,
       name: instance.name,
       baseUrl: instance.baseUrl,
+      webSocketUrl: instance.webSocketUrl,
+      region: instance.region,
       status: instance.status,
       statusName: providerInstanceStatusName(instance.status),
       hasApiKey: Boolean(instance.credential),
@@ -3397,19 +4467,126 @@ function jsonStringArray(value: Prisma.JsonValue | null | undefined) {
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }
 
+function isAudioRecommendedAliasKey(value: string): value is (typeof audioRecommendedAliasKeys)[number] {
+  return audioRecommendedAliasKeys.includes(value as (typeof audioRecommendedAliasKeys)[number]);
+}
+
+function audioRecommendedAliasCapability(aliasKey: (typeof audioRecommendedAliasKeys)[number]) {
+  const capabilities: Record<(typeof audioRecommendedAliasKeys)[number], string | null> = {
+    "tts-default": "TTS",
+    "tts-fast": "TTS",
+    "voice-clone-default": "VOICE_CLONE",
+    "voice-design-default": "VOICE_DESIGN",
+    "audio-preview": null
+  };
+
+  return capabilities[aliasKey];
+}
+
+function audioRecommendedAliasName(aliasKey: (typeof audioRecommendedAliasKeys)[number]) {
+  const names: Record<(typeof audioRecommendedAliasKeys)[number], string> = {
+    "tts-default": "默认语音合成模型",
+    "tts-fast": "快速语音合成模型",
+    "voice-clone-default": "默认声音复刻模型",
+    "voice-design-default": "默认声音设计模型",
+    "audio-preview": "音频预览模型"
+  };
+
+  return names[aliasKey];
+}
+
+function selectProviderTestModelName(
+  adapterType: string,
+  modelInstances: Array<{
+    providerModelName: string;
+    capabilityTags: Prisma.JsonValue;
+  }>
+) {
+  if (adapterType !== "DASHSCOPE_AUDIO") {
+    return modelInstances[0]?.providerModelName;
+  }
+
+  const systemVoicePriority = ["cosyvoice-v3-flash", "cosyvoice-v3-plus", "cosyvoice-v2", "cosyvoice-v1", "sambert"];
+  for (const modelName of systemVoicePriority) {
+    const matched = modelInstances.find((model) => model.providerModelName === modelName);
+    if (matched) {
+      return matched.providerModelName;
+    }
+  }
+
+  return (
+    modelInstances.find((model) => jsonStringArray(model.capabilityTags).includes("TTS"))?.providerModelName ??
+    modelInstances[0]?.providerModelName
+  );
+}
+
+function providerTestSucceeded(result: Prisma.JsonValue | null) {
+  return Boolean(
+    result &&
+      typeof result === "object" &&
+      !Array.isArray(result) &&
+      (result as { success?: unknown }).success === true
+  );
+}
+
 function normalizeCapabilityTags(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim().toUpperCase()).filter(Boolean))).slice(0, 12);
 }
 
 function promptVariablesFromInputSchema(schema: ToolInputSchema) {
   return schema.fields
-    .filter((field) => field.name !== "input")
+    .filter((field) => field.name !== "input" && !isNonPromptToolField(field.type))
     .map((field) => ({
       name: field.name,
       label: field.label,
       required: field.required,
       placeholder: field.placeholder
     }));
+}
+
+function isToolInputFieldType(value: string): value is ToolInputFieldType {
+  return (
+    value === "text" ||
+    value === "textarea" ||
+    value === "select" ||
+    value === "number" ||
+    value === "switch" ||
+    value === "voice-select" ||
+    value === "audio-upload" ||
+    value === "slider" ||
+    value === "audio-preview" ||
+    value === "format-select"
+  );
+}
+
+function isNonPromptToolField(type: ToolInputFieldType) {
+  return type === "voice-select" || type === "audio-upload" || type === "audio-preview";
+}
+
+function normalizeStringArray(value: unknown, limit: number) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((item) => String(item ?? "").trim()).filter(Boolean).slice(0, limit);
+}
+
+function normalizedDefaultValue(value: unknown, type: ToolInputFieldType) {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (type === "number" || type === "slider") {
+    const normalized = Number(value);
+
+    return Number.isFinite(normalized) ? normalized : undefined;
+  }
+
+  if (type === "switch") {
+    return isTruthySwitchValue(String(value));
+  }
+
+  return String(value).trim().slice(0, 200);
 }
 
 function optionalNumber(value: unknown) {
@@ -3581,6 +4758,18 @@ function capabilityLabel(value: string) {
     VISION: "视觉理解",
     EMBEDDING: "向量检索",
     IMAGE_GENERATION: "图片生成",
+    IMAGE_EDIT: "图片编辑",
+    IMAGE_INPUT: "图片输入",
+    REFERENCE_IMAGE: "参考图",
+    BATCH_IMAGE: "批量出图",
+    VIDEO_GENERATION: "视频生成",
+    TEXT_TO_VIDEO: "文生视频",
+    IMAGE_TO_VIDEO: "图生视频",
+    REFERENCE_VIDEO: "参考视频",
+    VIDEO_EDIT: "视频编辑",
+    VIDEO_INPUT: "视频输入",
+    REFERENCE_FILE: "参考文件",
+    REFERENCE_AUDIO: "参考音频",
     AUDIO: "音频",
     TOOLS: "工具调用",
     STREAMING: "流式输出",
@@ -3591,6 +4780,523 @@ function capabilityLabel(value: string) {
   };
 
   return names[value.toUpperCase()] ?? value;
+}
+
+function imageReferenceLimit(modelName: string, capabilityTags: string[]) {
+  if (!capabilityTags.some((tag) => ["IMAGE_INPUT", "REFERENCE_IMAGE", "IMAGE_EDIT", "VISION", "MULTIMODAL"].includes(tag))) {
+    return 0;
+  }
+
+  if (modelName.startsWith("wan2.7-image")) {
+    return 9;
+  }
+
+  return modelName.startsWith("qwen-image-") ? 3 : 4;
+}
+
+function imageOutputLimit(capabilityTags: string[], modelName?: string) {
+  if (modelName === "z-image-turbo") {
+    return 1;
+  }
+
+  if (modelName?.startsWith("wan2.7-image")) {
+    return 4;
+  }
+
+  return capabilityTags.includes("BATCH_IMAGE") ? 6 : 1;
+}
+
+function imageGenerationModelPriority(modelName: string) {
+  if (modelName === "wan2.7-image-pro") {
+    return 0;
+  }
+
+  if (modelName === "wan2.7-image") {
+    return 1;
+  }
+
+  if (modelName === "qwen-image-2.0-pro") {
+    return 2;
+  }
+
+  if (modelName === "qwen-image-2.0") {
+    return 3;
+  }
+
+  if (modelName === "z-image-turbo") {
+    return 4;
+  }
+
+  return 10;
+}
+
+function isDashScopeImageGenerationModel(modelName: string) {
+  return modelName.startsWith("qwen-image-") || modelName.startsWith("wan2.7-image") || modelName === "z-image-turbo";
+}
+
+function normalizeImageReferences(value: unknown, maxReferenceImages: number) {
+  if (maxReferenceImages <= 0) {
+    return [];
+  }
+
+  return normalizeProviderAttachments(value)
+    .filter((attachment) => {
+      return attachment.type === "image" && attachment.mimeType.startsWith("image/") && Boolean(attachment.dataUrl?.startsWith("data:image/"));
+    })
+    .slice(0, maxReferenceImages);
+}
+
+function dashScopeImageEndpoint(baseUrl: string) {
+  try {
+    const url = new URL(baseUrl);
+
+    return `${url.origin}/api/v1/services/aigc/multimodal-generation/generation`;
+  } catch {
+    return "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
+  }
+}
+
+function extractDashScopeImageUrls(payload: DashScopeImageResponse) {
+  const urls: string[] = [];
+  collectImageUrls(payload.output, urls);
+
+  return Array.from(new Set(urls)).slice(0, 6);
+}
+
+function collectImageUrls(value: unknown, urls: string[]) {
+  if (!value) {
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectImageUrls(item, urls);
+    }
+    return;
+  }
+
+  if (typeof value !== "object") {
+    return;
+  }
+
+  const record = value as Record<string, unknown>;
+  for (const key of ["image", "image_url", "url", "orig_url"]) {
+    const url = record[key];
+    if (typeof url === "string" && /^https?:\/\//.test(url)) {
+      urls.push(url);
+    }
+  }
+
+  for (const child of Object.values(record)) {
+    collectImageUrls(child, urls);
+  }
+}
+
+function dashScopeImageErrorMessage(payload: DashScopeImageResponse | null, status: number) {
+  const message = stringValue(payload?.message);
+
+  if (message) {
+    return `图片生成失败：${message}`;
+  }
+
+  if (status === 401 || status === 403) {
+    return "图片生成失败：DASHSCOPE_API_KEY 无效或权限不足。";
+  }
+
+  if (status === 404) {
+    return "图片生成失败：模型名称或接口地址不正确。";
+  }
+
+  if (status === 429) {
+    return "图片生成失败：接口限流或额度不足，请稍后重试。";
+  }
+
+  return "图片生成接口返回异常，请稍后重试。";
+}
+
+function videoReferenceLimit(modelName: string, capabilityTags: string[]) {
+  if (!capabilityTags.includes("VIDEO_GENERATION")) {
+    return 0;
+  }
+
+  if (modelName.includes("-t2v")) {
+    return capabilityTags.includes("REFERENCE_AUDIO") ? 1 : 0;
+  }
+
+  if (modelName.includes("-i2v")) {
+    return modelName.startsWith("wan2.7-") ? 3 : 1;
+  }
+
+  if (modelName.includes("-r2v")) {
+    return modelName.startsWith("happyhorse-") ? 9 : 6;
+  }
+
+  if (modelName.endsWith("videoedit") || modelName.endsWith("video-edit")) {
+    return 6;
+  }
+
+  return capabilityTags.some((tag) => ["REFERENCE_FILE", "REFERENCE_IMAGE", "REFERENCE_VIDEO", "VIDEO_INPUT"].includes(tag)) ? 4 : 0;
+}
+
+function videoReferenceAccept(modelName: string, capabilityTags: string[]) {
+  const accepts = new Set<string>();
+
+  if (capabilityTags.includes("IMAGE_INPUT") || capabilityTags.includes("REFERENCE_IMAGE")) {
+    accepts.add("image/*");
+  }
+
+  if (capabilityTags.includes("VIDEO_INPUT") || capabilityTags.includes("REFERENCE_VIDEO") || modelName.endsWith("videoedit") || modelName.endsWith("video-edit")) {
+    accepts.add("video/*");
+  }
+
+  if (capabilityTags.includes("REFERENCE_AUDIO")) {
+    accepts.add("audio/*");
+  }
+
+  return Array.from(accepts);
+}
+
+function videoDefaultDuration(modelName: string) {
+  if (modelName.startsWith("happyhorse-")) {
+    return 5;
+  }
+
+  return 5;
+}
+
+function videoGenerationModelPriority(modelName: string) {
+  if (modelName === "wan2.7-t2v") {
+    return 0;
+  }
+
+  if (modelName === "wan2.7-t2v-2026-04-25") {
+    return 1;
+  }
+
+  if (modelName === "wan2.7-i2v") {
+    return 2;
+  }
+
+  if (modelName === "wan2.7-i2v-2026-04-25") {
+    return 3;
+  }
+
+  if (modelName === "wan2.7-r2v") {
+    return 4;
+  }
+
+  if (modelName === "wan2.7-videoedit") {
+    return 5;
+  }
+
+  if (modelName === "happyhorse-1.0-t2v") {
+    return 6;
+  }
+
+  if (modelName === "happyhorse-1.0-i2v") {
+    return 7;
+  }
+
+  if (modelName === "happyhorse-1.0-r2v") {
+    return 8;
+  }
+
+  if (modelName === "happyhorse-1.0-video-edit") {
+    return 9;
+  }
+
+  return 20;
+}
+
+function isDashScopeVideoGenerationModel(modelName: string) {
+  return modelName.startsWith("wan2.7-") || modelName.startsWith("happyhorse-1.0-");
+}
+
+function normalizeVideoReferences(value: unknown, maxReferenceFiles: number, modelName: string, capabilityTags: string[]) {
+  if (maxReferenceFiles <= 0) {
+    return [];
+  }
+
+  const accepts = videoReferenceAccept(modelName, capabilityTags);
+  const normalized = normalizeProviderAttachments(value)
+    .filter((attachment) => {
+      if (attachment.type === "image") {
+        return accepts.includes("image/*") && attachment.mimeType.startsWith("image/") && Boolean(attachment.dataUrl?.startsWith("data:image/"));
+      }
+
+      if (attachment.type === "video") {
+        return accepts.includes("video/*") && attachment.mimeType.startsWith("video/") && Boolean(attachment.dataUrl?.startsWith("data:video/"));
+      }
+
+      if (attachment.type === "audio") {
+        return accepts.includes("audio/*") && attachment.mimeType.startsWith("audio/") && Boolean(attachment.dataUrl?.startsWith("data:audio/"));
+      }
+
+      return false;
+    })
+    .slice(0, maxReferenceFiles);
+
+  assertVideoReferences(modelName, normalized);
+
+  return normalized;
+}
+
+function assertVideoReferences(modelName: string, references: ProviderTextAttachment[]) {
+  if (modelName.includes("-t2v")) {
+    return;
+  }
+
+  if (modelName.includes("-i2v") && !references.some((item) => item.type === "image")) {
+    throw new AppException(40001, "当前图生视频模型需要至少上传 1 张参考图片。", HttpStatus.BAD_REQUEST);
+  }
+
+  if (modelName.includes("-r2v") && !references.some((item) => item.type === "image" || item.type === "video")) {
+    throw new AppException(40001, "当前参考生视频模型需要至少上传 1 个参考图片或视频。", HttpStatus.BAD_REQUEST);
+  }
+
+  if ((modelName.endsWith("videoedit") || modelName.endsWith("video-edit")) && !references.some((item) => item.type === "video")) {
+    throw new AppException(40001, "当前视频编辑模型需要至少上传 1 个参考视频。", HttpStatus.BAD_REQUEST);
+  }
+}
+
+function normalizedVideoRatio(value: string | undefined) {
+  const normalized = value?.trim();
+
+  return normalized && ["16:9", "9:16", "1:1", "4:3", "3:4"].includes(normalized) ? normalized : "16:9";
+}
+
+function normalizedVideoResolution(value: string | undefined) {
+  const normalized = value?.trim();
+
+  return normalized && ["高清 720P", "高清 1080P"].includes(normalized) ? normalized : "高清 720P";
+}
+
+function videoSizeFromRatio(ratio: string, resolution: string) {
+  const longEdge = resolution.includes("1080") ? 1080 : 720;
+  const sizes: Record<string, [number, number]> = {
+    "16:9": [longEdge === 1080 ? 1920 : 1280, longEdge],
+    "9:16": [longEdge, longEdge === 1080 ? 1920 : 1280],
+    "1:1": [longEdge, longEdge],
+    "4:3": [longEdge === 1080 ? 1440 : 960, longEdge],
+    "3:4": [longEdge, longEdge === 1080 ? 1440 : 960]
+  };
+  const [width, height] = sizes[ratio] ?? sizes["16:9"];
+
+  return `${width}*${height}`;
+}
+
+function dashScopeVideoInput(modelName: string, prompt: string, references: ProviderTextAttachment[]) {
+  const images = references.filter((item) => item.type === "image" && item.dataUrl);
+  const videos = references.filter((item) => item.type === "video" && item.dataUrl);
+  const audios = references.filter((item) => item.type === "audio" && item.dataUrl);
+  const media: Array<{ type: string; video_url?: string; image_url?: string; audio_url?: string }> = [];
+
+  if (modelName.includes("-i2v")) {
+    if (images[0]?.dataUrl) {
+      media.push({ type: "first_frame", image_url: images[0].dataUrl });
+    }
+    if (images[1]?.dataUrl) {
+      media.push({ type: "last_frame", image_url: images[1].dataUrl });
+    }
+    if (videos[0]?.dataUrl) {
+      media.push({ type: "reference_video", video_url: videos[0].dataUrl });
+    }
+    if (audios[0]?.dataUrl) {
+      media.push({ type: "driving_audio", audio_url: audios[0].dataUrl });
+    }
+  } else if (modelName.includes("-r2v")) {
+    for (const image of images.slice(0, 9)) {
+      media.push({ type: "reference_image", image_url: image.dataUrl });
+    }
+    for (const video of videos.slice(0, 3)) {
+      media.push({ type: "reference_video", video_url: video.dataUrl });
+    }
+    if (audios[0]?.dataUrl) {
+      media.push({ type: "reference_audio", audio_url: audios[0].dataUrl });
+    }
+  } else if (modelName.endsWith("videoedit") || modelName.endsWith("video-edit")) {
+    if (videos[0]?.dataUrl) {
+      media.push({ type: "video", video_url: videos[0].dataUrl });
+    }
+    for (const image of images.slice(0, 5)) {
+      media.push({ type: "reference_image", image_url: image.dataUrl });
+    }
+  } else if (audios[0]?.dataUrl) {
+    media.push({ type: "audio", audio_url: audios[0].dataUrl });
+  }
+
+  return media.length > 0 ? { prompt, media } : { prompt };
+}
+
+function dashScopeVideoEndpoint(baseUrl: string) {
+  try {
+    const url = new URL(baseUrl);
+
+    return `${url.origin}/api/v1/services/aigc/video-generation/video-synthesis`;
+  } catch {
+    return "https://dashscope.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis";
+  }
+}
+
+function dashScopeTaskEndpoint(baseUrl: string, taskId: string) {
+  try {
+    const url = new URL(baseUrl);
+
+    return `${url.origin}/api/v1/tasks/${encodeURIComponent(taskId)}`;
+  } catch {
+    return `https://dashscope.aliyuncs.com/api/v1/tasks/${encodeURIComponent(taskId)}`;
+  }
+}
+
+function dashScopeTaskId(payload: DashScopeVideoResponse) {
+  const taskId = findStringByKeys(payload.output, ["task_id", "taskId"]);
+
+  return taskId ?? findStringByKeys(payload, ["task_id", "taskId"]);
+}
+
+function dashScopeVideoStatus(payload: DashScopeVideoResponse) {
+  const status = findStringByKeys(payload.output, ["task_status", "taskStatus", "status"]) ?? findStringByKeys(payload, ["task_status", "taskStatus", "status"]);
+  const normalized = status?.toUpperCase();
+
+  if (normalized === "SUCCEEDED" || normalized === "SUCCESS") {
+    return "SUCCEEDED";
+  }
+
+  if (normalized === "FAILED" || normalized === "FAIL") {
+    return "FAILED";
+  }
+
+  if (normalized === "CANCELED" || normalized === "CANCELLED") {
+    return "CANCELLED";
+  }
+
+  return "RUNNING";
+}
+
+function videoTaskStatusName(status: string) {
+  const names: Record<string, string> = {
+    RUNNING: "生成中",
+    SUCCEEDED: "生成完成",
+    FAILED: "生成失败",
+    CANCELLED: "已取消"
+  };
+
+  return names[status] ?? status;
+}
+
+function dashScopeVideoTaskError(payload: DashScopeVideoResponse) {
+  return (
+    findStringByKeys(payload.output, ["message", "error_message", "errorMessage"]) ??
+    stringValue(payload.message) ??
+    null
+  );
+}
+
+function extractDashScopeVideoUrls(payload: DashScopeVideoResponse) {
+  const urls: string[] = [];
+  collectVideoUrls(payload.output, urls);
+
+  return Array.from(new Set(urls));
+}
+
+function collectVideoUrls(value: unknown, urls: string[]) {
+  if (!value) {
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectVideoUrls(item, urls);
+    }
+    return;
+  }
+
+  if (typeof value !== "object") {
+    return;
+  }
+
+  const record = value as Record<string, unknown>;
+  for (const key of ["video_url", "video", "url", "output_url"]) {
+    const url = record[key];
+    if (typeof url === "string" && /^https?:\/\//.test(url)) {
+      urls.push(url);
+    }
+  }
+
+  for (const child of Object.values(record)) {
+    collectVideoUrls(child, urls);
+  }
+}
+
+function findStringByKeys(value: unknown, keys: string[]): string | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findStringByKeys(item, keys);
+      if (found) {
+        return found;
+      }
+    }
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  for (const key of keys) {
+    const found = stringValue(record[key]);
+    if (found) {
+      return found;
+    }
+  }
+
+  for (const child of Object.values(record)) {
+    const found = findStringByKeys(child, keys);
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
+}
+
+function dashScopeVideoErrorMessage(payload: DashScopeVideoResponse | null, status: number) {
+  const message = stringValue(payload?.message);
+
+  if (message) {
+    return `视频生成失败：${message}`;
+  }
+
+  if (status === 401 || status === 403) {
+    return "视频生成失败：DASHSCOPE_API_KEY 无效或权限不足。";
+  }
+
+  if (status === 404) {
+    return "视频生成失败：模型名称或接口地址不正确。";
+  }
+
+  if (status === 429) {
+    return "视频生成失败：接口限流或额度不足，请稍后重试。";
+  }
+
+  return "视频生成接口返回异常，请稍后重试。";
+}
+
+function aiVideoTimeoutMs() {
+  const value = Number(process.env.AI_VIDEO_TIMEOUT_MS ?? "30000");
+
+  return Number.isFinite(value) && value > 0 ? value : 30000;
+}
+
+function aiVideoTaskTimeoutMs() {
+  const value = Number(process.env.AI_VIDEO_TASK_TIMEOUT_MS ?? "15000");
+
+  return Number.isFinite(value) && value > 0 ? value : 15000;
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function providerInstanceStatusName(status: string) {
@@ -3623,8 +5329,89 @@ function normalizedUsage(usage?: TokenUsage | null) {
   };
 }
 
+function normalizeProviderAttachments(value: unknown): ProviderTextAttachment[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+
+      const record = item as Record<string, unknown>;
+      const name = normalizedShortString(record.name, 200);
+      const type = normalizedShortString(record.type, 30);
+      const mimeType = normalizedShortString(record.mimeType, 120);
+      const size = integerValue(record.size);
+      const dataUrl = normalizedShortString(record.dataUrl, 15 * 1024 * 1024);
+
+      if (!name || !type || !mimeType) {
+        return null;
+      }
+
+      return {
+        name,
+        type,
+        mimeType,
+        size,
+        ...(dataUrl ? { dataUrl } : {})
+      };
+    })
+    .filter((item): item is ProviderTextAttachment => Boolean(item))
+    .slice(0, 6);
+}
+
+function attachmentsForModel(model: ActiveAiModel | null, attachments: ProviderTextAttachment[]) {
+  if (!model || attachments.length === 0 || !modelSupportsVision(model)) {
+    return [];
+  }
+
+  return attachments;
+}
+
+function modelSupportsVision(model: ActiveAiModel) {
+  return modelHasAnyCapability(model, ["VISION", "MULTIMODAL", "IMAGE", "IMAGE_INPUT"]);
+}
+
+function modelHasCapability(model: ActiveAiModel, capability: string) {
+  return modelHasAnyCapability(model, [capability]);
+}
+
+function modelHasAnyCapability(model: ActiveAiModel, capabilities: string[]) {
+  const tags = new Set((model.capabilityTags ?? []).map((tag) => tag.toUpperCase()));
+
+  return capabilities.some((tag) => tags.has(tag.toUpperCase()));
+}
+
+function estimateMockTokenUsage(input: string, output: string): TokenUsage {
+  const inputTokens = estimateTokenCount(input);
+  const outputTokens = estimateTokenCount(output);
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens
+  };
+}
+
+function estimateTokenCount(value: string) {
+  const normalized = value.trim();
+
+  if (!normalized) {
+    return 0;
+  }
+
+  return Math.max(1, Math.ceil(normalized.length / 2));
+}
+
 function integerValue(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
+}
+
+function normalizedShortString(value: unknown, maxLength: number) {
+  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
 }
 
 function contentPreview(value: string | null | undefined, maxLength: number) {
@@ -3647,11 +5434,20 @@ function contentHash(value: string | null | undefined) {
 
 function extractTemplateVariables(template: string) {
   const names = new Set<string>();
-  const pattern = /{{\s*([a-zA-Z][a-zA-Z0-9_]{0,39})\s*}}|\{([a-zA-Z][a-zA-Z0-9_]{0,39})\}/g;
+  const doubleBracePattern = /{{\s*([a-zA-Z][a-zA-Z0-9_]{0,39})\s*}}/g;
+  const singleBracePattern = /\{([a-zA-Z][a-zA-Z0-9_]{0,39})\}/g;
   let match: RegExpExecArray | null;
 
-  while ((match = pattern.exec(template))) {
-    names.add(match[1] ?? match[2]);
+  while ((match = doubleBracePattern.exec(template))) {
+    names.add(match[1]);
+  }
+
+  while ((match = singleBracePattern.exec(template))) {
+    const name = match[1];
+
+    if (isSingleBraceTemplateVariable(template, match.index, match[0].length, name)) {
+      names.add(name);
+    }
   }
 
   return Array.from(names);
@@ -3660,7 +5456,47 @@ function extractTemplateVariables(template: string) {
 function renderPromptTemplate(template: string, variables: Record<string, string>) {
   return template
     .replace(/{{\s*([a-zA-Z][a-zA-Z0-9_]{0,39})\s*}}/g, (_match, name: string) => variables[name] ?? "")
-    .replace(/\{([a-zA-Z][a-zA-Z0-9_]{0,39})\}/g, (_match, name: string) => variables[name] ?? "");
+    .replace(/\{([a-zA-Z][a-zA-Z0-9_]{0,39})\}/g, (match: string, name: string, offset: number, source: string) => {
+      if (!isSingleBraceTemplateVariable(source, offset, match.length, name)) {
+        return match;
+      }
+
+      return Object.prototype.hasOwnProperty.call(variables, name) ? variables[name] ?? "" : match;
+    });
+}
+
+function isSingleBraceTemplateVariable(template: string, openBraceIndex: number, matchLength: number, name: string) {
+  const closeBraceIndex = openBraceIndex + matchLength - 1;
+  const beforeChar = template[openBraceIndex - 1] ?? "";
+  const afterChar = template[closeBraceIndex + 1] ?? "";
+
+  if (beforeChar === "{" || afterChar === "}") {
+    return false;
+  }
+
+  const previousNonWhitespace = previousNonWhitespaceChar(template, openBraceIndex);
+
+  if (previousNonWhitespace && /[A-Za-z\\}]/.test(previousNonWhitespace)) {
+    return false;
+  }
+
+  if (name.length === 1 && previousNonWhitespace !== ":" && previousNonWhitespace !== "：" && previousNonWhitespace !== "") {
+    return false;
+  }
+
+  return true;
+}
+
+function previousNonWhitespaceChar(value: string, beforeIndex: number) {
+  for (let index = beforeIndex - 1; index >= 0; index -= 1) {
+    const char = value[index];
+
+    if (!/\s/.test(char)) {
+      return char;
+    }
+  }
+
+  return "";
 }
 
 function keywordTokens(value: string) {
@@ -3685,9 +5521,15 @@ function scoreText(value: string, words: string[]) {
 }
 
 function aiGatewayTimeoutMs() {
-  const value = Number(process.env.AI_GATEWAY_TIMEOUT_MS ?? 30_000);
+  const value = Number(process.env.AI_GATEWAY_TIMEOUT_MS ?? 120_000);
 
-  return Number.isFinite(value) && value > 0 ? value : 30_000;
+  return Number.isFinite(value) && value > 0 ? value : 120_000;
+}
+
+function aiImageTimeoutMs() {
+  const value = Number(process.env.AI_IMAGE_TIMEOUT_MS ?? 180_000);
+
+  return Number.isFinite(value) && value > 0 ? value : 180_000;
 }
 
 function aiTemperature() {
@@ -3697,7 +5539,8 @@ function aiTemperature() {
 }
 
 function aiMaxTokens() {
-  const value = Number(process.env.AI_PROVIDER_MAX_TOKENS ?? 800);
+  const fallbackMaxTokens = 2048;
+  const value = Number(process.env.AI_PROVIDER_MAX_TOKENS ?? fallbackMaxTokens);
 
-  return Number.isFinite(value) && value > 0 ? Math.round(value) : 800;
+  return Number.isFinite(value) && value > 0 ? Math.round(value) : fallbackMaxTokens;
 }
