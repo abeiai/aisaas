@@ -16,7 +16,7 @@ export const metadata: Metadata = {
 export default function UseCasesPage() {
   return (
     <PublicShell>
-      <section className="mx-auto flex max-w-6xl flex-col gap-10 px-5 py-16">
+      <section className="flex w-full flex-col gap-10 px-5 py-16">
         <div className="grid gap-8 lg:grid-cols-[0.9fr_1.1fr] lg:items-end">
           <div className="flex flex-col gap-5">
             <Badge>使用场景</Badge>
@@ -77,8 +77,8 @@ export default function UseCasesPage() {
       </section>
 
       <section className="border-y border-border bg-card">
-        <div className="mx-auto flex max-w-6xl flex-col gap-8 px-5 py-16">
-          <div className="flex max-w-2xl flex-col gap-3">
+        <div className="flex w-full flex-col gap-8 px-5 py-16">
+          <div className="flex w-full flex-col gap-3">
             <p className="text-sm font-semibold text-muted-foreground">工具示例</p>
             <h2 className="font-display text-4xl font-light leading-tight tracking-normal">
               用具体工具承接场景

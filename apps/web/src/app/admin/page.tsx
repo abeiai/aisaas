@@ -89,14 +89,14 @@ export default async function AdminHomePage() {
       href: "/admin/payments"
     },
     {
-      label: "AI 任务",
+      label: "任务清单",
       value: aiTasks.length,
       description: "生成任务记录",
       icon: BrainCircuit,
       href: "/admin/ai-tasks"
     },
     {
-      label: "AI Provider",
+      label: "模型配置",
       value: aiProviders.length,
       description: "预置模型接入",
       icon: Bot,

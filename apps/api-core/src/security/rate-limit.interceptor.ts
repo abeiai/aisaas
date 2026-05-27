@@ -36,6 +36,18 @@ const rules: RateLimitRule[] = [
   },
   {
     method: "POST",
+    path: /^\/api\/auth\/phone-code$/,
+    maxEnv: "RATE_LIMIT_AUTH_PHONE_CODE_MAX",
+    fallbackMax: 5
+  },
+  {
+    method: "POST",
+    path: /^\/api\/auth\/phone-login$/,
+    maxEnv: "RATE_LIMIT_AUTH_PHONE_LOGIN_MAX",
+    fallbackMax: 10
+  },
+  {
+    method: "POST",
     path: /^\/api\/admin-auth\/login$/,
     maxEnv: "RATE_LIMIT_ADMIN_AUTH_LOGIN_MAX",
     fallbackMax: 10

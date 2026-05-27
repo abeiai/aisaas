@@ -23,6 +23,11 @@ export class AdminAuthController {
     return successResponse(await this.adminAuthService.logout(request as never, response as never));
   }
 
+  @Post("refresh")
+  async refresh(@Req() request: unknown, @Res({ passthrough: true }) response: unknown) {
+    return successResponse(await this.adminAuthService.refresh(request as never, response as never));
+  }
+
   @Get("me")
   async me(@Req() request: unknown) {
     return successResponse(await this.adminAuthService.me(request as never));

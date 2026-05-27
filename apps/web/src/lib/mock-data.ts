@@ -7,6 +7,8 @@ import {
   Image,
   LayoutTemplate,
   LayoutDashboard,
+  Menu,
+  Package,
   PanelsTopLeft,
   Mic2,
   Newspaper,
@@ -155,15 +157,27 @@ export const adminNavGroups: AdminNavGroup[] = [
         icon: Newspaper
       },
       {
+        href: "/admin/pages",
+        label: "单页管理",
+        icon: FileText
+      },
+      {
         href: "/admin/tags",
-        label: "文章标签",
+        label: "内容标签",
         icon: Tags
       },
       {
         href: "/admin/media",
-        label: "媒体资源",
+        label: "素材资源",
         icon: Image
-      },
+      }
+    ]
+  },
+  {
+    key: "appearance",
+    label: "主题外观",
+    icon: LayoutTemplate,
+    items: [
       {
         href: "/admin/modules",
         label: "模块管理",
@@ -175,9 +189,9 @@ export const adminNavGroups: AdminNavGroup[] = [
         icon: PanelsTopLeft
       },
       {
-        href: "/admin/pages",
-        label: "单页管理",
-        icon: FileText
+        href: "/admin/menus",
+        label: "菜单管理",
+        icon: Menu
       }
     ]
   },
@@ -209,6 +223,11 @@ export const adminNavGroups: AdminNavGroup[] = [
         icon: Users
       },
       {
+        href: "/admin/products",
+        label: "产品管理",
+        icon: Package
+      },
+      {
         href: "/admin/payments",
         label: "支付订单",
         icon: ReceiptText
@@ -222,7 +241,7 @@ export const adminNavGroups: AdminNavGroup[] = [
     items: [
       {
         href: "/admin/ai-tasks",
-        label: "AI 任务",
+        label: "任务清单",
         icon: BrainCircuit
       },
       {
@@ -236,34 +255,9 @@ export const adminNavGroups: AdminNavGroup[] = [
         icon: Settings
       },
       {
-        href: "/admin/audio/models",
-        label: "语音模型",
-        icon: Bot
-      },
-      {
         href: "/admin/audio/voices",
         label: "音色库",
         icon: Mic2
-      },
-      {
-        href: "/admin/audio/tasks",
-        label: "语音任务",
-        icon: Activity
-      },
-      {
-        href: "/admin/audio/pricing",
-        label: "语音计费",
-        icon: ReceiptText
-      },
-      {
-        href: "/admin/audio/reviews",
-        label: "语音审核",
-        icon: ShieldCheck
-      },
-      {
-        href: "/admin/audio/usage",
-        label: "语音用量",
-        icon: Activity
       },
       {
         href: "/admin/audio/safety",
@@ -277,19 +271,9 @@ export const adminNavGroups: AdminNavGroup[] = [
       },
       {
         href: "/admin/ai/providers",
-        label: "AI Provider",
+        label: "模型配置",
         icon: Bot
       },
-      {
-        href: "/admin/ai/model-aliases",
-        label: "模型别名",
-        icon: Bot
-      },
-      {
-        href: "/admin/ai-workflows",
-        label: "AI 工作流",
-        icon: BrainCircuit
-      }
     ]
   },
   {

@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { ArrowLeft, Database, FileText, Upload } from "lucide-react";
+import { Database, FileText, Upload } from "lucide-react";
 
-import { PublicShell } from "@/components/shell/public-shell";
+import { DashboardShell } from "@/components/shell/dashboard-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,26 +36,8 @@ export default async function KnowledgePage({
   const selectedBase = selectedBaseId ? await getKnowledgeBase(selectedBaseId).catch(() => null) : null;
 
   return (
-    <PublicShell>
-      <section className="mx-auto flex max-w-6xl flex-col gap-8 px-5 py-12">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div className="flex max-w-3xl flex-col gap-4">
-            <Badge>知识库</Badge>
-            <h1 className="font-display text-5xl font-light leading-tight tracking-normal">
-              文件解析与 RAG 基础检索
-            </h1>
-            <p className="text-base leading-7 text-muted-foreground">
-              支持上传 txt、md、pdf、docx 并提取文本切块，AI 工具可选择知识库片段拼入 Prompt。
-            </p>
-          </div>
-          <Button asChild variant="outline">
-            <Link href="/dashboard">
-              <ArrowLeft data-icon="inline-start" />
-              返回用户中心
-            </Link>
-          </Button>
-        </div>
-
+    <DashboardShell active="knowledge">
+      <section className="flex w-full flex-col gap-8 px-5 py-8">
         <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
           <Card>
             <CardHeader>
@@ -171,6 +153,6 @@ export default async function KnowledgePage({
           </Card>
         </div>
       </section>
-    </PublicShell>
+    </DashboardShell>
   );
 }

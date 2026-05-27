@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Edit3, Filter, Mic2, Power, PowerOff, RotateCcw, Trash2 } from "lucide-react";
+import { CheckCircle2, Edit3, Filter, Mic2, Plus, Power, PowerOff, RotateCcw, Trash2 } from "lucide-react";
 
 import { AdminShell } from "@/components/shell/admin-shell";
 import { Badge } from "@/components/ui/badge";
@@ -8,14 +8,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
+  createAdminPlatformVoiceAction,
   deleteAdminSystemVoiceAction,
   deleteAdminUserVoiceQuickAction,
+  getAdminAudioModels,
   getAdminSystemVoiceAssets,
   getAdminVoiceAssets,
   toggleAdminSystemVoiceEnabledAction,
   toggleAdminUserVoiceEnabledAction,
+  type AdminAudioModel,
   type AdminSystemVoiceAsset,
   type AdminVoiceAsset
 } from "@/lib/audio-admin-api";
@@ -28,6 +32,7 @@ interface PageProps {
     status?: string;
     language?: string;
     model?: string;
+    create?: "platform-clone" | "platform-design";
   }>;
 }
 
@@ -45,103 +50,110 @@ function statusVariant(status: string) {
 
 export default async function AdminAudioVoicesPage({ searchParams }: PageProps) {
   const query = await searchParams;
-  const [systemVoices, userVoices] = await Promise.all([
+  const [systemVoices, voiceAssets, audioModels] = await Promise.all([
     getAdminSystemVoiceAssets({
       keyword: query.keyword,
       status: query.status,
       language: query.language,
       model: query.model
     }),
-    getAdminVoiceAssets()
+    getAdminVoiceAssets(),
+    getAdminAudioModels()
   ]);
-  const systemReadyCount = systemVoices.filter((voice) => voice.status === "READY").length;
-  const systemDisabledCount = systemVoices.filter((voice) => voice.status === "DISABLED").length;
-  const userReadyCount = userVoices.filter((voice) => voice.status === "READY").length;
-  const userPendingCount = userVoices.filter((voice) => voice.status === "PENDING_REVIEW").length;
+  const activeVoiceAssets = voiceAssets.filter((voice) => voice.status !== "DELETED");
+  const platformClonedVoices = activeVoiceAssets.filter((voice) => voice.isPlatform && voice.type === "CLONED");
+  const platformDesignedVoices = activeVoiceAssets.filter((voice) => voice.isPlatform && voice.type === "DESIGNED");
+  const userClonedVoices = activeVoiceAssets.filter((voice) => !voice.isPlatform && voice.type === "CLONED");
+  const userDesignedVoices = activeVoiceAssets.filter((voice) => !voice.isPlatform && voice.type === "DESIGNED");
+  const pendingUserVoiceCount = [...userClonedVoices, ...userDesignedVoices].filter(
+    (voice) => voice.status === "PENDING_REVIEW"
+  ).length;
+  const readyPublicVoiceCount =
+    systemVoices.filter((voice) => voice.status === "READY").length +
+    platformClonedVoices.filter((voice) => voice.status === "READY").length +
+    platformDesignedVoices.filter((voice) => voice.status === "READY").length;
 
   return (
     <AdminShell
       active="/admin/audio/voices"
       title="音色库"
-      description="管理官方系统音色和用户复刻、设计生成的音色。系统音色禁用后前台不再展示，也不能用于合成。"
+      description="统一管理系统音色、平台音色和用户音色。平台音色对所有用户可选，用户音色只对本人可选。"
     >
       <div className="flex flex-col gap-6">
         <div className="grid gap-4 md:grid-cols-4">
-          <Metric label="系统可用音色" value={systemReadyCount.toLocaleString("zh-CN")} />
-          <Metric label="系统禁用音色" value={systemDisabledCount.toLocaleString("zh-CN")} />
-          <Metric label="用户可用音色" value={userReadyCount.toLocaleString("zh-CN")} />
-          <Metric label="用户待审核" value={userPendingCount.toLocaleString("zh-CN")} />
+          <Metric label="公共可用音色" value={readyPublicVoiceCount.toLocaleString("zh-CN")} />
+          <Metric label="平台复刻音色" value={platformClonedVoices.length.toLocaleString("zh-CN")} />
+          <Metric label="平台设计音色" value={platformDesignedVoices.length.toLocaleString("zh-CN")} />
+          <Metric label="用户待审核" value={pendingUserVoiceCount.toLocaleString("zh-CN")} />
         </div>
 
         <Card>
-          <CardHeader>
-            <CardTitle>官方系统音色</CardTitle>
-            <CardDescription>
-              来自阿里云 CosyVoice v3 官方音色列表。可调整后台展示信息、年龄分类和启停状态。
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-5">
-            <SystemVoiceFilters query={query} />
-            <div className="overflow-hidden rounded-md border border-border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>音色</TableHead>
-                    <TableHead>语言与能力</TableHead>
-                    <TableHead>试听</TableHead>
-                    <TableHead>状态</TableHead>
-                    <TableHead className="text-right">操作</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {systemVoices.length > 0 ? (
-                    systemVoices.map((voice) => <SystemVoiceRow key={voice.providerVoiceId} voice={voice} />)
-                  ) : (
-                    <TableRow>
-                      <TableCell className="text-muted-foreground" colSpan={5}>
-                        没有匹配的系统音色。
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
+          <CardHeader className="gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-col gap-2">
+              <CardTitle>平台音色</CardTitle>
+              <CardDescription>平台复刻和平台设计音色可像系统音色一样被前台用户选择。</CardDescription>
             </div>
-          </CardContent>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild variant={query.create === "platform-clone" ? "default" : "outline"}>
+                <Link href="/admin/audio/voices?create=platform-clone">
+                  <Plus data-icon="inline-start" />
+                  平台音色复刻
+                </Link>
+              </Button>
+              <Button asChild variant={query.create === "platform-design" ? "default" : "outline"}>
+                <Link href="/admin/audio/voices?create=platform-design">
+                  <Plus data-icon="inline-start" />
+                  平台音色设计
+                </Link>
+              </Button>
+            </div>
+          </CardHeader>
+          {query.create ? (
+            <CardContent>
+              <PlatformVoiceForm createType={query.create} models={audioModels} />
+            </CardContent>
+          ) : null}
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>用户音色</CardTitle>
-            <CardDescription>管理用户复刻和设计生成的音色，查看授权状态并处理违规音色。</CardDescription>
+            <CardTitle>系统音色</CardTitle>
+            <CardDescription>直接引入模型提供方的官方音色，只支持启用、禁用和展示信息编辑。</CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="overflow-hidden rounded-md border border-border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>音色名称</TableHead>
-                    <TableHead>用户</TableHead>
-                    <TableHead>Provider voice_id</TableHead>
-                    <TableHead>状态</TableHead>
-                    <TableHead>创建时间</TableHead>
-                    <TableHead>操作</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {userVoices.length > 0 ? (
-                    userVoices.map((voice) => <VoiceRow key={voice.id} voice={voice} />)
-                  ) : (
-                    <TableRow>
-                      <TableCell className="text-muted-foreground" colSpan={6}>
-                        暂无用户音色。
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+          <CardContent className="flex flex-col gap-5">
+            <SystemVoiceFilters query={query} />
+            <SystemVoiceTable voices={systemVoices} />
           </CardContent>
         </Card>
+
+        <VoiceAssetSection
+          description="管理员添加的复刻音色，对所有用户开放选择。"
+          emptyText="暂无平台复刻音色。"
+          scope="platform"
+          title="平台复刻音色"
+          voices={platformClonedVoices}
+        />
+        <VoiceAssetSection
+          description="管理员添加的设计音色，对所有用户开放选择。"
+          emptyText="暂无平台设计音色。"
+          scope="platform"
+          title="平台设计音色"
+          voices={platformDesignedVoices}
+        />
+        <VoiceAssetSection
+          description="用户通过前台声音复刻创建，只能被创建者本人选用。"
+          emptyText="暂无用户复刻音色。"
+          scope="user"
+          title="用户复刻音色"
+          voices={userClonedVoices}
+        />
+        <VoiceAssetSection
+          description="用户通过前台声音设计创建，只能被创建者本人选用。"
+          emptyText="暂无用户设计音色。"
+          scope="user"
+          title="用户设计音色"
+          voices={userDesignedVoices}
+        />
       </div>
     </AdminShell>
   );
@@ -161,17 +173,63 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function PlatformVoiceForm({ createType, models }: { createType: "platform-clone" | "platform-design"; models: AdminAudioModel[] }) {
+  const type = createType === "platform-clone" ? "CLONED" : "DESIGNED";
+  const ttsModels = models.filter((model) => model.supportsTts);
+
+  return (
+    <form action={createAdminPlatformVoiceAction} className="grid gap-4 rounded-md border border-border bg-secondary/30 p-4 lg:grid-cols-3">
+      <input name="type" type="hidden" value={type} />
+      <Field>
+        <FieldLabel htmlFor="platform-voice-name">显示名称</FieldLabel>
+        <Input id="platform-voice-name" name="name" placeholder={type === "CLONED" ? "例如：平台复刻男声" : "例如：平台设计旁白"} required />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor="platform-provider-voice-id">Provider voice_id</FieldLabel>
+        <Input id="platform-provider-voice-id" name="providerVoiceId" placeholder="例如：longanhuan 或后台复刻生成的 voice_id" required />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor="platform-model">绑定语音模型</FieldLabel>
+        <Select id="platform-model" name="modelInstanceId" required>
+          <option value="">选择支持 TTS 的模型</option>
+          {ttsModels.map((model) => (
+            <option key={model.id} value={model.id}>
+              {model.displayName} · {model.modelName}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      <Field>
+        <FieldLabel htmlFor="platform-language">语言</FieldLabel>
+        <Input id="platform-language" name="language" placeholder="例如：普通话、美式英语" />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor="platform-preview">试听音频 URL</FieldLabel>
+        <Input id="platform-preview" name="previewAudioUrl" placeholder="可选，填写可公开访问的试听地址" />
+      </Field>
+      <Field className="lg:col-span-3">
+        <FieldLabel htmlFor="platform-description">描述</FieldLabel>
+        <Textarea id="platform-description" name="description" placeholder="音色特征、适用场景和使用说明" rows={3} />
+      </Field>
+      <div className="flex justify-end gap-2 lg:col-span-3">
+        <Button asChild type="button" variant="outline">
+          <Link href="/admin/audio/voices">取消</Link>
+        </Button>
+        <Button disabled={ttsModels.length === 0} type="submit">
+          <CheckCircle2 data-icon="inline-start" />
+          保存{type === "CLONED" ? "平台复刻音色" : "平台设计音色"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 function SystemVoiceFilters({ query }: { query: Awaited<PageProps["searchParams"]> }) {
   return (
     <form className="grid gap-3 rounded-md border border-border bg-secondary/30 p-4 lg:grid-cols-[1.2fr_0.8fr_0.8fr_0.8fr_auto_auto]">
       <Field>
         <FieldLabel htmlFor="keyword">搜索</FieldLabel>
-        <Input
-          defaultValue={query.keyword ?? ""}
-          id="keyword"
-          name="keyword"
-          placeholder="名称、voice 参数、特质、场景"
-        />
+        <Input defaultValue={query.keyword ?? ""} id="keyword" name="keyword" placeholder="名称、voice 参数、特质、场景" />
       </Field>
       <Field>
         <FieldLabel htmlFor="status">状态</FieldLabel>
@@ -220,6 +278,35 @@ function SystemVoiceFilters({ query }: { query: Awaited<PageProps["searchParams"
   );
 }
 
+function SystemVoiceTable({ voices }: { voices: AdminSystemVoiceAsset[] }) {
+  return (
+    <div className="overflow-hidden rounded-md border border-border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>音色</TableHead>
+            <TableHead>语言与能力</TableHead>
+            <TableHead>试听</TableHead>
+            <TableHead>状态</TableHead>
+            <TableHead className="text-right">操作</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {voices.length > 0 ? (
+            voices.map((voice) => <SystemVoiceRow key={voice.providerVoiceId} voice={voice} />)
+          ) : (
+            <TableRow>
+              <TableCell className="text-muted-foreground" colSpan={5}>
+                没有匹配的系统音色。
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
 function SystemVoiceRow({ voice }: { voice: AdminSystemVoiceAsset }) {
   return (
     <TableRow>
@@ -232,9 +319,7 @@ function SystemVoiceRow({ voice }: { voice: AdminSystemVoiceAsset }) {
           <div className="flex flex-wrap gap-2">
             <Badge variant="outline">{voice.targetModel}</Badge>
             {voice.sourceModels.map((model) => (
-              <Badge key={model} variant="muted">
-                来源：{model}
-              </Badge>
+              <Badge key={model} variant="muted">来源：{model}</Badge>
             ))}
             {voice.isCustomized ? <Badge variant="secondary">已自定义</Badge> : null}
           </div>
@@ -246,9 +331,7 @@ function SystemVoiceRow({ voice }: { voice: AdminSystemVoiceAsset }) {
           <div className="flex flex-wrap gap-2">
             {voice.ageCategory ? <Badge variant="outline">{voice.ageCategory}</Badge> : null}
             {voice.languages.map((language) => (
-              <Badge key={language} variant="muted">
-                {language}
-              </Badge>
+              <Badge key={language} variant="muted">{language}</Badge>
             ))}
           </div>
           <div className="flex flex-wrap gap-2">
@@ -267,12 +350,7 @@ function SystemVoiceRow({ voice }: { voice: AdminSystemVoiceAsset }) {
         </audio>
       </TableCell>
       <TableCell className="min-w-36 align-top">
-        <div className="flex flex-col gap-2">
-          <Badge className="w-fit" variant={statusVariant(voice.status)}>
-            {voice.statusName}
-          </Badge>
-          {voice.disabledReason ? <span className="text-xs text-muted-foreground">{voice.disabledReason}</span> : null}
-        </div>
+        <VoiceStatus status={voice.status} statusName={voice.statusName} note={voice.disabledReason} />
       </TableCell>
       <TableCell className="min-w-60 align-top">
         <div className="flex flex-wrap justify-end gap-2">
@@ -280,11 +358,7 @@ function SystemVoiceRow({ voice }: { voice: AdminSystemVoiceAsset }) {
             <input name="providerVoiceId" type="hidden" value={voice.providerVoiceId} />
             <input name="nextStatus" type="hidden" value={voice.status === "READY" ? "DISABLED" : "READY"} />
             <Button size="sm" type="submit" variant={voice.status === "READY" ? "outline" : "default"}>
-              {voice.status === "READY" ? (
-                <PowerOff data-icon="inline-start" />
-              ) : (
-                <Power data-icon="inline-start" />
-              )}
+              {voice.status === "READY" ? <PowerOff data-icon="inline-start" /> : <Power data-icon="inline-start" />}
               {voice.status === "READY" ? "停用" : "启用"}
             </Button>
           </form>
@@ -307,51 +381,105 @@ function SystemVoiceRow({ voice }: { voice: AdminSystemVoiceAsset }) {
   );
 }
 
-function SupportBadge({ label, value }: { label: string; value: boolean }) {
+function VoiceAssetSection({
+  description,
+  emptyText,
+  scope,
+  title,
+  voices
+}: {
+  description: string;
+  emptyText: string;
+  scope: "platform" | "user";
+  title: string;
+  voices: AdminVoiceAsset[];
+}) {
   return (
-    <Badge variant={value ? "secondary" : "outline"}>
-      {label}
-      {value ? "支持" : "不支持"}
-    </Badge>
+    <Card>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-hidden rounded-md border border-border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>音色</TableHead>
+                <TableHead>归属</TableHead>
+                <TableHead>Provider voice_id</TableHead>
+                <TableHead>试听</TableHead>
+                <TableHead>状态</TableHead>
+                <TableHead className="text-right">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {voices.length > 0 ? (
+                voices.map((voice) => <VoiceAssetRow key={voice.id} scope={scope} voice={voice} />)
+              ) : (
+                <TableRow>
+                  <TableCell className="text-muted-foreground" colSpan={6}>{emptyText}</TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
-function VoiceRow({ voice }: { voice: AdminVoiceAsset }) {
+function VoiceAssetRow({ scope, voice }: { scope: "platform" | "user"; voice: AdminVoiceAsset }) {
   const isReady = voice.status === "READY";
   const isDeleted = voice.status === "DELETED";
   const canEnable = Boolean(voice.providerVoiceId) && !isDeleted;
 
   return (
     <TableRow>
-      <TableCell className="min-w-64">
+      <TableCell className="min-w-64 align-top">
         <div className="flex flex-col gap-1">
-          <Button asChild className="w-fit px-0" variant="ghost">
-            <Link href={`/admin/audio/voices/${voice.id}`}>{voice.name}</Link>
-          </Button>
+          <Link className="font-medium underline-offset-4 hover:underline" href={`/admin/audio/voices/${voice.id}`}>
+            {voice.name}
+          </Link>
           <span className="text-xs text-muted-foreground">
-            {voice.typeName} · {voice.visibility}
+            {scope === "platform" ? (voice.type === "CLONED" ? "平台复刻音色" : "平台设计音色") : voice.typeName} · {voice.targetModel}
           </span>
-          <span className="font-mono text-xs text-muted-foreground">{voice.targetModel}</span>
+          {voice.description ? <span className="line-clamp-2 text-xs text-muted-foreground">{voice.description}</span> : null}
         </div>
       </TableCell>
-      <TableCell>
-        <div className="flex flex-col gap-1">
-          <span>{voice.user.nickname}</span>
-          <span className="text-xs text-muted-foreground">{voice.user.email}</span>
-        </div>
+      <TableCell className="min-w-52 align-top">
+        {scope === "platform" ? (
+          <Badge variant="secondary">平台公共</Badge>
+        ) : (
+          <div className="flex flex-col gap-1 text-sm">
+            <span>{voice.user.nickname}</span>
+            <span className="text-xs text-muted-foreground">{voice.user.email}</span>
+          </div>
+        )}
       </TableCell>
-      <TableCell className="font-mono text-xs">{voice.providerVoiceId ?? "未生成"}</TableCell>
-      <TableCell>
-        <div className="flex flex-col gap-2">
-          <Badge variant={statusVariant(voice.status)}>{voice.statusName}</Badge>
-          {voice.reviewNote ? <span className="text-xs text-muted-foreground">{voice.reviewNote}</span> : null}
-        </div>
+      <TableCell className="max-w-64 break-all font-mono text-xs align-top">{voice.providerVoiceId ?? "未生成"}</TableCell>
+      <TableCell className="min-w-56 align-top">
+        {voice.previewAudioUrl ? (
+          <audio className="w-full" controls src={voice.previewAudioUrl}>
+            <track kind="captions" />
+          </audio>
+        ) : (
+          <span className="text-sm text-muted-foreground">暂无试听</span>
+        )}
       </TableCell>
-      <TableCell className="text-sm text-muted-foreground">
-        {new Date(voice.createdAt).toLocaleString("zh-CN")}
+      <TableCell className="min-w-40 align-top">
+        <VoiceStatus status={voice.status} statusName={voice.statusName} note={voice.reviewNote ?? voice.disabledReason} />
       </TableCell>
-      <TableCell className="min-w-60">
+      <TableCell className="min-w-72 align-top">
         <div className="flex flex-wrap justify-end gap-2">
+          {scope === "user" ? (
+            <Button asChild size="sm" variant="outline">
+              <Link href={`/admin/audio/voices/${voice.id}`}>
+                <CheckCircle2 data-icon="inline-start" />
+                审核
+              </Link>
+            </Button>
+          ) : null}
           <form action={toggleAdminUserVoiceEnabledAction}>
             <input name="id" type="hidden" value={voice.id} />
             <input name="action" type="hidden" value={isReady ? "DISABLE" : "APPROVE"} />
@@ -376,5 +504,23 @@ function VoiceRow({ voice }: { voice: AdminVoiceAsset }) {
         </div>
       </TableCell>
     </TableRow>
+  );
+}
+
+function VoiceStatus({ note, status, statusName }: { note?: string | null; status: string; statusName: string }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <Badge className="w-fit" variant={statusVariant(status)}>{statusName}</Badge>
+      {note ? <span className="text-xs text-muted-foreground">{note}</span> : null}
+    </div>
+  );
+}
+
+function SupportBadge({ label, value }: { label: string; value: boolean }) {
+  return (
+    <Badge variant={value ? "secondary" : "outline"}>
+      {label}
+      {value ? "支持" : "不支持"}
+    </Badge>
   );
 }

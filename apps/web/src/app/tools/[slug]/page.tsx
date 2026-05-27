@@ -173,6 +173,7 @@ function FieldControl({
 
   if (field.type === "voice-select") {
     const systemVoices = voiceLibrary?.systemVoices ?? [];
+    const platformVoices = voiceLibrary?.platformVoices?.filter((voice) => voice.status === "READY") ?? [];
     const customVoices = voiceLibrary?.customVoices.filter((voice) => voice.status === "READY") ?? [];
 
     return (
@@ -185,13 +186,18 @@ function FieldControl({
               {voice.name} · 系统音色
             </option>
           ))}
+          {platformVoices.map((voice) => (
+            <option key={voice.id} value={`voice:${voice.id}`}>
+              {voice.name} · {voice.type === "CLONED" ? "平台复刻音色" : "平台设计音色"}
+            </option>
+          ))}
           {customVoices.map((voice) => (
             <option key={voice.id} value={`voice:${voice.id}`}>
               {voice.name} · {voice.typeName}
             </option>
           ))}
         </Select>
-        <FieldDescription>只显示系统音色和已审核可用的个人音色。</FieldDescription>
+        <FieldDescription>只显示系统音色、平台音色和已审核可用的个人音色。</FieldDescription>
       </Field>
     );
   }
@@ -341,9 +347,9 @@ export default async function ToolDetailPage({
 
   return (
     <PublicShell>
-      <section className="mx-auto flex max-w-6xl flex-col gap-8 px-5 py-12">
+      <section className="flex w-full flex-col gap-8 px-5 py-12">
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div className="flex max-w-3xl flex-col gap-4">
+          <div className="flex w-full flex-col gap-4">
             <Badge>{tool.toolCategory?.name ?? "AI 工具"}</Badge>
             <h1 className="font-display text-5xl font-light leading-tight tracking-normal md:text-6xl">
               {tool.name}

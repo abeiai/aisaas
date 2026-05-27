@@ -6,8 +6,13 @@ process.env.JWT_ACCESS_SECRET ??= `test-access-${randomUUID()}`;
 process.env.JWT_REFRESH_SECRET ??= `test-refresh-${randomUUID()}`;
 process.env.SECRET_ENCRYPTION_KEY ??= `test-secret-${randomUUID()}-${randomUUID()}`;
 process.env.ENABLE_MOCK_PAYMENT_NOTIFY ??= "1";
+delete process.env.ALIYUN_SMS_ACCESS_KEY_ID;
+delete process.env.ALIYUN_SMS_ACCESS_KEY_SECRET;
+delete process.env.ALIYUN_SMS_SIGN_NAME;
+delete process.env.ALIYUN_SMS_TEMPLATE_CODE;
 
 const unique = `unit-${Date.now()}`;
+const phoneSuffix = String(Date.now()).slice(-8);
 
 function responseMock() {
   return {
@@ -52,6 +57,7 @@ async function loadModules() {
 test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
   const {
     getPrismaClient,
+    encryptSecret,
     hashPassword,
     verifyPassword,
     AuthService,
@@ -212,13 +218,6 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
         }
       }
     });
-    await prisma.audioPricingRule.deleteMany({
-      where: {
-        model: {
-          contains: unique
-        }
-      }
-    });
     await prisma.aiModelAlias.deleteMany({
       where: {
         aliasKey: {
@@ -260,11 +259,27 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
         }
       }
     });
+    await prisma.smsVerificationCode.deleteMany({
+      where: {
+        phone: {
+          contains: phoneSuffix
+        }
+      }
+    });
     await prisma.user.deleteMany({
       where: {
-        email: {
-          contains: unique
-        }
+        OR: [
+          {
+            email: {
+              contains: unique
+            }
+          },
+          {
+            phone: {
+              contains: phoneSuffix
+            }
+          }
+        ]
       }
     });
     await prisma.article.deleteMany({
@@ -285,6 +300,13 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
       where: {
         subject: {
           contains: unique
+        }
+      }
+    });
+    await prisma.loginFailure.deleteMany({
+      where: {
+        subject: {
+          contains: phoneSuffix
         }
       }
     });
@@ -320,6 +342,66 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
     );
   });
 
+  await t.test("手机号验证码可创建用户并登录", async () => {
+    const phone = `139${phoneSuffix}`;
+
+    const codeResult = await authService.sendPhoneCode({
+      phone,
+      purpose: "LOGIN"
+    });
+    const session = await authService.loginByPhone(
+      {
+        phone,
+        code: "199599",
+        nickname: "手机号单测用户"
+      },
+      responseMock()
+    );
+    const createdUser = await prisma.user.findUnique({
+      where: {
+        phone
+      },
+      include: {
+        wallet: true
+      }
+    });
+
+    assert.equal(codeResult.phone, phone);
+    assert.equal(session.user.phone, phone);
+    assert.equal(session.user.nickname, "手机号单测用户");
+    assert.ok(session.accessToken);
+    assert.ok(createdUser?.wallet);
+  });
+
+  await t.test("邮箱注册用户可以绑定手机号", async () => {
+    const phone = `138${phoneSuffix}`;
+    const user = await prisma.user.create({
+      data: {
+        email: `bind-phone-${unique}@example.com`,
+        passwordHash: await hashPassword("Unit123456"),
+        nickname: "绑定手机号用户",
+        wallet: {
+          create: {}
+        }
+      }
+    });
+
+    await authService.sendPhoneCode(
+      {
+        phone,
+        purpose: "BIND_PHONE"
+      },
+      user.id
+    );
+    const boundUser = await authService.bindPhone(user.id, {
+      phone,
+      code: "199599"
+    });
+
+    assert.equal(boundUser.phone, phone);
+    assert.ok(boundUser.phoneVerifiedAt);
+  });
+
   await t.test("管理员登录失败返回中文错误", async () => {
     await assert.rejects(
       () =>
@@ -332,6 +414,79 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
         ),
       (error: unknown) => error instanceof Error && error.message === "管理员邮箱或密码错误"
     );
+  });
+
+  await t.test("用户和管理员可通过 refresh cookie 保持登录", async () => {
+    const userPassword = "Unit123456";
+    const user = await prisma.user.create({
+      data: {
+        email: `persistent-user-${unique}@example.com`,
+        passwordHash: await hashPassword(userPassword),
+        nickname: "长期登录用户",
+        wallet: {
+          create: {}
+        }
+      }
+    });
+    const adminPassword = "Admin123456";
+    const admin = await prisma.adminUser.create({
+      data: {
+        email: `persistent-admin-${unique}@example.com`,
+        passwordHash: await hashPassword(adminPassword),
+        name: "长期登录管理员",
+        role: "SUPER_ADMIN",
+        status: "ACTIVE"
+      }
+    });
+
+    const userSession = await authService.login(
+      {
+        email: user.email,
+        password: userPassword
+      },
+      responseMock()
+    );
+    const adminSession = await adminAuthService.login(
+      {
+        email: admin.email,
+        password: adminPassword
+      },
+      responseMock()
+    );
+
+    const userFromRefresh = await authService.me({
+      headers: {
+        cookie: `aisaas_user_refresh=${encodeURIComponent(userSession.refreshToken)}`
+      }
+    });
+    const refreshedUserSession = await authService.refresh(
+      {
+        headers: {
+          cookie: `aisaas_user_refresh=${encodeURIComponent(userSession.refreshToken)}`
+        }
+      },
+      responseMock()
+    );
+    const adminFromRefresh = await adminAuthService.me({
+      headers: {
+        cookie: `aisaas_admin_refresh=${encodeURIComponent(adminSession.refreshToken)}`
+      }
+    });
+    const refreshedAdminSession = await adminAuthService.refresh(
+      {
+        headers: {
+          cookie: `aisaas_admin_refresh=${encodeURIComponent(adminSession.refreshToken)}`
+        }
+      },
+      responseMock()
+    );
+
+    assert.equal(userFromRefresh.id, user.id);
+    assert.equal(adminFromRefresh.id, admin.id);
+    assert.equal(refreshedUserSession.user.id, user.id);
+    assert.equal(refreshedAdminSession.admin.id, admin.id);
+    assert.ok(refreshedUserSession.accessToken);
+    assert.ok(refreshedAdminSession.accessToken);
   });
 
   await t.test("草稿文章不会被 public 查询返回", async () => {
@@ -474,6 +629,35 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
     );
     assert.equal(
       calculateUsageCredits({
+        usage: {
+          inputTokens: 100_000,
+          outputTokens: 10_000,
+          totalTokens: 110_000
+        },
+        inputPrice: 0,
+        outputPrice: 0,
+        pricingConfig: {
+          mode: "TOKEN_TIERED",
+          currency: "CNY",
+          unit: "M_TOKENS",
+          tierBasis: "REQUEST_INPUT_TOKENS",
+          tiers: [
+            {
+              label: "默认",
+              minInputTokens: 0,
+              maxInputTokens: null,
+              input: 2,
+              output: 12
+            }
+          ]
+        },
+        fallbackCredits: 120,
+        maxCredits: 120
+      }),
+      32
+    );
+    assert.equal(
+      calculateUsageCredits({
         usage: null,
         inputPrice: 2,
         outputPrice: 8,
@@ -521,6 +705,99 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
     assert.equal(rawProvider.apiKeyEncrypted.includes(apiKey), false);
     assert.equal(provider.apiKeyPreview, `sk-u****alue`);
     assert.equal(Object.prototype.hasOwnProperty.call(provider, "apiKeyEncrypted"), false);
+  });
+
+  await t.test("AI 模型实例删除前会校验场景绑定", async () => {
+    const providerPreset = await prisma.aiProviderPreset.create({
+      data: {
+        providerKey: `delete-check-${unique}`,
+        displayName: "删除检查 Provider",
+        adapterType: "OPENAI_COMPATIBLE",
+        modality: "TEXT",
+        defaultBaseUrl: "https://api.example.com/v1",
+        apiKeyEnvName: "TEST_API_KEY",
+        isBuiltIn: false,
+        presetVersion: "test",
+        lastUpdatedAt: new Date()
+      }
+    });
+    const modelPreset = await prisma.aiModelPreset.create({
+      data: {
+        providerPresetId: providerPreset.id,
+        modelKey: `delete-check-model-${unique}`,
+        displayName: "删除检查模型",
+        providerModelName: `delete-check-model-${unique}`,
+        capabilityTags: ["TEXT"],
+        supportsStreaming: true
+      }
+    });
+    const providerInstance = await prisma.aiProviderInstance.create({
+      data: {
+        providerPresetId: providerPreset.id,
+        name: "删除检查实例",
+        baseUrl: "https://api.example.com/v1",
+        status: "ENABLED"
+      }
+    });
+    const modelInstance = await prisma.aiModelInstance.create({
+      data: {
+        providerInstanceId: providerInstance.id,
+        modelPresetId: modelPreset.id,
+        displayName: "删除检查实例模型",
+        providerModelName: `delete-check-instance-${unique}`,
+        capabilityTags: ["TEXT"],
+        inputPrice: "1",
+        outputPrice: "4",
+        pricingMode: "TOKENS",
+        pricingUnit: "K_TOKENS",
+        isEnabled: true
+      }
+    });
+    const alias = await prisma.aiModelAlias.create({
+      data: {
+        aliasKey: `delete-check-alias-${unique}`,
+        displayName: "删除检查别名",
+        modelInstanceId: modelInstance.id
+      }
+    });
+    const scenario = await prisma.aiScenario.create({
+      data: {
+        name: "删除检查场景",
+        slug: `delete-check-scenario-${unique}`,
+        promptTemplate: "{input}",
+        promptVariables: [],
+        requiredCapabilities: ["TEXT"],
+        costCredits: 1,
+        isEnabled: true,
+        modelBinding: {
+          create: {
+            defaultModelAlias: alias.aliasKey
+          }
+        }
+      }
+    });
+
+    const blocked = await aiService.checkModelInstanceDelete(modelInstance.id);
+    assert.equal(blocked.canDelete, false);
+    assert.equal(blocked.boundScenarios[0]?.slug, scenario.slug);
+    await assert.rejects(() => aiService.deleteModelInstance(modelInstance.id), /请先解除模型别名绑定/);
+
+    await prisma.aiScenario.delete({
+      where: {
+        id: scenario.id
+      }
+    });
+
+    const allowed = await aiService.checkModelInstanceDelete(modelInstance.id);
+    assert.equal(allowed.canDelete, true);
+    await aiService.deleteModelInstance(modelInstance.id);
+    const aliasAfterDelete = await prisma.aiModelAlias.findUniqueOrThrow({
+      where: {
+        id: alias.id
+      }
+    });
+
+    assert.equal(aliasAfterDelete.modelInstanceId, null);
   });
 
   await t.test("管理员禁用用户后已有会话会被拒绝", async () => {
@@ -595,6 +872,19 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
         }),
       (error: unknown) => error instanceof Error && error.message === "可用点数不足，不能扣成负数"
     );
+
+    const recharged = await adminUsersService.rechargeCredits(user.id, {
+      amount: 120,
+      reasonType: "REWARD"
+    });
+    assert.equal(recharged.wallet.availableCredits, 190);
+    assert.equal(recharged.wallet.totalTopUpCredits, 120);
+    assert.equal(recharged.ledgerEntry.type, "TOP_UP");
+    assert.equal(recharged.ledgerEntry.amount, 120);
+    assert.equal(recharged.ledgerEntry.note, "管理员充值：奖励");
+
+    const detail = await adminUsersService.getUserDetail(user.id);
+    assert.ok(detail.rechargeRecords.some((entry) => entry.id === recharged.ledgerEntry.id));
   });
 
   await t.test("AI 任务失败会释放冻结点数", async () => {
@@ -656,6 +946,309 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
     assert.equal(task.status, "FAILED");
     assert.equal(wallet.availableCredits, scenario.costCredits);
     assert.equal(wallet.frozenCredits, 0);
+  });
+
+  await t.test("体验区 AI 对话完成后按实际点数结算", async () => {
+    const user = await prisma.user.create({
+      data: {
+        email: `ai-chat-billing-${unique}@example.com`,
+        passwordHash: await hashPassword("Unit123456"),
+        nickname: "AI 对话扣点单元测试用户",
+        wallet: {
+          create: {
+            availableCredits: 100
+          }
+        }
+      }
+    });
+    const streamEvents: Record<string, unknown>[] = [];
+
+    const task = await aiService.createChatStream(
+      user.id,
+      {
+        input: "你好，请介绍本系统",
+        modelInstanceId: "mock",
+        messages: []
+      },
+      (event) => streamEvents.push(event)
+    );
+
+    const actualCredits = task.actualCredits ?? 0;
+    const doneEvent = streamEvents.find((event) => event.type === "done") as
+      | {
+          task?: {
+            actualCredits?: number | null;
+          };
+        }
+      | undefined;
+    const wallet = await prisma.wallet.findUniqueOrThrow({
+      where: {
+        userId: user.id
+      }
+    });
+    const consumeLedger = await prisma.ledgerEntry.findFirst({
+      where: {
+        relatedTaskId: task.id,
+        type: "CONSUME"
+      }
+    });
+
+    assert.equal(task.status, "SUCCEEDED");
+    assert.ok(actualCredits > 0);
+    assert.equal(doneEvent?.task?.actualCredits, actualCredits);
+    assert.equal(wallet.availableCredits, 100 - actualCredits);
+    assert.equal(wallet.frozenCredits, 0);
+    assert.equal(wallet.totalConsumedCredits, actualCredits);
+    assert.equal(consumeLedger?.amount, -actualCredits);
+  });
+
+  await t.test("体验区图片生成会写入后台图片任务清单", async () => {
+    const user = await prisma.user.create({
+      data: {
+        email: `ai-image-task-${unique}@example.com`,
+        passwordHash: await hashPassword("Unit123456"),
+        nickname: "图片生成任务单元测试用户",
+        wallet: {
+          create: {
+            availableCredits: 100
+          }
+        }
+      }
+    });
+    const providerPreset = await prisma.aiProviderPreset.create({
+      data: {
+        providerKey: `image-provider-${unique}`,
+        displayName: "图片生成测试 Provider",
+        adapterType: "OPENAI_COMPATIBLE",
+        modality: "MULTIMODAL",
+        defaultBaseUrl: "https://dashscope.aliyuncs.com/api/v1",
+        apiKeyEnvName: "TEST_IMAGE_API_KEY",
+        isBuiltIn: false,
+        presetVersion: "test",
+        lastUpdatedAt: new Date()
+      }
+    });
+    const providerInstance = await prisma.aiProviderInstance.create({
+      data: {
+        providerPresetId: providerPreset.id,
+        name: `图片生成测试实例 ${unique}`,
+        baseUrl: "https://dashscope.aliyuncs.com/api/v1",
+        status: "ENABLED",
+        credential: {
+          create: {
+            apiKeyEncrypted: encryptSecret("sk-unit-image")
+          }
+        }
+      }
+    });
+    const modelInstance = await prisma.aiModelInstance.create({
+      data: {
+        providerInstanceId: providerInstance.id,
+        displayName: "图片生成测试模型",
+        providerModelName: "qwen-image-2.0",
+        capabilityTags: ["IMAGE_GENERATION"],
+        inputPrice: "0.01",
+        outputPrice: "0",
+        pricingMode: "IMAGES",
+        pricingUnit: "IMAGE",
+        isEnabled: true
+      }
+    });
+    const imageService = aiService as unknown as {
+      callDashScopeImageGeneration(input: unknown): Promise<Record<string, unknown>>;
+    };
+    const originalCall = imageService.callDashScopeImageGeneration;
+
+    imageService.callDashScopeImageGeneration = async () => ({
+      request_id: `image-request-${unique}`,
+      output: {
+        results: [
+          {
+            url: "https://example.com/unit-image.png"
+          }
+        ]
+      }
+    });
+
+    try {
+      const result = await aiService.generateImage(user.id, {
+        prompt: "生成一张单元测试图片",
+        modelInstanceId: modelInstance.id,
+        width: 1024,
+        height: 1024,
+        count: 1
+      });
+      const task = await prisma.aiTask.findUniqueOrThrow({
+        where: {
+          id: result.id
+        },
+        include: {
+          scenario: true,
+          reservation: true,
+          callLogs: true
+        }
+      });
+      const wallet = await prisma.wallet.findUniqueOrThrow({
+        where: {
+          userId: user.id
+        }
+      });
+      const adminImageTasks = await aiService.listAdminTasks({
+        taskType: "IMAGE",
+        model: modelInstance.id,
+        user: user.email,
+        page: "1",
+        pageSize: "50"
+      });
+
+      assert.equal(task.status, "SUCCEEDED");
+      assert.deepEqual(task.scenario.requiredCapabilities, ["IMAGE_GENERATION"]);
+      assert.equal(task.estimatedCredits, 1);
+      assert.equal(task.actualCredits, 1);
+      assert.equal(task.reservation?.amount, 1);
+      assert.equal(task.callLogs[0]?.success, true);
+      assert.match(task.outputPreview ?? "", /unit-image\.png/);
+      assert.equal(wallet.availableCredits, 99);
+      assert.equal(wallet.totalConsumedCredits, 1);
+      assert.equal(adminImageTasks.some((item) => item.id === result.id), true);
+    } finally {
+      imageService.callDashScopeImageGeneration = originalCall;
+    }
+  });
+
+  await t.test("体验区视频生成会写入后台视频任务清单并在轮询完成后结算", async () => {
+    const user = await prisma.user.create({
+      data: {
+        email: `ai-video-task-${unique}@example.com`,
+        passwordHash: await hashPassword("Unit123456"),
+        nickname: "视频生成任务单元测试用户",
+        wallet: {
+          create: {
+            availableCredits: 200
+          }
+        }
+      }
+    });
+    const providerPreset = await prisma.aiProviderPreset.create({
+      data: {
+        providerKey: `video-provider-${unique}`,
+        displayName: "视频生成测试 Provider",
+        adapterType: "OPENAI_COMPATIBLE",
+        modality: "MULTIMODAL",
+        defaultBaseUrl: "https://dashscope.aliyuncs.com/api/v1",
+        apiKeyEnvName: "TEST_VIDEO_API_KEY",
+        isBuiltIn: false,
+        presetVersion: "test",
+        lastUpdatedAt: new Date()
+      }
+    });
+    const providerInstance = await prisma.aiProviderInstance.create({
+      data: {
+        providerPresetId: providerPreset.id,
+        name: `视频生成测试实例 ${unique}`,
+        baseUrl: "https://dashscope.aliyuncs.com/api/v1",
+        status: "ENABLED",
+        credential: {
+          create: {
+            apiKeyEncrypted: encryptSecret("sk-unit-video")
+          }
+        }
+      }
+    });
+    const modelInstance = await prisma.aiModelInstance.create({
+      data: {
+        providerInstanceId: providerInstance.id,
+        displayName: "视频生成测试模型",
+        providerModelName: "wan2.7-t2v",
+        capabilityTags: ["VIDEO_GENERATION", "TEXT_TO_VIDEO"],
+        inputPrice: "0.02",
+        outputPrice: "0",
+        pricingMode: "VIDEO_SECONDS",
+        pricingUnit: "SECOND",
+        isEnabled: true
+      }
+    });
+    const providerTaskId = `video-task-${unique}`;
+    const videoService = aiService as unknown as {
+      callDashScopeVideoGeneration(input: unknown): Promise<Record<string, unknown>>;
+      queryDashScopeVideoTask(input: unknown): Promise<Record<string, unknown>>;
+    };
+    const originalCreate = videoService.callDashScopeVideoGeneration;
+    const originalQuery = videoService.queryDashScopeVideoTask;
+
+    videoService.callDashScopeVideoGeneration = async () => ({
+      request_id: `video-submit-${unique}`,
+      output: {
+        task_id: providerTaskId,
+        task_status: "RUNNING"
+      }
+    });
+    videoService.queryDashScopeVideoTask = async () => ({
+      request_id: `video-query-${unique}`,
+      output: {
+        task_id: providerTaskId,
+        task_status: "SUCCEEDED",
+        video_url: "https://example.com/unit-video.mp4"
+      }
+    });
+
+    try {
+      const result = await aiService.generateVideo(user.id, {
+        prompt: "生成一段单元测试视频",
+        modelInstanceId: modelInstance.id,
+        ratio: "16:9",
+        resolution: "高清 720P",
+        duration: 5
+      });
+      const runningTask = await prisma.aiTask.findUniqueOrThrow({
+        where: {
+          id: result.id
+        },
+        include: {
+          scenario: true,
+          reservation: true,
+          callLogs: true
+        }
+      });
+      const adminVideoTasks = await aiService.listAdminTasks({
+        taskType: "VIDEO",
+        model: modelInstance.id,
+        user: user.email,
+        page: "1",
+        pageSize: "50"
+      });
+
+      assert.equal(result.providerTaskId, providerTaskId);
+      assert.equal(runningTask.status, "RUNNING");
+      assert.deepEqual(runningTask.scenario.requiredCapabilities, ["VIDEO_GENERATION"]);
+      assert.equal(runningTask.estimatedCredits, 10);
+      assert.equal(runningTask.reservation?.amount, 10);
+      assert.match(runningTask.outputPreview ?? "", new RegExp(providerTaskId));
+      assert.equal(runningTask.callLogs[0]?.success, true);
+      assert.equal(adminVideoTasks.some((item) => item.id === result.id), true);
+
+      const completed = await aiService.getVideoGenerationTask(user.id, providerTaskId, modelInstance.id);
+      const settledTask = await prisma.aiTask.findUniqueOrThrow({
+        where: {
+          id: result.id
+        }
+      });
+      const wallet = await prisma.wallet.findUniqueOrThrow({
+        where: {
+          userId: user.id
+        }
+      });
+
+      assert.equal(completed.status, "SUCCEEDED");
+      assert.equal(completed.videoUrl, "https://example.com/unit-video.mp4");
+      assert.equal(settledTask.status, "SUCCEEDED");
+      assert.equal(settledTask.actualCredits, 10);
+      assert.equal(wallet.availableCredits, 190);
+      assert.equal(wallet.totalConsumedCredits, 10);
+    } finally {
+      videoService.callDashScopeVideoGeneration = originalCreate;
+      videoService.queryDashScopeVideoTask = originalQuery;
+    }
   });
 
   await t.test("AI Prompt 模板不会把 LaTeX 大括号误判为变量", async () => {
@@ -814,17 +1407,10 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
         displayName: "单元测试 TTS 模型",
         providerModelName: `cosyvoice-${unique}`,
         capabilityTags: ["AUDIO", "TTS", "CUSTOM_VOICE"],
-        isEnabled: true
-      }
-    });
-    await prisma.audioPricingRule.create({
-      data: {
-        operationType: "TTS",
-        model: modelInstance.providerModelName,
-        billingMode: "PER_CHARACTER",
-        creditsPerUnit: 5,
-        minimumCredits: 5,
-        modelMultiplier: 1,
+        inputPrice: "0.05",
+        outputPrice: "0",
+        pricingMode: "REQUEST",
+        pricingUnit: "REQUEST",
         isEnabled: true
       }
     });
@@ -921,14 +1507,6 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
         aliasKey: "tts-default"
       }
     });
-    const previousWildcardPricing = await prisma.audioPricingRule.findUnique({
-      where: {
-        operationType_model: {
-          operationType: "TTS",
-          model: "*"
-        }
-      }
-    });
     const providerPreset = await prisma.aiProviderPreset.create({
       data: {
         providerKey: `audio-fallback-${unique}`,
@@ -961,6 +1539,10 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
         displayName: "单元测试 CosyVoice v3 Flash 兜底",
         providerModelName: "cosyvoice-v3-flash",
         capabilityTags: ["AUDIO", "TTS", "SYSTEM_VOICE"],
+        inputPrice: "1",
+        outputPrice: "0",
+        pricingMode: "CHARACTERS",
+        pricingUnit: "TEN_K_CHARACTERS",
         isEnabled: true
       }
     });
@@ -990,30 +1572,6 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
           aliasKey: "tts-default",
           displayName: "默认语音合成模型",
           modelInstanceId: null
-        }
-      });
-      await prisma.audioPricingRule.upsert({
-        where: {
-          operationType_model: {
-            operationType: "TTS",
-            model: "*"
-          }
-        },
-        update: {
-          billingMode: "PER_CHARACTER",
-          creditsPerUnit: 5,
-          minimumCredits: 5,
-          modelMultiplier: 1,
-          isEnabled: true
-        },
-        create: {
-          operationType: "TTS",
-          model: "*",
-          billingMode: "PER_CHARACTER",
-          creditsPerUnit: 5,
-          minimumCredits: 5,
-          modelMultiplier: 1,
-          isEnabled: true
         }
       });
 
@@ -1046,30 +1604,6 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
         });
       }
 
-      if (previousWildcardPricing) {
-        await prisma.audioPricingRule.update({
-          where: {
-            operationType_model: {
-              operationType: "TTS",
-              model: "*"
-            }
-          },
-          data: {
-            billingMode: previousWildcardPricing.billingMode,
-            creditsPerUnit: previousWildcardPricing.creditsPerUnit,
-            minimumCredits: previousWildcardPricing.minimumCredits,
-            modelMultiplier: previousWildcardPricing.modelMultiplier,
-            isEnabled: previousWildcardPricing.isEnabled
-          }
-        });
-      } else {
-        await prisma.audioPricingRule.deleteMany({
-          where: {
-            operationType: "TTS",
-            model: "*"
-          }
-        });
-      }
     }
   });
 
@@ -1248,6 +1782,13 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
       assert.equal(listed.some((model) => model.id === modelInstance.id), true);
 
       const updated = await audioService.updateAdminAudioModel(modelInstance.id, {
+        displayName: "单元测试已编辑 TTS 模型",
+        modelName: `cosyvoice-admin-edited-${unique}`,
+        capabilityTags: ["AUDIO", "TTS"],
+        inputPrice: 0.8,
+        outputPrice: 0,
+        pricingMode: "CHARACTERS",
+        pricingUnit: "TEN_K_CHARACTERS",
         isEnabled: false,
         aliasKey: "tts-fast",
         aliasDisplayName: "单元测试快速语音模型",
@@ -1255,6 +1796,11 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
       });
 
       assert.equal(updated.isEnabled, false);
+      assert.equal(updated.displayName, "单元测试已编辑 TTS 模型");
+      assert.equal(updated.modelName, `cosyvoice-admin-edited-${unique}`);
+      assert.equal(updated.pricingMode, "CHARACTERS");
+      assert.equal(updated.pricingUnit, "TEN_K_CHARACTERS");
+      assert.equal(updated.inputPrice, "0.8");
       assert.equal(updated.aliases.some((alias) => alias.aliasKey === "tts-fast"), true);
 
       await assert.rejects(
@@ -1264,9 +1810,55 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
             modelAlias: "tts-fast",
             voice: "longxiaochun",
             execute: false
-          }),
+        }),
         (error: unknown) => error instanceof Error && error.message === "模型别名 tts-fast 对应模型未启用"
       );
+
+      const scenario = await prisma.aiScenario.create({
+        data: {
+          slug: `audio-model-delete-${unique}`,
+          name: "语音模型删除检查场景",
+          promptTemplate: "测试语音模型删除检查：{input}",
+          promptVariables: [],
+          costCredits: 1,
+          isEnabled: true
+        }
+      });
+      await prisma.aiScenarioModelBinding.create({
+        data: {
+          scenarioId: scenario.id,
+          defaultModelAlias: "tts-fast"
+        }
+      });
+      const blockedDelete = await audioService.checkAdminAudioModelDelete(modelInstance.id);
+
+      assert.equal(blockedDelete.canDelete, false);
+      assert.equal(blockedDelete.boundScenarios.some((item) => item.slug === scenario.slug), true);
+      await assert.rejects(
+        () => audioService.deleteAdminAudioModel(modelInstance.id),
+        (error: unknown) =>
+          error instanceof Error && error.message.includes("请先解除模型别名绑定后再删除")
+      );
+
+      await prisma.aiScenarioModelBinding.deleteMany({
+        where: {
+          scenarioId: scenario.id
+        }
+      });
+      const deletableModel = await prisma.aiModelInstance.create({
+        data: {
+          providerInstanceId: providerInstance.id,
+          displayName: "单元测试可删除 TTS 模型",
+          providerModelName: `cosyvoice-deletable-${unique}`,
+          capabilityTags: ["AUDIO", "TTS"],
+          isEnabled: true
+        }
+      });
+      const allowedDelete = await audioService.checkAdminAudioModelDelete(deletableModel.id);
+      const deleted = await audioService.deleteAdminAudioModel(deletableModel.id);
+
+      assert.equal(allowedDelete.canDelete, true);
+      assert.equal(deleted.deleted, true);
     } finally {
       if (previousAlias) {
         await prisma.aiModelAlias.update({
@@ -1289,11 +1881,11 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
     }
   });
 
-  await t.test("语音计费规则驱动预估、成功结算和用量日志", async () => {
+  await t.test("语音合成按模型价格预估并按 Provider 字符数结算", async () => {
     const providerPreset = await prisma.aiProviderPreset.create({
       data: {
         providerKey: `audio-billing-${unique}`,
-        displayName: "单元测试语音计费 Provider",
+        displayName: "单元测试语音模型价格 Provider",
         adapterType: "DASHSCOPE_AUDIO",
         modality: "AUDIO",
         defaultBaseUrl: "https://dashscope.aliyuncs.com/api/v1",
@@ -1309,7 +1901,7 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
     const providerInstance = await prisma.aiProviderInstance.create({
       data: {
         providerPresetId: providerPreset.id,
-        name: "单元测试语音计费实例",
+        name: "单元测试语音模型价格实例",
         baseUrl: providerPreset.defaultBaseUrl,
         webSocketUrl: providerPreset.defaultWebSocketUrl,
         region: "cn-beijing",
@@ -1323,24 +1915,17 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
         displayName: "单元测试 TTS 计费模型",
         providerModelName: modelName,
         capabilityTags: ["AUDIO", "TTS"],
-        isEnabled: true
-      }
-    });
-    await prisma.audioPricingRule.create({
-      data: {
-        operationType: "TTS",
-        model: modelName,
-        billingMode: "PER_CHARACTER",
-        creditsPerUnit: 7,
-        minimumCredits: 7,
-        modelMultiplier: 2,
+        inputPrice: "1",
+        outputPrice: "0",
+        pricingMode: "CHARACTERS",
+        pricingUnit: "TEN_K_CHARACTERS",
         isEnabled: true
       }
     });
     const alias = await prisma.aiModelAlias.create({
       data: {
         aliasKey: `tts-billing-${unique}`,
-        displayName: "单元测试语音计费别名",
+        displayName: "单元测试语音模型价格别名",
         modelInstanceId: modelInstance.id
       }
     });
@@ -1348,7 +1933,7 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
       data: {
         email: `audio-billing-${unique}@example.com`,
         passwordHash: await hashPassword("Unit123456"),
-        nickname: "语音计费单元测试用户",
+        nickname: "语音模型价格单元测试用户",
         wallet: {
           create: {
             availableCredits: 30
@@ -1370,9 +1955,9 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
     });
 
     assert.equal(task.status, "RESERVED");
-    assert.equal(task.estimatedCredits, 28);
-    assert.equal(wallet.availableCredits, 2);
-    assert.equal(wallet.frozenCredits, 28);
+    assert.equal(task.estimatedCredits, 3);
+    assert.equal(wallet.availableCredits, 27);
+    assert.equal(wallet.frozenCredits, 3);
 
     const audioTaskSettler = audioService as unknown as {
       settleSuccessfulAudioTask(
@@ -1390,7 +1975,12 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
       requestId: `audio-request-${unique}`,
       latencyMs: 321,
       audioDurationMs: 1500,
-      estimatedCost: 0.0123
+      estimatedCost: 0.0123,
+      usage: {
+        providerUsage: {
+          characters: 620
+        }
+      }
     });
     wallet = await prisma.wallet.findUniqueOrThrow({
       where: {
@@ -1399,12 +1989,12 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
     });
 
     assert.equal(settledTask.status, "SUCCEEDED");
-    assert.equal(settledTask.actualCredits, 28);
+    assert.equal(settledTask.actualCredits, 7);
     assert.equal(settledTask.requestId, `audio-request-${unique}`);
     assert.equal(typeof settledTask.outputAudioAssetId, "string");
-    assert.equal(wallet.availableCredits, 2);
+    assert.equal(wallet.availableCredits, 23);
     assert.equal(wallet.frozenCredits, 0);
-    assert.equal(wallet.totalConsumedCredits, 28);
+    assert.equal(wallet.totalConsumedCredits, 7);
 
     const usageLog = await prisma.audioUsageLog.findUniqueOrThrow({
       where: {
@@ -1419,8 +2009,9 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
     });
 
     assert.equal(usageLog.success, true);
-    assert.equal(usageLog.consumedCredits, 28);
-    assert.equal(usageLog.characterCount, text.length);
+    assert.equal(usageLog.consumedCredits, 7);
+    assert.equal(usageLog.characterCount, 620);
+    assert.equal(usageLog.usageCount, 620);
     assert.equal(usageLog.audioDurationMs, 1500);
     assert.equal(usageLog.providerRequestId, `audio-request-${unique}`);
     assert.equal(consumeLedgers.length, 1);
@@ -1456,7 +2047,7 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
     });
 
     assert.equal(dashboard.total.requestCount, 1);
-    assert.equal(dashboard.total.consumedCredits, 28);
+    assert.equal(dashboard.total.consumedCredits, 7);
     assert.equal(dashboard.byOperation[0]?.id, "TTS");
     assert.equal(dashboard.byModel[0]?.id, modelName);
     assert.equal(dashboard.byUser[0]?.id, user.id);
@@ -1506,17 +2097,10 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
         displayName: "单元测试 TTS 审核模型",
         providerModelName: modelName,
         capabilityTags: ["AUDIO", "TTS", "CUSTOM_VOICE"],
-        isEnabled: true
-      }
-    });
-    await prisma.audioPricingRule.create({
-      data: {
-        operationType: "TTS",
-        model: modelName,
-        billingMode: "PER_CHARACTER",
-        creditsPerUnit: 5,
-        minimumCredits: 5,
-        modelMultiplier: 1,
+        inputPrice: "1",
+        outputPrice: "0",
+        pricingMode: "CHARACTERS",
+        pricingUnit: "TEN_K_CHARACTERS",
         isEnabled: true
       }
     });

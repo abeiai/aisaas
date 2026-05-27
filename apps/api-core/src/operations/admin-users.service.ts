@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { HttpStatus, Injectable } from "@nestjs/common";
 import { getPrismaClient, type Prisma } from "@aisaas/database";
 import { AppException } from "../common/app-exception.js";
-import { AdjustUserCreditsDto } from "./dto/admin-user.dto.js";
+import { AdjustUserCreditsDto, RechargeUserCreditsDto } from "./dto/admin-user.dto.js";
 
 type UserStatus = "ACTIVE" | "DISABLED";
 
@@ -101,9 +101,7 @@ export class AdminUsersService {
       },
       wallet: this.toWallet(wallet),
       paymentOrders: user.paymentOrders.map((order) => this.toPaymentOrder(order)),
-      rechargeRecords: user.paymentOrders
-        .filter((order) => order.status === "PAID")
-        .map((order) => this.toPaymentOrder(order)),
+      rechargeRecords: ledgerEntries.filter((entry) => entry.type === "TOP_UP"),
       consumeRecords: ledgerEntries.filter(
         (entry) => entry.type === "CONSUME" || (entry.type === "ADMIN_ADJUST" && entry.amount < 0)
       ),
@@ -132,6 +130,71 @@ export class AdminUsersService {
             }
           : null
       }))
+    };
+  }
+
+  async rechargeCredits(id: string, dto: RechargeUserCreditsDto) {
+    const amount = dto.amount;
+    const note = this.adminRechargeNote(dto);
+
+    if (!Number.isInteger(amount) || amount <= 0) {
+      throw new AppException(40001, "充值点数必须为正整数", HttpStatus.BAD_REQUEST);
+    }
+
+    const result = await this.prisma.$transaction(async (transaction) => {
+      const user = await transaction.user.findUnique({
+        where: {
+          id
+        }
+      });
+
+      if (!user) {
+        throw new AppException(40401, "用户不存在", HttpStatus.NOT_FOUND);
+      }
+
+      await this.ensureWallet(transaction, id);
+      const wallet = await transaction.wallet.update({
+        where: {
+          userId: id
+        },
+        data: {
+          availableCredits: {
+            increment: amount
+          },
+          totalTopUpCredits: {
+            increment: amount
+          }
+        }
+      });
+
+      const ledgerEntry = await transaction.ledgerEntry.create({
+        data: {
+          userId: id,
+          type: "TOP_UP",
+          amount,
+          balanceAfter: wallet.availableCredits,
+          idempotencyKey: `admin-recharge:${id}:${Date.now()}:${randomUUID()}`,
+          note
+        }
+      });
+
+      return {
+        user,
+        wallet,
+        ledgerEntry
+      };
+    });
+
+    return {
+      user: {
+        id: result.user.id,
+        email: result.user.email,
+        nickname: result.user.nickname,
+        status: result.user.status,
+        statusName: this.statusName(result.user.status)
+      },
+      wallet: this.toWallet(result.wallet),
+      ledgerEntry: this.toLedgerEntry(result.ledgerEntry)
     };
   }
 
@@ -429,6 +492,24 @@ export class AdminUsersService {
     };
 
     return names[type] ?? type;
+  }
+
+  private adminRechargeNote(dto: RechargeUserCreditsDto) {
+    const reason = dto.reason?.trim() ?? "";
+    const reasonNames: Record<RechargeUserCreditsDto["reasonType"], string> = {
+      TEST: "测试",
+      REWARD: "奖励",
+      COMPENSATION: "补偿",
+      OTHER: "其他"
+    };
+
+    if (dto.reasonType === "OTHER" && reason.length < 2) {
+      throw new AppException(40001, "请选择其他原因时，请填写具体说明", HttpStatus.BAD_REQUEST);
+    }
+
+    const reasonName = reasonNames[dto.reasonType];
+
+    return dto.reasonType === "OTHER" ? `管理员充值：${reason}` : `管理员充值：${reasonName}`;
   }
 
   private aiTaskStatusName(status: string) {

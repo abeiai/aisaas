@@ -1,12 +1,11 @@
-import Link from "next/link";
-import { ArrowLeft, CheckCircle2, Coins, CreditCard, QrCode, WalletCards } from "lucide-react";
+import { CheckCircle2, Coins, CreditCard, QrCode, WalletCards } from "lucide-react";
 import { headers } from "next/headers";
 import QRCode from "qrcode";
 
 import { PaymentOrderForm } from "@/components/billing/payment-order-form";
 import { PaymentPoller } from "@/components/billing/payment-poller";
 import { WechatJsapiLauncher } from "@/components/billing/wechat-jsapi-launcher";
-import { PublicShell } from "@/components/shell/public-shell";
+import { DashboardShell } from "@/components/shell/dashboard-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,9 +16,9 @@ import {
   getAvailablePaymentProducts,
   getLedger,
   getPaymentOrder,
+  getRechargeProducts,
   getWallet,
   mockPayOrderAction,
-  rechargePackages,
   type LedgerEntry,
   type PaymentOrder
 } from "@/lib/billing-api";
@@ -55,6 +54,22 @@ function ledgerAmount(entry: LedgerEntry) {
   return `${sign}${entry.amount.toLocaleString("zh-CN")} 点`;
 }
 
+function ledgerRelatedBusiness(entry: LedgerEntry) {
+  if (entry.relatedOrder?.orderNo) {
+    return entry.relatedOrder.orderNo;
+  }
+
+  if (entry.type === "TOP_UP" && entry.note) {
+    return entry.note.replace(/^管理员充值：/, "");
+  }
+
+  if (entry.relatedTaskId) {
+    return `任务 ${entry.relatedTaskId.slice(0, 8)}`;
+  }
+
+  return "无";
+}
+
 export default async function BillingPage({
   searchParams
 }: {
@@ -63,10 +78,11 @@ export default async function BillingPage({
   const params = await searchParams;
   const requestHeaders = await headers();
   await getCurrentUser();
-  const [wallet, ledger, availableProducts] = await Promise.all([
+  const [wallet, ledger, availableProducts, rechargeProducts] = await Promise.all([
     getWallet(),
     getLedger(),
-    getAvailablePaymentProducts()
+    getAvailablePaymentProducts(),
+    getRechargeProducts()
   ]);
   const initialScene = detectPaymentScene(requestHeaders.get("user-agent"));
   const authorizeUrl = `${process.env.PUBLIC_API_BASE_URL ?? "http://localhost:7342/api"}/payment/wechat/jsapi/authorize?redirect=${encodeURIComponent("/dashboard/billing")}`;
@@ -82,27 +98,9 @@ export default async function BillingPage({
     : null;
 
   return (
-    <PublicShell>
+    <DashboardShell active="billing">
       <PaymentPoller enabled={Boolean(currentOrder && currentOrder.status !== "PAID")} />
-      <section className="mx-auto flex max-w-6xl flex-col gap-8 px-5 py-12">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div className="flex max-w-3xl flex-col gap-4">
-            <Badge>账单中心</Badge>
-            <h1 className="font-display text-5xl font-light leading-tight tracking-normal">
-              点数充值与钱包流水
-            </h1>
-            <p className="text-base leading-7 text-muted-foreground">
-              当前可用支付方式由后台正式启用状态决定，支付结果以后端订单和渠道回调为准。
-            </p>
-          </div>
-          <Button asChild variant="outline">
-            <Link href="/dashboard">
-              <ArrowLeft data-icon="inline-start" />
-              返回用户中心
-            </Link>
-          </Button>
-        </div>
-
+      <section className="flex w-full flex-col gap-8 px-5 py-8">
         {params.error ? (
           <Card>
             <CardContent className="pt-6 text-sm text-muted-foreground">
@@ -179,7 +177,7 @@ export default async function BillingPage({
                 authorizeUrl={authorizeUrl}
                 initialScene={initialScene}
                 products={availableProducts}
-                rechargeOptions={rechargePackages}
+                rechargeOptions={rechargeProducts}
               />
             </CardContent>
           </Card>
@@ -288,9 +286,8 @@ export default async function BillingPage({
                         </TableCell>
                         <TableCell>{ledgerAmount(entry)}</TableCell>
                         <TableCell>{entry.balanceAfter.toLocaleString("zh-CN")} 点</TableCell>
-                        <TableCell className="font-mono text-xs">
-                          {entry.relatedOrder?.orderNo ??
-                            (entry.relatedTaskId ? `任务 ${entry.relatedTaskId.slice(0, 8)}` : "无")}
+                        <TableCell className="max-w-sm break-words text-xs">
+                          {ledgerRelatedBusiness(entry)}
                         </TableCell>
                         <TableCell>{formatDate(entry.createdAt)}</TableCell>
                       </TableRow>
@@ -308,6 +305,6 @@ export default async function BillingPage({
           </CardContent>
         </Card>
       </section>
-    </PublicShell>
+    </DashboardShell>
   );
 }

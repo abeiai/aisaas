@@ -3,13 +3,22 @@ import { createReadStream, existsSync, mkdirSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 import { HttpStatus, Injectable } from "@nestjs/common";
-import { decryptSecret, getPrismaClient, type Prisma } from "@aisaas/database";
+import { decryptSecret, encryptSecret, getPrismaClient, hashPassword, maskSecret, type Prisma } from "@aisaas/database";
 import { AppException } from "../common/app-exception.js";
+import {
+  type AiModelPricingMode,
+  type AiModelPricingUnit,
+  normalizeModelPricingConfig,
+  normalizePricingMode,
+  normalizePricingUnit,
+  pricingConfigToJson,
+  pricingSummaryFromConfig
+} from "../ai/model-pricing.js";
 import { getClientIp, getUserAgent, type HeaderRequestLike } from "../security/request-types.js";
 import { cosyVoiceSystemVoices } from "./cosyvoice-system-voices.js";
 import {
-  CreateAudioPricingRuleDto,
   CreateAudioAssetDto,
+  CreatePlatformVoiceAssetDto,
   DeleteVoiceAssetAdminDto,
   CreateTtsAudioTaskDto,
   CreateVoiceCloneTaskDto,
@@ -17,7 +26,6 @@ import {
   ReviewVoiceAssetDto,
   SetDefaultVoiceDto,
   UpdateAudioModelDto,
-  UpdateAudioPricingRuleDto,
   UpdateSystemVoiceDto,
   UpdateVoiceAssetDto
 } from "./dto/audio.dto.js";
@@ -33,6 +41,17 @@ type AudioTaskStatus =
   | "COMPENSATED";
 
 type AudioTaskType = "TTS" | "VOICE_CLONE" | "VOICE_DESIGN";
+interface AdminAudioTaskListFilters {
+  user?: string;
+  status?: string;
+  type?: string;
+  provider?: string;
+  model?: string;
+  startTime?: string;
+  endTime?: string;
+  page?: string;
+  pageSize?: string;
+}
 type AudioBillingMode = "PER_CHARACTER" | "PER_TASK" | "PER_SECOND";
 type CreditReservationStatus = "RESERVED" | "SETTLED" | "RELEASED" | "EXPIRED" | "FAILED";
 type VoiceConsentType = "SELF_VOICE" | "AUTHORIZED_VOICE";
@@ -52,6 +71,11 @@ interface ActiveAudioModel {
   apiKeyEncrypted: string | null;
   apiKeyEnvName: string;
   capabilityTags: string[];
+  inputPrice: number;
+  outputPrice: number;
+  pricingMode: AiModelPricingMode;
+  pricingUnit: AiModelPricingUnit;
+  pricingConfig: Prisma.JsonValue | null;
 }
 
 interface AudioTaskRecord {
@@ -133,25 +157,19 @@ interface AudioTaskRecord {
   }>;
 }
 
-interface AudioPricingRuleRecord {
-  id: string;
-  operationType: AudioTaskType;
-  model: string;
-  billingMode: AudioBillingMode;
-  creditsPerUnit: DecimalLike;
-  minimumCredits: number;
-  modelMultiplier: DecimalLike;
-  isEnabled: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
 interface AudioPricingQuote {
   ruleId: string;
+  pricingSource: "RULE" | "MODEL";
   billingMode: AudioBillingMode;
   creditsPerUnit: number;
   minimumCredits: number;
   modelMultiplier: number;
+  pricingMode?: AiModelPricingMode;
+  pricingUnit?: AiModelPricingUnit;
+  pricePerUnit?: number;
+  unitSize?: number;
+  creditsPerCny?: number;
+  estimatedCost?: number;
   usageCount: number;
   estimatedCredits: number;
 }
@@ -282,6 +300,17 @@ export class AudioService {
           status: "DISABLED"
         }
       }));
+    const existingModelCount = await this.prisma.aiModelInstance.count({
+      where: {
+        providerInstanceId: instance.id
+      }
+    });
+
+    await this.normalizeDefaultAudioModelPricing(instance.id, preset.modelPresets);
+
+    if (existingModelCount > 0) {
+      return;
+    }
 
     for (const modelPreset of preset.modelPresets) {
       const recommendedAlias = emptyToNull(modelPreset.recommendedAlias ?? undefined);
@@ -307,9 +336,14 @@ export class AudioService {
           modelPresetId: modelPreset.id,
           displayName: modelPreset.displayName,
           providerModelName: modelPreset.providerModelName,
+          baseUrl: instance.baseUrl,
+          webSocketUrl: instance.webSocketUrl,
+          region: instance.region,
           capabilityTags: capabilityTags as Prisma.InputJsonValue,
-          inputPrice: "0",
+          inputPrice: capabilityTags.includes("TTS") ? "1" : "0",
           outputPrice: "0",
+          pricingMode: "CHARACTERS",
+          pricingUnit: "TEN_K_CHARACTERS",
           isEnabled: true
         }
       });
@@ -318,6 +352,50 @@ export class AudioService {
         await this.bindRecommendedAudioAlias(recommendedAlias, model.id);
       }
     }
+  }
+
+  private async normalizeDefaultAudioModelPricing(
+    providerInstanceId: string,
+    modelPresets: Array<{
+      providerModelName: string;
+      capabilityTags: Prisma.JsonValue | null;
+    }>
+  ) {
+    const ttsModelNames = modelPresets
+      .filter((modelPreset) => jsonStringArray(modelPreset.capabilityTags).includes("TTS"))
+      .map((modelPreset) => modelPreset.providerModelName);
+
+    if (ttsModelNames.length === 0) {
+      return;
+    }
+
+    const staleModels = await this.prisma.aiModelInstance.findMany({
+      where: {
+        providerInstanceId,
+        providerModelName: {
+          in: ttsModelNames
+        },
+        inputPrice: 0
+      }
+    });
+
+    await Promise.all(
+      staleModels
+        .filter((model) => Math.abs(model.updatedAt.getTime() - model.createdAt.getTime()) < 1000)
+        .map((model) =>
+          this.prisma.aiModelInstance.update({
+            where: {
+              id: model.id
+            },
+            data: {
+              inputPrice: "1",
+              outputPrice: "0",
+              pricingMode: "CHARACTERS",
+              pricingUnit: "TEN_K_CHARACTERS"
+            }
+          })
+        )
+    );
   }
 
   private async bindRecommendedAudioAlias(aliasKey: (typeof audioModelAliases)[number], modelInstanceId: string) {
@@ -420,6 +498,7 @@ export class AudioService {
 
   async listModelOptions() {
     await this.ensureDashScopeAudioDefaults();
+    const creditsPerCny = await this.getCreditsPerCny();
 
     const aliases = await this.prisma.aiModelAlias.findMany({
       where: {
@@ -464,6 +543,12 @@ export class AudioService {
         providerName: provider?.name ?? preset?.displayName ?? null,
         modelName: model?.providerModelName ?? null,
         capabilityTags: jsonStringArray(model?.capabilityTags),
+        inputPrice: model?.inputPrice.toString() ?? "0",
+        outputPrice: model?.outputPrice.toString() ?? "0",
+        pricingMode: model ? normalizePricingMode(model.pricingMode) : "CHARACTERS",
+        pricingUnit: model ? normalizePricingUnit(model.pricingUnit, model.pricingMode) : "TEN_K_CHARACTERS",
+        pricingConfig: model?.pricingConfig ?? null,
+        creditsPerCny,
         statusName: isConfigured ? "已配置" : "未配置"
       };
     });
@@ -472,41 +557,29 @@ export class AudioService {
   async listAdminAudioModels() {
     await this.ensureDashScopeAudioDefaults();
 
-    const [models, pricingRules] = await Promise.all([
-      this.prisma.aiModelInstance.findMany({
-        where: {
+    const models = await this.prisma.aiModelInstance.findMany({
+      where: {
+        providerInstance: {
+          providerPreset: {
+            adapterType: "DASHSCOPE_AUDIO",
+            modality: "AUDIO"
+          }
+        }
+      },
+      include: adminAudioModelInclude(),
+      orderBy: [
+        {
           providerInstance: {
-            providerPreset: {
-              adapterType: "DASHSCOPE_AUDIO",
-              modality: "AUDIO"
-            }
+            name: "asc"
           }
         },
-        include: adminAudioModelInclude(),
-        orderBy: [
-          {
-            providerInstance: {
-              name: "asc"
-            }
-          },
-          {
-            displayName: "asc"
-          }
-        ]
-      }),
-      this.prisma.audioPricingRule.findMany({
-        orderBy: [
-          {
-            operationType: "asc"
-          },
-          {
-            model: "asc"
-          }
-        ]
-      })
-    ]);
+        {
+          displayName: "asc"
+        }
+      ]
+    });
 
-    return models.map((model) => this.toAdminAudioModel(model, pricingRules));
+    return models.map((model) => this.toAdminAudioModel(model));
   }
 
   async updateAdminAudioModel(id: string, dto: UpdateAudioModelDto) {
@@ -528,16 +601,65 @@ export class AudioService {
       throw new AppException(40001, "该模型不是语音模型", HttpStatus.BAD_REQUEST);
     }
 
-    if (typeof dto.isEnabled === "boolean" && dto.isEnabled !== existing.isEnabled) {
-      await this.prisma.aiModelInstance.update({
-        where: {
-          id
-        },
-        data: {
-          isEnabled: dto.isEnabled
+    const pricingConfig =
+      dto.pricingConfig === undefined ? undefined : normalizeModelPricingConfig(dto.pricingConfig);
+    const pricingSummary =
+      pricingConfig === undefined
+        ? null
+        : pricingSummaryFromConfig(pricingConfig, {
+            inputPrice: dto.inputPrice === undefined ? existing.inputPrice.toString() : String(dto.inputPrice),
+            outputPrice: dto.outputPrice === undefined ? existing.outputPrice.toString() : String(dto.outputPrice),
+            pricingMode: dto.pricingMode === undefined ? normalizePricingMode(existing.pricingMode) : normalizePricingMode(dto.pricingMode),
+            pricingUnit:
+              dto.pricingUnit === undefined
+                ? normalizePricingUnit(existing.pricingUnit, dto.pricingMode ?? existing.pricingMode)
+                : normalizePricingUnit(dto.pricingUnit, dto.pricingMode ?? existing.pricingMode)
+          });
+    const normalizedCapabilityTags =
+      dto.capabilityTags === undefined ? jsonStringArray(existing.capabilityTags) : normalizeCapabilityTags(dto.capabilityTags);
+    const nextCapabilityTags =
+      dto.capabilityTags === undefined ? undefined : (normalizedCapabilityTags as Prisma.InputJsonValue);
+    const modelApiKey = dto.apiKey?.trim();
+    const modelApiKeyData = modelApiKey
+      ? {
+          apiKeyEncrypted: encryptSecret(modelApiKey),
+          apiKeyPreview: maskSecret(modelApiKey)
         }
-      });
-    }
+      : dto.clearApiKey
+        ? {
+            apiKeyEncrypted: null,
+            apiKeyPreview: null
+          }
+        : {};
+
+    await this.prisma.aiModelInstance.update({
+      where: {
+        id
+      },
+      data: {
+        displayName: dto.displayName === undefined ? undefined : emptyToNull(dto.displayName) ?? existing.displayName,
+        providerModelName: dto.modelName === undefined ? undefined : emptyToNull(dto.modelName) ?? existing.providerModelName,
+        baseUrl: normalizeOptionalBaseUrl(dto.baseUrl),
+        webSocketUrl: dto.webSocketUrl === undefined ? undefined : emptyToNull(dto.webSocketUrl),
+        region: dto.region === undefined ? undefined : emptyToNull(dto.region),
+        ...modelApiKeyData,
+        capabilityTags: nextCapabilityTags,
+        inputPrice: pricingSummary ? pricingSummary.inputPrice : dto.inputPrice === undefined ? undefined : String(dto.inputPrice),
+        outputPrice: pricingSummary ? pricingSummary.outputPrice : dto.outputPrice === undefined ? undefined : String(dto.outputPrice),
+        pricingMode: pricingSummary
+          ? pricingSummary.pricingMode
+          : dto.pricingMode === undefined
+            ? undefined
+            : normalizePricingMode(dto.pricingMode),
+        pricingUnit: pricingSummary
+          ? pricingSummary.pricingUnit
+          : dto.pricingUnit === undefined
+            ? undefined
+            : normalizePricingUnit(dto.pricingUnit, dto.pricingMode ?? existing.pricingMode),
+        pricingConfig: pricingConfig === undefined ? undefined : pricingConfigToJson(pricingConfig),
+        isEnabled: dto.isEnabled
+      }
+    });
 
     const aliasKey = emptyToNull(dto.aliasKey);
     if (aliasKey) {
@@ -546,9 +668,8 @@ export class AudioService {
       }
 
       const requiredCapability = audioAliasRequiredCapability(aliasKey);
-      const capabilityTags = jsonStringArray(existing.capabilityTags);
 
-      if (requiredCapability && !capabilityTags.includes(requiredCapability)) {
+      if (requiredCapability && !normalizedCapabilityTags.includes(requiredCapability)) {
         throw new AppException(40001, "该模型不支持所选用途别名", HttpStatus.BAD_REQUEST);
       }
 
@@ -583,58 +704,108 @@ export class AudioService {
       throw new AppException(40401, "语音模型不存在", HttpStatus.NOT_FOUND);
     }
 
-    const pricingRules = await this.prisma.audioPricingRule.findMany();
-
-    return this.toAdminAudioModel(updated, pricingRules);
+    return this.toAdminAudioModel(updated);
   }
 
-  async listPricingRules() {
-    const rules = await this.prisma.audioPricingRule.findMany({
-      orderBy: [
-        {
-          operationType: "asc"
+  async checkAdminAudioModelDelete(modelInstanceId: string) {
+    const model = await this.prisma.aiModelInstance.findUnique({
+      where: {
+        id: modelInstanceId
+      },
+      include: adminAudioModelInclude()
+    });
+
+    if (!model) {
+      throw new AppException(40401, "语音模型不存在", HttpStatus.NOT_FOUND);
+    }
+
+    if (
+      model.providerInstance.providerPreset.adapterType !== "DASHSCOPE_AUDIO" ||
+      model.providerInstance.providerPreset.modality !== "AUDIO"
+    ) {
+      throw new AppException(40001, "该模型不是语音模型", HttpStatus.BAD_REQUEST);
+    }
+
+    const aliasKeys = model.aliases.filter((alias) => isAudioModelAliasKey(alias.aliasKey)).map((alias) => alias.aliasKey);
+    const scenarioBindings = aliasKeys.length
+      ? await this.prisma.aiScenarioModelBinding.findMany({
+          where: {
+            OR: [
+              {
+                defaultModelAlias: {
+                  in: aliasKeys
+                }
+              },
+              {
+                fallbackModelAlias: {
+                  in: aliasKeys
+                }
+              }
+            ]
+          },
+          include: {
+            scenario: {
+              select: {
+                name: true,
+                slug: true,
+                isEnabled: true
+              }
+            }
+          },
+          orderBy: {
+            createdAt: "asc"
+          }
+        })
+      : [];
+    const boundScenarios = scenarioBindings.map((binding) => ({
+      name: binding.scenario.name,
+      slug: binding.scenario.slug,
+      isEnabled: binding.scenario.isEnabled,
+      aliasKey:
+        binding.defaultModelAlias && aliasKeys.includes(binding.defaultModelAlias)
+          ? binding.defaultModelAlias
+          : binding.fallbackModelAlias
+    }));
+
+    return {
+      modelInstanceId,
+      canDelete: boundScenarios.length === 0,
+      aliasKeys,
+      boundScenarios,
+      message:
+        boundScenarios.length > 0
+          ? `该语音模型仍被 ${boundScenarios.length} 个 AI 场景使用，请先解除模型别名绑定后再删除。`
+          : "该语音模型未被 AI 场景使用，可以删除。"
+    };
+  }
+
+  async deleteAdminAudioModel(modelInstanceId: string) {
+    const check = await this.checkAdminAudioModelDelete(modelInstanceId);
+
+    if (!check.canDelete) {
+      throw new AppException(40001, check.message, HttpStatus.BAD_REQUEST);
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.aiModelAlias.updateMany({
+        where: {
+          modelInstanceId
         },
-        {
-          model: "asc"
+        data: {
+          modelInstanceId: null
         }
-      ]
-    });
-
-    return rules.map((rule) => this.toPricingRule(rule));
-  }
-
-  async createPricingRule(dto: CreateAudioPricingRuleDto) {
-    const rule = normalizePricingRuleInput(dto);
-    const saved = await this.prisma.audioPricingRule.upsert({
-      where: {
-        operationType_model: {
-          operationType: rule.operationType,
-          model: rule.model
+      }),
+      this.prisma.aiModelInstance.delete({
+        where: {
+          id: modelInstanceId
         }
-      },
-      update: {
-        billingMode: rule.billingMode,
-        creditsPerUnit: rule.creditsPerUnit,
-        minimumCredits: rule.minimumCredits,
-        modelMultiplier: rule.modelMultiplier,
-        isEnabled: rule.isEnabled
-      },
-      create: rule
-    });
+      })
+    ]);
 
-    return this.toPricingRule(saved);
-  }
-
-  async updatePricingRule(id: string, dto: UpdateAudioPricingRuleDto) {
-    const data = normalizePricingRuleUpdate(dto);
-    const updated = await this.prisma.audioPricingRule.update({
-      where: {
-        id
-      },
-      data
-    });
-
-    return this.toPricingRule(updated);
+    return {
+      deleted: true,
+      modelInstanceId
+    };
   }
 
   async getUsageDashboard(filters: {
@@ -767,10 +938,11 @@ export class AudioService {
   }
 
   async listVoiceAssets(userId: string) {
-    const [voices, preference, systemVoiceItems] = await Promise.all([
+    const [voices, preference, platformVoices, systemVoiceItems] = await Promise.all([
       this.prisma.voiceAsset.findMany({
         where: {
           userId,
+          isPlatform: false,
           status: {
             not: "DELETED"
           }
@@ -791,6 +963,25 @@ export class AudioService {
           userId
         }
       }),
+      this.prisma.voiceAsset.findMany({
+        where: {
+          isPlatform: true,
+          status: "READY",
+          providerVoiceId: {
+            not: null
+          }
+        },
+        include: {
+          sourceAudioAsset: true,
+          previewAudioAsset: true,
+          consent: true,
+          targetConsent: true
+        },
+        orderBy: {
+          createdAt: "desc"
+        },
+        take: 100
+      }),
       this.listSystemVoiceItems()
     ]);
 
@@ -800,6 +991,10 @@ export class AudioService {
         typeName: voiceTypeName(voice.type),
         statusName: voiceStatusName(voice.status),
         isDefault: preference?.defaultSystemVoiceId === voice.providerVoiceId
+      })),
+      platformVoices: platformVoices.map((voice) => ({
+        ...this.toVoiceAsset(voice),
+        isDefault: preference?.defaultVoiceAssetId === voice.id
       })),
       customVoices: voices.map((voice) => ({
         ...this.toVoiceAsset(voice),
@@ -826,6 +1021,78 @@ export class AudioService {
     });
 
     return voices.map((voice) => this.toAdminVoiceAsset(voice));
+  }
+
+  async createPlatformVoiceAsset(dto: CreatePlatformVoiceAssetDto, adminUserId: string) {
+    const providerVoiceId = dto.providerVoiceId.trim();
+    const name = dto.name.trim();
+
+    if (!providerVoiceId || !name) {
+      throw new AppException(40001, "请填写平台音色名称和 Provider voice_id", HttpStatus.BAD_REQUEST);
+    }
+
+    const model = await this.prisma.aiModelInstance.findUnique({
+      where: {
+        id: dto.modelInstanceId
+      },
+      include: {
+        providerInstance: {
+          include: {
+            providerPreset: true
+          }
+        }
+      }
+    });
+
+    if (!model) {
+      throw new AppException(40401, "语音模型不存在", HttpStatus.NOT_FOUND);
+    }
+
+    const capabilityTags = jsonStringArray(model.capabilityTags);
+    if (!capabilityTags.includes("TTS")) {
+      throw new AppException(40001, "平台音色必须绑定支持语音合成的模型", HttpStatus.BAD_REQUEST);
+    }
+
+    const duplicated = await this.prisma.voiceAsset.findFirst({
+      where: {
+        isPlatform: true,
+        providerVoiceId,
+        targetModel: model.providerModelName,
+        status: {
+          not: "DELETED"
+        }
+      }
+    });
+
+    if (duplicated) {
+      throw new AppException(40001, "该模型下已存在相同 Provider voice_id 的平台音色", HttpStatus.BAD_REQUEST);
+    }
+
+    const owner = await this.ensurePlatformVoiceOwnerUser();
+    const voice = await this.prisma.voiceAsset.create({
+      data: {
+        userId: owner.id,
+        providerInstanceId: model.providerInstanceId,
+        provider: model.providerInstance.providerPreset.providerKey,
+        providerVoiceId,
+        name,
+        type: dto.type,
+        targetModel: model.providerModelName,
+        status: "READY",
+        visibility: "PUBLIC",
+        language: emptyToNull(dto.language),
+        description: emptyToNull(dto.description),
+        previewAudioUrl: emptyToNull(dto.previewAudioUrl),
+        isPlatform: true,
+        reviewedByAdminId: adminUserId,
+        reviewedAt: new Date(),
+        reviewNote: "平台音色由后台添加",
+        disabledReason: null
+      },
+      include: adminVoiceAssetInclude()
+    });
+
+    return this.toAdminVoiceAsset(voice);
   }
 
   async listAdminSystemVoiceAssets(filters: AdminSystemVoiceFilters = {}) {
@@ -1189,11 +1456,12 @@ export class AudioService {
       preferredModel.label
     );
     const voice = await this.resolveVoice(userId, dto.voiceAssetId, dto.voice, model.modelName);
-    const pricing = await this.calculatePricingQuote("TTS", model.modelName, {
-      characterCount: text.length
+    const pricing = await this.calculatePricingQuote("TTS", model, {
+      characterCount: estimatedTtsBillingCharacters(text)
     });
     const estimatedCredits = pricing.estimatedCredits;
     const parameters = normalizeTtsParameters(dto);
+    const timeoutMs = ttsGatewayTimeoutMs(text);
     const task = await this.reserveAudioTask({
       userId,
       type: "TTS",
@@ -1203,7 +1471,9 @@ export class AudioService {
       voiceAssetId: voice.voiceAssetId ?? undefined,
       providerPayload: {
         voice: voice.providerVoiceId,
+        source: dto.source ?? "TOOL",
         parameters,
+        timeoutMs,
         pricing: pricingSnapshot(pricing)
       } as unknown as Prisma.InputJsonValue,
       reserveNote: `语音合成冻结 ${estimatedCredits} 点`
@@ -1213,7 +1483,7 @@ export class AudioService {
       return this.getUserTask(userId, task.id);
     }
 
-    return this.executeTtsTask(task.id, model, voice.providerVoiceId, text, parameters);
+    return this.executeTtsTask(task.id, model, voice.providerVoiceId, text, parameters, timeoutMs);
   }
 
   async createVoiceCloneTask(userId: string, dto: CreateVoiceCloneTaskDto, request?: HeaderRequestLike) {
@@ -1235,7 +1505,7 @@ export class AudioService {
       throw new AppException(40001, "使用他人授权声音时，请填写权利人姓名和联系方式", HttpStatus.BAD_REQUEST);
     }
 
-    const pricing = await this.calculatePricingQuote("VOICE_CLONE", model.modelName, {
+    const pricing = await this.calculatePricingQuote("VOICE_CLONE", model, {
       usageCount: 1
     });
     const estimatedCredits = pricing.estimatedCredits;
@@ -1288,6 +1558,7 @@ export class AudioService {
       voiceAssetId: voiceAsset.id,
       providerPayload: {
         voiceAssetId: voiceAsset.id,
+        source: dto.source ?? "TOOL",
         targetModel: model.modelName,
         pricing: pricingSnapshot(pricing)
       },
@@ -1306,7 +1577,7 @@ export class AudioService {
 
     const model = await this.getModelByAlias(dto.modelAlias ?? "voice-design-default", "VOICE_DESIGN");
     const safety = await this.audioSafetySettings();
-    const pricing = await this.calculatePricingQuote("VOICE_DESIGN", model.modelName, {
+    const pricing = await this.calculatePricingQuote("VOICE_DESIGN", model, {
       usageCount: 1
     });
     const estimatedCredits = pricing.estimatedCredits;
@@ -1334,6 +1605,7 @@ export class AudioService {
       voiceAssetId: voiceAsset.id,
       providerPayload: {
         previewText: emptyToNull(dto.previewText),
+        source: dto.source ?? "TOOL",
         targetModel: model.modelName,
         pricing: pricingSnapshot(pricing)
       },
@@ -1407,7 +1679,15 @@ export class AudioService {
       const voice = await this.prisma.voiceAsset.findFirst({
         where: {
           id: voiceAssetId,
-          userId,
+          OR: [
+            {
+              userId,
+              isPlatform: false
+            },
+            {
+              isPlatform: true
+            }
+          ],
           status: "READY"
         }
       });
@@ -1478,7 +1758,7 @@ export class AudioService {
     return this.toAudioTask(task);
   }
 
-  async listAdminTasks(filters: { user?: string; status?: string; type?: string } = {}) {
+  async listAdminTasks(filters: AdminAudioTaskListFilters = {}) {
     const where: Prisma.AudioTaskWhereInput = {};
 
     if (isAudioTaskStatus(filters.status)) {
@@ -1515,6 +1795,52 @@ export class AudioService {
       };
     }
 
+    const createdAt = adminAudioTaskDateFilter(filters.startTime, filters.endTime);
+    if (createdAt) {
+      where.createdAt = createdAt;
+    }
+
+    const andFilters: Prisma.AudioTaskWhereInput[] = [];
+    const providerKeyword = emptyToNull(filters.provider);
+    if (providerKeyword) {
+      andFilters.push({
+        OR: [
+          {
+            providerInstanceId: providerKeyword
+          },
+          {
+            provider: {
+              contains: providerKeyword,
+              mode: "insensitive"
+            }
+          }
+        ]
+      });
+    }
+
+    const modelKeyword = emptyToNull(filters.model);
+    if (modelKeyword) {
+      andFilters.push({
+        OR: [
+          {
+            modelInstanceId: modelKeyword
+          },
+          {
+            model: {
+              contains: modelKeyword,
+              mode: "insensitive"
+            }
+          }
+        ]
+      });
+    }
+
+    if (andFilters.length > 0) {
+      where.AND = andFilters;
+    }
+
+    const pageSize = parseAdminAudioListPageSize(filters.pageSize, filters.page ? 50 : 100);
+    const page = parseAdminAudioListPage(filters.page);
     const tasks = await this.prisma.audioTask.findMany({
       where,
       include: {
@@ -1530,7 +1856,8 @@ export class AudioService {
       orderBy: {
         createdAt: "desc"
       },
-      take: 100
+      skip: (page - 1) * pageSize,
+      take: pageSize
     });
 
     return tasks.map((task) => this.toAdminAudioTask(task));
@@ -1575,7 +1902,8 @@ export class AudioService {
     model: ActiveAudioModel,
     providerVoiceId: string,
     text: string,
-    parameters: TtsParameters
+    parameters: TtsParameters,
+    timeoutMs: number
   ) {
     await this.prisma.audioTask.update({
       where: {
@@ -1601,6 +1929,7 @@ export class AudioService {
           model: model.modelName,
           voice: providerVoiceId,
           text,
+          timeoutMs,
           ...parameters
         })
       });
@@ -1882,26 +2211,22 @@ export class AudioService {
 
       const mergedProviderPayload = mergeProviderPayload(task.providerPayload, providerPayload);
       const actualCredits = calculateActualCreditsFromTask(task, providerPayload);
-      const settledCredits = Math.min(actualCredits, task.reservation.amount);
-      const releaseCredits = Math.max(0, task.reservation.amount - settledCredits);
-      const currentWallet = await transaction.wallet.findUniqueOrThrow({
-        where: {
-          userId: task.userId
-        }
-      });
+      const reservedCredits = task.reservation.amount;
+      const releaseCredits = Math.max(0, reservedCredits - actualCredits);
+      const extraCredits = Math.max(0, actualCredits - reservedCredits);
       const wallet = await transaction.wallet.update({
         where: {
           userId: task.userId
         },
         data: {
           availableCredits: {
-            increment: releaseCredits
+            increment: releaseCredits - extraCredits
           },
           frozenCredits: {
-            decrement: task.reservation.amount
+            decrement: reservedCredits
           },
           totalConsumedCredits: {
-            increment: settledCredits
+            increment: actualCredits
           }
         }
       });
@@ -1919,13 +2244,13 @@ export class AudioService {
         data: {
           userId: task.userId,
           type: "CONSUME",
-          amount: -settledCredits,
-          balanceAfter: currentWallet.availableCredits,
+          amount: -actualCredits,
+          balanceAfter: wallet.availableCredits,
           relatedAudioTaskId: task.id,
           relatedTaskType: "AUDIO",
           operationType: task.type,
           idempotencyKey: `audio-task:${task.id}:consume`,
-          note: `语音任务消耗 ${settledCredits} 点`
+          note: `语音任务消耗 ${actualCredits} 点`
         }
       });
 
@@ -1954,7 +2279,7 @@ export class AudioService {
         data: {
           status: "SUCCEEDED",
           outputAudioAssetId,
-          actualCredits: settledCredits,
+          actualCredits,
           errorCode: null,
           errorMessage: null,
           requestId: extractProviderRequestId(providerPayload),
@@ -1965,7 +2290,7 @@ export class AudioService {
 
       await this.writeAudioUsageLog(transaction, task, {
         success: true,
-        consumedCredits: settledCredits,
+        consumedCredits: actualCredits,
         providerPayload
       });
 
@@ -2264,12 +2589,17 @@ export class AudioService {
       providerDisplayName: providerPreset.displayName,
       adapterType: providerPreset.adapterType,
       modelName: model.providerModelName,
-      baseUrl: providerInstance.baseUrl,
-      webSocketUrl: providerInstance.webSocketUrl,
-      region: providerInstance.region ?? providerPreset.region,
-      apiKeyEncrypted: providerInstance.credential?.apiKeyEncrypted ?? null,
+      baseUrl: normalizeBaseUrl(model.baseUrl || providerInstance.baseUrl),
+      webSocketUrl: model.webSocketUrl ?? providerInstance.webSocketUrl,
+      region: model.region ?? providerInstance.region ?? providerPreset.region,
+      apiKeyEncrypted: model.apiKeyEncrypted ?? providerInstance.credential?.apiKeyEncrypted ?? null,
       apiKeyEnvName: providerPreset.apiKeyEnvName,
-      capabilityTags
+      capabilityTags,
+      inputPrice: decimalNumber(model.inputPrice),
+      outputPrice: decimalNumber(model.outputPrice),
+      pricingMode: normalizePricingMode(model.pricingMode),
+      pricingUnit: normalizePricingUnit(model.pricingUnit, model.pricingMode),
+      pricingConfig: model.pricingConfig
     } satisfies ActiveAudioModel;
   }
 
@@ -2411,7 +2741,15 @@ export class AudioService {
     const asset = await this.prisma.voiceAsset.findFirst({
       where: {
         id: voiceAssetId,
-        userId
+        OR: [
+          {
+            userId,
+            isPlatform: false
+          },
+          {
+            isPlatform: true
+          }
+        ]
       }
     });
 
@@ -2457,7 +2795,8 @@ export class AudioService {
     const asset = await this.prisma.voiceAsset.findFirst({
       where: {
         id,
-        userId
+        userId,
+        isPlatform: false
       },
       include: {
         sourceAudioAsset: true,
@@ -2498,6 +2837,28 @@ export class AudioService {
     };
   }
 
+  private async ensurePlatformVoiceOwnerUser() {
+    const email = "platform-voice@aisaas.local";
+    const existing = await this.prisma.user.findUnique({
+      where: {
+        email
+      }
+    });
+
+    if (existing) {
+      return existing;
+    }
+
+    return this.prisma.user.create({
+      data: {
+        email,
+        passwordHash: await hashPassword(randomBytes(24).toString("hex")),
+        nickname: "平台音色",
+        status: "ACTIVE"
+      }
+    });
+  }
+
   private resolveProviderApiKey(model: ActiveAudioModel) {
     if (model.apiKeyEncrypted) {
       try {
@@ -2527,36 +2888,50 @@ export class AudioService {
 
   private async calculatePricingQuote(
     operationType: AudioTaskType,
-    model: string,
+    model: ActiveAudioModel,
     input: {
       characterCount?: number;
       audioDurationMs?: number | null;
       usageCount?: number;
     }
   ): Promise<AudioPricingQuote> {
-    const rule =
-      (await this.prisma.audioPricingRule.findUnique({
-        where: {
-          operationType_model: {
-            operationType,
-            model
-          }
-        }
-      })) ??
-      (await this.prisma.audioPricingRule.findUnique({
-        where: {
-          operationType_model: {
-            operationType,
-            model: "*"
-          }
-        }
-      }));
+    const modelQuote = await this.quoteFromAudioModel(model, input);
 
-    if (!rule || !rule.isEnabled) {
-      throw new AppException(40001, `语音计费规则未配置或已禁用：${audioTaskTypeName(operationType)} / ${model}`, HttpStatus.BAD_REQUEST);
+    if (!modelQuote) {
+      throw new AppException(
+        40001,
+        `语音模型价格未配置或不支持当前计费方式：${audioTaskTypeName(operationType)} / ${model.modelName}`,
+        HttpStatus.BAD_REQUEST
+      );
     }
 
-    return quoteFromPricingRule(rule, input);
+    return modelQuote;
+  }
+
+  private async quoteFromAudioModel(
+    model: ActiveAudioModel,
+    input: {
+      characterCount?: number;
+      audioDurationMs?: number | null;
+      usageCount?: number;
+    }
+  ) {
+    const creditsPerCny = await this.getCreditsPerCny();
+
+    return quoteFromAudioModelPricing(model, input, creditsPerCny);
+  }
+
+  private async getCreditsPerCny() {
+    const config = await this.prisma.systemConfig.findUnique({
+      where: {
+        key: "defaultCreditExchangeRate"
+      },
+      select: {
+        value: true
+      }
+    });
+
+    return parseCreditsPerCny(config?.value);
   }
 
   private async writeAudioUsageLog(
@@ -2570,6 +2945,7 @@ export class AudioService {
       modelInstanceId: string | null;
       voiceAssetId: string | null;
       type: AudioTaskType;
+      inputText: string | null;
       inputTextLength: number;
       estimatedCredits: number;
       providerPayload: Prisma.JsonValue | null;
@@ -2582,11 +2958,18 @@ export class AudioService {
   ) {
     const snapshot = pricingSnapshotFromTask(task.providerPayload);
     const durationMs = extractAudioDurationMs(input.providerPayload);
-    const usageCount = snapshot?.usageCount ?? usageCountForBilling(snapshot?.billingMode, {
-      characterCount: task.inputTextLength,
-      audioDurationMs: durationMs,
-      usageCount: 1
-    });
+    const characterCount = billableCharacterCountForTask(task, input.providerPayload);
+    const usageCount = snapshot
+      ? usageCountForPricingSnapshot(snapshot, {
+          characterCount,
+          audioDurationMs: durationMs,
+          usageCount: snapshot.usageCount
+        })
+      : usageCountForBilling(undefined, {
+          characterCount,
+          audioDurationMs: durationMs,
+          usageCount: 1
+        });
     const data = {
       userId: task.userId,
       provider: task.provider,
@@ -2595,12 +2978,12 @@ export class AudioService {
       modelInstanceId: task.modelInstanceId,
       voiceAssetId: task.voiceAssetId,
       operationType: task.type,
-      characterCount: task.inputTextLength,
+      characterCount,
       audioDurationMs: durationMs,
       usageCount,
       latencyMs: extractLatencyMs(input.providerPayload),
       success: input.success,
-      estimatedCost: estimatedAudioCost(input.providerPayload),
+      estimatedCost: actualEstimatedCostFromSnapshot(snapshot, usageCount) ?? estimatedAudioCost(input.providerPayload),
       consumedCredits: input.consumedCredits,
       providerRequestId: extractProviderRequestId(input.providerPayload)
     };
@@ -2794,7 +3177,7 @@ export class AudioService {
     };
   }
 
-  private toAdminAudioModel(model: AdminAudioModelRecord, pricingRules: AudioPricingRuleRecord[]) {
+  private toAdminAudioModel(model: AdminAudioModelRecord) {
     const capabilityTags = jsonStringArray(model.capabilityTags);
     const aliases = model.aliases
       .filter((alias) => isAudioModelAliasKey(alias.aliasKey))
@@ -2805,9 +3188,9 @@ export class AudioService {
         description: alias.description,
         updatedAt: alias.updatedAt
       }));
-    const matchedRules = pricingRules.filter((rule) => rule.model === model.providerModelName);
-    const fallbackRules = pricingRules.filter((rule) => rule.model === "*");
-    const selectedRule = matchedRules[0] ?? fallbackRules[0] ?? null;
+    const inputPrice = decimalNumber(model.inputPrice);
+    const outputPrice = decimalNumber(model.outputPrice);
+    const defaultCharacterPricing = model.pricingMode === "TOKENS" && inputPrice === 0 && outputPrice === 0;
 
     return {
       id: model.id,
@@ -2817,12 +3200,19 @@ export class AudioService {
       providerName: model.providerInstance.name,
       providerDisplayName: model.providerInstance.providerPreset.displayName,
       providerStatus: model.providerInstance.status,
-      region: model.providerInstance.region ?? model.providerInstance.providerPreset.region,
+      baseUrl: model.baseUrl,
+      webSocketUrl: model.webSocketUrl,
+      region: model.region ?? model.providerInstance.region ?? model.providerInstance.providerPreset.region,
+      hasCustomApiKey: Boolean(model.apiKeyEncrypted),
+      apiKeyPreview: model.apiKeyEncrypted ? model.apiKeyPreview ?? maskSecretPreview(model.apiKeyEncrypted) : "使用 Provider 默认",
       capabilityTags,
       isEnabled: model.isEnabled,
       statusName: model.isEnabled ? "启用" : "停用",
-      priceMultiplier: selectedRule ? decimalNumber(selectedRule.modelMultiplier) : null,
-      pricingRules: [...matchedRules, ...fallbackRules].map((rule) => this.toPricingRule(rule)),
+      inputPrice: inputPrice.toString(),
+      outputPrice: outputPrice.toString(),
+      pricingMode: defaultCharacterPricing ? "CHARACTERS" : model.pricingMode,
+      pricingUnit: defaultCharacterPricing ? "TEN_K_CHARACTERS" : model.pricingUnit,
+      pricingConfig: model.pricingConfig,
       aliases,
       defaultPurposes: aliases.map((alias) => alias.displayName),
       supportsTts: capabilityTags.includes("TTS"),
@@ -2894,6 +3284,7 @@ export class AudioService {
     disabledReason?: string | null;
     reviewedAt?: Date | null;
     deletedAt?: Date | null;
+    isPlatform?: boolean;
     createdAt: Date;
     updatedAt: Date;
   }) {
@@ -2919,6 +3310,7 @@ export class AudioService {
       disabledReason: asset.disabledReason ?? null,
       reviewedAt: asset.reviewedAt ?? null,
       deletedAt: asset.deletedAt ?? null,
+      isPlatform: asset.isPlatform ?? false,
       createdAt: asset.createdAt,
       updatedAt: asset.updatedAt
     };
@@ -2994,24 +3386,6 @@ export class AudioService {
       ...this.toAudioTask(task),
       sourceAudioAsset: task.sourceAudioAsset ? this.toAudioAssetMetadata(task.sourceAudioAsset) : null,
       sourceSampleFilePath: task.sourceAudioAssetId ? `/admin/audio/assets/${task.sourceAudioAssetId}/file` : null
-    };
-  }
-
-  private toPricingRule(rule: AudioPricingRuleRecord) {
-    return {
-      id: rule.id,
-      operationType: rule.operationType,
-      operationTypeName: audioTaskTypeName(rule.operationType),
-      model: rule.model,
-      billingMode: rule.billingMode,
-      billingModeName: billingModeName(rule.billingMode),
-      creditsPerUnit: decimalNumber(rule.creditsPerUnit),
-      minimumCredits: rule.minimumCredits,
-      modelMultiplier: decimalNumber(rule.modelMultiplier),
-      isEnabled: rule.isEnabled,
-      statusName: rule.isEnabled ? "启用" : "停用",
-      createdAt: rule.createdAt,
-      updatedAt: rule.updatedAt
     };
   }
 
@@ -3430,60 +3804,6 @@ function hmac(key: string | Buffer, value: string) {
   return createHmac("sha256", key).update(value).digest();
 }
 
-function normalizePricingRuleInput(dto: CreateAudioPricingRuleDto) {
-  return {
-    operationType: dto.operationType,
-    model: dto.model?.trim() || "*",
-    billingMode: dto.billingMode,
-    creditsPerUnit: positiveDecimal(dto.creditsPerUnit, "单位点数必须大于或等于 0"),
-    minimumCredits: nonNegativeInt(dto.minimumCredits, "最低扣费不能小于 0"),
-    modelMultiplier: positiveDecimal(dto.modelMultiplier, "模型倍率必须大于或等于 0"),
-    isEnabled: dto.isEnabled ?? true
-  };
-}
-
-function normalizePricingRuleUpdate(dto: UpdateAudioPricingRuleDto) {
-  const data: Prisma.AudioPricingRuleUpdateInput = {};
-
-  if (dto.billingMode) {
-    data.billingMode = dto.billingMode;
-  }
-
-  if (dto.creditsPerUnit !== undefined) {
-    data.creditsPerUnit = positiveDecimal(dto.creditsPerUnit, "单位点数必须大于或等于 0");
-  }
-
-  if (dto.minimumCredits !== undefined) {
-    data.minimumCredits = nonNegativeInt(dto.minimumCredits, "最低扣费不能小于 0");
-  }
-
-  if (dto.modelMultiplier !== undefined) {
-    data.modelMultiplier = positiveDecimal(dto.modelMultiplier, "模型倍率必须大于或等于 0");
-  }
-
-  if (dto.isEnabled !== undefined) {
-    data.isEnabled = dto.isEnabled;
-  }
-
-  return data;
-}
-
-function positiveDecimal(value: number, message: string) {
-  if (!Number.isFinite(value) || value < 0) {
-    throw new AppException(40001, message, HttpStatus.BAD_REQUEST);
-  }
-
-  return Number(value.toFixed(4));
-}
-
-function nonNegativeInt(value: number, message: string) {
-  if (!Number.isFinite(value) || value < 0) {
-    throw new AppException(40001, message, HttpStatus.BAD_REQUEST);
-  }
-
-  return Math.round(value);
-}
-
 function defaultAudioSafetySettings() {
   return {
     audioVoiceCloneReviewRequired: true,
@@ -3559,41 +3879,82 @@ function moderationUpdateData(action: VoiceAssetModerationAction, reason: string
   };
 }
 
-function quoteFromPricingRule(
-  rule: AudioPricingRuleRecord,
+function quoteFromAudioModelPricing(
+  model: ActiveAudioModel,
   input: {
     characterCount?: number;
     audioDurationMs?: number | null;
     usageCount?: number;
+  },
+  creditsPerCny: number
+): AudioPricingQuote | null {
+  const pricingMode = normalizePricingMode(model.pricingMode);
+  const pricingUnit = normalizePricingUnit(model.pricingUnit, pricingMode);
+  const pricePerUnit = Math.max(0, model.inputPrice);
+  let billingMode: AudioBillingMode;
+  let usageCount: number;
+  let unitSize: number;
+
+  if (pricingMode === "CHARACTERS") {
+    if (input.characterCount === undefined) {
+      return null;
+    }
+
+    billingMode = "PER_CHARACTER";
+    usageCount = Math.max(0, Math.ceil(input.characterCount ?? 0));
+    unitSize = audioModelPricingUnitSize(pricingUnit);
+  } else if (pricingMode === "REQUEST") {
+    billingMode = "PER_TASK";
+    usageCount = Math.max(1, Math.ceil(input.usageCount ?? 1));
+    unitSize = 1;
+  } else if (pricingMode === "SECONDS") {
+    billingMode = "PER_SECOND";
+    const durationSeconds = Math.ceil(Math.max(0, input.audioDurationMs ?? 0) / 1000);
+    usageCount = Math.max(1, durationSeconds || Math.ceil(input.usageCount ?? 1));
+    unitSize = 1;
+  } else {
+    return null;
   }
-): AudioPricingQuote {
-  const creditsPerUnit = decimalNumber(rule.creditsPerUnit);
-  const modelMultiplier = decimalNumber(rule.modelMultiplier);
-  const usageCount = usageCountForBilling(rule.billingMode, input);
+
+  const pricing = calculateModelPricingCredits({
+    usageCount,
+    pricePerUnit,
+    unitSize,
+    creditsPerCny
+  });
 
   return {
-    ruleId: rule.id,
-    billingMode: rule.billingMode,
-    creditsPerUnit,
-    minimumCredits: rule.minimumCredits,
-    modelMultiplier,
+    ruleId: `model:${model.modelInstanceId}`,
+    pricingSource: "MODEL",
+    billingMode,
+    creditsPerUnit: 0,
+    minimumCredits: pricing.minimumCredits,
+    modelMultiplier: 1,
+    pricingMode,
+    pricingUnit,
+    pricePerUnit,
+    unitSize,
+    creditsPerCny,
+    estimatedCost: pricing.estimatedCost,
     usageCount,
-    estimatedCredits: calculatePricingCredits({
-      usageCount,
-      creditsPerUnit,
-      minimumCredits: rule.minimumCredits,
-      modelMultiplier
-    })
+    estimatedCredits: pricing.credits
   };
 }
 
 function pricingSnapshot(quote: AudioPricingQuote) {
   return {
     ruleId: quote.ruleId,
+    pricingSource: quote.pricingSource,
     billingMode: quote.billingMode,
     creditsPerUnit: quote.creditsPerUnit,
     minimumCredits: quote.minimumCredits,
     modelMultiplier: quote.modelMultiplier,
+    pricingMode: quote.pricingMode,
+    pricingUnit: quote.pricingUnit,
+    pricePerUnit: quote.pricePerUnit,
+    unitSize: quote.unitSize,
+    creditsPerCny: quote.creditsPerCny,
+    estimatedCost: quote.estimatedCost,
     usageCount: quote.usageCount,
     estimatedCredits: quote.estimatedCredits
   };
@@ -3610,10 +3971,17 @@ function pricingSnapshotFromTask(value: Prisma.JsonValue | null): AudioPricingQu
 
   return {
     ruleId: stringValue(pricing.ruleId) ?? "",
+    pricingSource: stringValue(pricing.pricingSource) === "MODEL" ? "MODEL" : "RULE",
     billingMode,
     creditsPerUnit: numberValue(pricing.creditsPerUnit) ?? 0,
     minimumCredits: numberValue(pricing.minimumCredits) ?? 0,
     modelMultiplier: numberValue(pricing.modelMultiplier) ?? 1,
+    pricingMode: pricing.pricingMode ? normalizePricingMode(pricing.pricingMode) : undefined,
+    pricingUnit: pricing.pricingUnit ? normalizePricingUnit(pricing.pricingUnit, pricing.pricingMode) : undefined,
+    pricePerUnit: numberValue(pricing.pricePerUnit) ?? undefined,
+    unitSize: numberValue(pricing.unitSize) ?? undefined,
+    creditsPerCny: numberValue(pricing.creditsPerCny) ?? undefined,
+    estimatedCost: numberValue(pricing.estimatedCost) ?? undefined,
     usageCount: numberValue(pricing.usageCount) ?? 1,
     estimatedCredits: numberValue(pricing.estimatedCredits) ?? 0
   };
@@ -3622,6 +3990,7 @@ function pricingSnapshotFromTask(value: Prisma.JsonValue | null): AudioPricingQu
 function calculateActualCreditsFromTask(
   task: {
     type: AudioTaskType;
+    inputText: string | null;
     inputTextLength: number;
     estimatedCredits: number;
     providerPayload: Prisma.JsonValue | null;
@@ -3634,11 +4003,21 @@ function calculateActualCreditsFromTask(
     return task.estimatedCredits;
   }
 
-  const usageCount = usageCountForBilling(snapshot.billingMode, {
-    characterCount: task.inputTextLength,
+  const characterCount = billableCharacterCountForTask(task, providerPayload);
+  const usageCount = usageCountForPricingSnapshot(snapshot, {
+    characterCount,
     audioDurationMs: extractAudioDurationMs(providerPayload),
     usageCount: snapshot.usageCount
   });
+
+  if (snapshot.pricingSource === "MODEL") {
+    return calculateModelPricingCredits({
+      usageCount,
+      pricePerUnit: snapshot.pricePerUnit ?? 0,
+      unitSize: snapshot.unitSize ?? 1,
+      creditsPerCny: snapshot.creditsPerCny ?? 100
+    }).credits;
+  }
 
   return calculatePricingCredits({
     usageCount,
@@ -3659,6 +4038,70 @@ function calculatePricingCredits(input: {
   return Math.ceil(Math.max(input.minimumCredits, raw));
 }
 
+function calculateModelPricingCredits(input: {
+  usageCount: number;
+  pricePerUnit: number;
+  unitSize: number;
+  creditsPerCny: number;
+}) {
+  const safeUnitSize = Math.max(1, input.unitSize);
+  const safeUsageCount = Math.max(0, input.usageCount);
+  const estimatedCost = (safeUsageCount / safeUnitSize) * Math.max(0, input.pricePerUnit);
+  const minimumCredits = estimatedCost > 0 ? 1 : 0;
+  const credits = Math.ceil(Math.max(minimumCredits, estimatedCost * Math.max(0, input.creditsPerCny)));
+
+  return {
+    estimatedCost: Number(estimatedCost.toFixed(6)),
+    minimumCredits,
+    credits
+  };
+}
+
+function actualEstimatedCostFromSnapshot(snapshot: AudioPricingQuote | null, usageCount: number) {
+  if (snapshot?.pricingSource !== "MODEL") {
+    return null;
+  }
+
+  return calculateModelPricingCredits({
+    usageCount,
+    pricePerUnit: snapshot.pricePerUnit ?? 0,
+    unitSize: snapshot.unitSize ?? 1,
+    creditsPerCny: snapshot.creditsPerCny ?? 100
+  }).estimatedCost;
+}
+
+function usageCountForPricingSnapshot(
+  snapshot: AudioPricingQuote,
+  input: {
+    characterCount?: number;
+    audioDurationMs?: number | null;
+    usageCount?: number;
+  }
+) {
+  if (snapshot.pricingSource === "MODEL" && snapshot.pricingMode === "CHARACTERS") {
+    return Math.max(0, Math.ceil(input.characterCount ?? 0));
+  }
+
+  if (snapshot.pricingSource === "MODEL" && snapshot.pricingMode === "SECONDS") {
+    const durationSeconds = Math.ceil(Math.max(0, input.audioDurationMs ?? 0) / 1000);
+    return Math.max(1, durationSeconds || Math.ceil(input.usageCount ?? 1));
+  }
+
+  return usageCountForBilling(snapshot.billingMode, input);
+}
+
+function audioModelPricingUnitSize(unit: AiModelPricingUnit) {
+  if (unit === "TEN_K_CHARACTERS") {
+    return 10_000;
+  }
+
+  if (unit === "K_CHARACTERS") {
+    return 1_000;
+  }
+
+  return 1;
+}
+
 function usageCountForBilling(
   billingMode: AudioBillingMode | undefined,
   input: {
@@ -3676,6 +4119,91 @@ function usageCountForBilling(
   }
 
   return Math.max(1, Math.ceil(Math.max(1, input.usageCount ?? 1)));
+}
+
+function billableCharacterCountForTask(
+  task: {
+    inputText: string | null;
+    inputTextLength: number;
+  },
+  providerPayload: Record<string, unknown>
+) {
+  const providerCharacters = extractProviderCharacterCount(providerPayload);
+
+  if (providerCharacters !== null) {
+    return providerCharacters;
+  }
+
+  const estimatedCharacters = task.inputText ? estimatedTtsBillingCharacters(task.inputText) : 0;
+
+  return estimatedCharacters > 0 ? estimatedCharacters : task.inputTextLength;
+}
+
+function estimatedTtsBillingCharacters(text: string) {
+  let count = 0;
+
+  for (const char of text) {
+    count += (char.codePointAt(0) ?? 0) <= 0x7f ? 1 : 2;
+  }
+
+  return count;
+}
+
+function ttsGatewayTimeoutMs(text: string) {
+  const billableCharacters = estimatedTtsBillingCharacters(text);
+  const extraBlocks = Math.ceil(Math.max(0, billableCharacters - 400) / 500);
+
+  return Math.min(120_000, 45_000 + extraBlocks * 15_000);
+}
+
+function extractProviderCharacterCount(payload: Record<string, unknown>) {
+  const usage = jsonObject(payload.usage);
+  const providerUsage = jsonObject(payload.providerUsage) ?? jsonObject(usage?.providerUsage);
+  const raw = jsonObject(payload.raw);
+  const rawUsage = jsonObject(raw?.usage);
+  const output = jsonObject(payload.output);
+  const outputUsage = jsonObject(output?.usage);
+  const candidates = [
+    providerUsage?.characters,
+    providerUsage?.characterCount,
+    usage?.characters,
+    usage?.characterCount,
+    usage?.inputCharacters,
+    usage?.totalCharacters,
+    rawUsage?.characters,
+    rawUsage?.characterCount,
+    outputUsage?.characters,
+    outputUsage?.characterCount,
+    payload.characters,
+    payload.characterCount
+  ];
+
+  for (const candidate of candidates) {
+    const value = numberValue(candidate);
+
+    if (value !== null && value >= 0) {
+      return Math.ceil(value);
+    }
+  }
+
+  return null;
+}
+
+function parseCreditsPerCny(value: string | null | undefined) {
+  const fallback = 100;
+  const normalized = value?.trim();
+
+  if (!normalized) {
+    return fallback;
+  }
+
+  const numbers = normalized.match(/\d+(?:\.\d+)?/g)?.map(Number).filter((item) => Number.isFinite(item) && item > 0) ?? [];
+
+  if (numbers.length >= 2) {
+    return numbers[1] / numbers[0];
+  }
+
+  return numbers[0] ?? fallback;
 }
 
 function mergeProviderPayload(existing: Prisma.JsonValue | null, providerPayload: Record<string, unknown>) {
@@ -3830,6 +4358,50 @@ function isAudioTaskStatus(value: string | undefined): value is AudioTaskStatus 
     value === "CANCELLED" ||
     value === "COMPENSATED"
   );
+}
+
+function adminAudioTaskDateFilter(startTime: string | undefined, endTime: string | undefined) {
+  const range: Prisma.DateTimeFilter = {};
+  const startAt = parseAdminAudioListDate(startTime);
+  const endAt = parseAdminAudioListDate(endTime);
+
+  if (startAt) {
+    range.gte = startAt;
+  }
+
+  if (endAt) {
+    range.lte = endAt;
+  }
+
+  return Object.keys(range).length > 0 ? range : null;
+}
+
+function parseAdminAudioListDate(value: string | undefined) {
+  const normalized = emptyToNull(value);
+
+  if (!normalized) {
+    return null;
+  }
+
+  const date = new Date(normalized);
+
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function parseAdminAudioListPage(value: string | undefined) {
+  const parsed = Number(value);
+
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+}
+
+function parseAdminAudioListPageSize(value: string | undefined, fallback: number) {
+  const parsed = Number(value);
+
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return Math.min(parsed, 200);
 }
 
 interface AudioDateRange {
@@ -4000,6 +4572,28 @@ function gatewayBaseUrl() {
   return (process.env.AI_GATEWAY_BASE_URL ?? "http://localhost:7343").replace(/\/+$/, "");
 }
 
+function normalizeBaseUrl(value: string) {
+  return value.trim().replace(/\/+$/, "");
+}
+
+function normalizeOptionalBaseUrl(value: string | undefined) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const normalized = emptyToNull(value);
+
+  return normalized ? normalizeBaseUrl(normalized) : null;
+}
+
+function maskSecretPreview(encrypted: string) {
+  try {
+    return maskSecret(decryptSecret(encrypted));
+  } catch {
+    return "已配置";
+  }
+}
+
 function emptyToNull(value: string | undefined) {
   const normalized = value?.trim();
 
@@ -4012,6 +4606,17 @@ function jsonStringArray(value: Prisma.JsonValue | null | undefined) {
   }
 
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+function normalizeCapabilityTags(values: string[]) {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => value.trim().toUpperCase())
+        .filter((value) => value.length > 0)
+        .slice(0, 20)
+    )
+  );
 }
 
 function stringValue(value: unknown) {
@@ -4036,16 +4641,6 @@ function audioTaskTypeName(type: string) {
   };
 
   return names[type] ?? type;
-}
-
-function billingModeName(mode: string) {
-  const names: Record<string, string> = {
-    PER_CHARACTER: "按字符计费",
-    PER_TASK: "按任务计费",
-    PER_SECOND: "按秒计费"
-  };
-
-  return names[mode] ?? mode;
 }
 
 function voiceConsentTypeName(type: string) {

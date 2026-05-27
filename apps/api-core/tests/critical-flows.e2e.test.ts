@@ -236,22 +236,6 @@ test("关键业务 e2e 链路", { timeout: 180_000 }, async (t) => {
         }
       }
     });
-    await prisma.aiWorkflowRun.deleteMany({
-      where: {
-        workflow: {
-          slug: {
-            contains: unique
-          }
-        }
-      }
-    });
-    await prisma.aiWorkflow.deleteMany({
-      where: {
-        slug: {
-          contains: unique
-        }
-      }
-    });
     await prisma.aiScenario.deleteMany({
       where: {
         slug: {
@@ -967,33 +951,6 @@ test("关键业务 e2e 链路", { timeout: 180_000 }, async (t) => {
   assert.equal(providerTest.data.success, false);
   assert.match(providerTest.data.message, /Base URL|连接/);
 
-  const workflowSlug = `content-three-step-${unique}`;
-  await request("/admin/ai-workflows", {
-    method: "POST",
-    jar: adminJar,
-    body: {
-      name: "链路三步工作流",
-      slug: workflowSlug,
-      description: "链路测试工作流",
-      costCredits: 0,
-      isEnabled: true,
-      steps: [
-        {
-          name: "生成初稿",
-          prompt: "根据输入生成初稿"
-        },
-        {
-          name: "改写优化",
-          prompt: "保持事实不变并优化表达"
-        },
-        {
-          name: "总结要点",
-          prompt: "总结为三条要点"
-        }
-      ]
-    }
-  });
-
   const category = await request<{
     id: string;
     name: string;
@@ -1339,31 +1296,6 @@ test("关键业务 e2e 链路", { timeout: 180_000 }, async (t) => {
   });
   assert.equal(agentTool.data.output.result, 7);
 
-  const workflows = await request<
-    Array<{
-      id: string;
-      slug: string;
-    }>
-  >("/ai/workflows", {
-    jar: userJar
-  });
-  const workflow = workflows.data.find((item) => item.slug === workflowSlug);
-  assert.ok(workflow);
-  const workflowRun = await request<{
-    status: string;
-    steps: Array<{
-      output: string | null;
-    }>;
-  }>(`/ai/workflows/${workflow.id}/run`, {
-    method: "POST",
-    jar: userJar,
-    body: {
-      input: "把高级 AI 能力拆成三步"
-    }
-  });
-  assert.equal(workflowRun.data.status, "SUCCEEDED");
-  assert.equal(workflowRun.data.steps.length, 3);
-
   const adminAiTasks = await request<
     Array<{
       id: string;
@@ -1505,6 +1437,29 @@ test("关键业务 e2e 链路", { timeout: 180_000 }, async (t) => {
   assert.equal(adjusted.data.ledgerEntry.type, "ADMIN_ADJUST");
   assert.equal(adjusted.data.ledgerEntry.amount, 25);
 
+  const adminRecharge = await request<{
+    wallet: {
+      availableCredits: number;
+      totalTopUpCredits: number;
+    };
+    ledgerEntry: {
+      type: string;
+      amount: number;
+      note: string;
+    };
+  }>(`/admin/users/${registered.data.user.id}/credits/recharge`, {
+    method: "POST",
+    jar: adminJar,
+    body: {
+      amount: 40,
+      reasonType: "COMPENSATION"
+    }
+  });
+  assert.equal(adminRecharge.data.ledgerEntry.type, "TOP_UP");
+  assert.equal(adminRecharge.data.ledgerEntry.amount, 40);
+  assert.equal(adminRecharge.data.ledgerEntry.note, "管理员充值：补偿");
+  assert.ok(adminRecharge.data.wallet.totalTopUpCredits >= order.data.credits + 40);
+
   await request(`/admin/users/${registered.data.user.id}/status`, {
     method: "PATCH",
     jar: adminJar,
@@ -1575,6 +1530,7 @@ test("关键业务 e2e 链路", { timeout: 180_000 }, async (t) => {
     jar: adminJar
   });
   assert.ok(operationLogs.data.some((item) => item.action === "ADMIN_ADJUST_CREDITS"));
+  assert.ok(operationLogs.data.some((item) => item.action === "ADMIN_RECHARGE_CREDITS"));
   assert.ok(operationLogs.data.some((item) => item.action === "UPDATE_USER_STATUS"));
 
   const adminLogCount = await prisma.adminOperationLog.count({

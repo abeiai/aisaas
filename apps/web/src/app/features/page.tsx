@@ -16,8 +16,8 @@ export const metadata: Metadata = {
 export default function FeaturesPage() {
   return (
     <PublicShell>
-      <section className="mx-auto flex max-w-6xl flex-col gap-10 px-5 py-16">
-        <div className="flex max-w-3xl flex-col gap-5">
+      <section className="flex w-full flex-col gap-10 px-5 py-16">
+        <div className="flex w-full flex-col gap-5">
           <Badge>产品功能</Badge>
           <h1 className="font-display text-5xl font-light leading-tight tracking-normal md:text-6xl">
             面向中文内容工具站的基础能力

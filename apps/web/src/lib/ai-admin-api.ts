@@ -38,6 +38,89 @@ export interface AiProvider {
   models: AiModel[];
 }
 
+export type AiModelPricingMode =
+  | "TOKENS"
+  | "TOKEN_CACHE"
+  | "TOKEN_TIERED"
+  | "REQUEST"
+  | "CHARACTERS"
+  | "IMAGES"
+  | "SECONDS"
+  | "VIDEO_SECONDS";
+export type AiModelPricingUnit =
+  | "K_TOKENS"
+  | "M_TOKENS"
+  | "REQUEST"
+  | "CHARACTER"
+  | "K_CHARACTERS"
+  | "TEN_K_CHARACTERS"
+  | "IMAGE"
+  | "SECOND";
+
+export type AiModelPricingConfig =
+  | {
+      mode: "TOKENS";
+      currency: "CNY";
+      unit: "K_TOKENS" | "M_TOKENS";
+      input: number;
+      output: number;
+      source?: string;
+      note?: string;
+    }
+  | {
+      mode: "TOKEN_CACHE";
+      currency: "CNY";
+      unit: "M_TOKENS";
+      inputCacheHit: number;
+      inputCacheMiss: number;
+      output: number;
+      discountWindows?: Array<{
+        label: string;
+        inputCacheHit: number;
+        inputCacheMiss: number;
+        output: number;
+        timezone?: string;
+        startTime?: string;
+        endTime?: string;
+      }>;
+      source?: string;
+      note?: string;
+    }
+  | {
+      mode: "TOKEN_TIERED";
+      currency: "CNY";
+      unit: "M_TOKENS";
+      tierBasis: "REQUEST_INPUT_TOKENS";
+      tiers: Array<{
+        label: string;
+        minInputTokens: number;
+        maxInputTokens: number | null;
+        input: number;
+        output: number;
+        reasoningOutput?: number | null;
+      }>;
+      source?: string;
+      note?: string;
+    }
+  | {
+      mode: "VIDEO_SECONDS";
+      currency: "CNY";
+      unit: "SECOND";
+      billingBasis: "OUTPUT_SECONDS" | "INPUT_OUTPUT_SECONDS";
+      variants: Array<{
+        label: string;
+        resolution: string;
+        jobMode: "STANDARD" | "REALTIME" | "BATCH";
+        taskType: "TEXT_TO_VIDEO" | "IMAGE_TO_VIDEO" | "REFERENCE_TO_VIDEO" | "VIDEO_EDIT" | "OTHER";
+        withAudio: boolean;
+        input: number;
+        output: number;
+        note?: string;
+      }>;
+      source?: string;
+      note?: string;
+    };
+
 export interface AdminAiScenario {
   id: string;
   name: string;
@@ -117,6 +200,7 @@ export interface AiModelPreset {
   deprecatedMessage: string | null;
   replacementModelKey: string | null;
   recommendedAlias: string | null;
+  pricingConfig: AiModelPricingConfig | null;
 }
 
 export interface AiModelInstance {
@@ -125,9 +209,17 @@ export interface AiModelInstance {
   modelPresetId: string | null;
   displayName: string;
   providerModelName: string;
+  baseUrl: string | null;
+  webSocketUrl: string | null;
+  region: string | null;
+  hasCustomApiKey: boolean;
+  apiKeyPreview: string;
   capabilityTags: string[];
   inputPrice: string;
   outputPrice: string;
+  pricingMode: AiModelPricingMode;
+  pricingUnit: AiModelPricingUnit;
+  pricingConfig: AiModelPricingConfig | null;
   isEnabled: boolean;
   providerName: string | null;
   providerPresetName: string | null;
@@ -135,6 +227,19 @@ export interface AiModelInstance {
     aliasKey: string;
     displayName: string;
   }>;
+}
+
+export interface AiModelInstanceDeleteCheck {
+  modelInstanceId: string;
+  canDelete: boolean;
+  aliasKeys: string[];
+  boundScenarios: Array<{
+    name: string;
+    slug: string;
+    isEnabled: boolean;
+    aliasKey: string | null;
+  }>;
+  message: string;
 }
 
 export interface AiProviderPreset {
@@ -197,23 +302,6 @@ export interface AiModelAliasPayload {
   modelInstances: AiModelInstance[];
 }
 
-export interface AiWorkflow {
-  id: string;
-  name: string;
-  slug: string;
-  description: string | null;
-  costCredits: number;
-  isEnabled: boolean;
-  createdAt: string;
-  updatedAt: string;
-  steps: Array<{
-    id: string;
-    name: string;
-    prompt: string;
-    sortOrder: number;
-  }>;
-}
-
 export type AdminAiTask = AiTask & {
   user: {
     id: string;
@@ -254,6 +342,18 @@ export type AdminAiTask = AiTask & {
   }>;
 };
 
+export interface AdminAiTaskFilters {
+  taskType?: string;
+  provider?: string;
+  model?: string;
+  status?: string;
+  startTime?: string;
+  endTime?: string;
+  user?: string;
+  page?: string;
+  pageSize?: string;
+}
+
 function getApiBaseUrl() {
   return process.env.API_BASE_URL ?? "http://localhost:7342/api";
 }
@@ -286,6 +386,20 @@ async function apiFetch<TData>(path: string, init: RequestInit = {}) {
   return payload.data;
 }
 
+function buildQuery(filters: AdminAiTaskFilters = {}) {
+  const params = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) {
+      params.set(key, value);
+    }
+  }
+
+  const query = params.toString();
+
+  return query ? `?${query}` : "";
+}
+
 export async function getAdminAiProviders() {
   return apiFetch<AiProvider[]>("/admin/ai-providers");
 }
@@ -302,8 +416,8 @@ export async function getAdminAiModelAliases() {
   return apiFetch<AiModelAliasPayload>("/admin/ai/model-aliases");
 }
 
-export async function getAdminAiTasks() {
-  return apiFetch<AdminAiTask[]>("/admin/ai-tasks");
+export async function getAdminAiTasks(filters: AdminAiTaskFilters = {}) {
+  return apiFetch<AdminAiTask[]>(`/admin/ai-tasks${buildQuery(filters)}`);
 }
 
 export async function getAdminAiTask(id: string) {
@@ -320,10 +434,6 @@ export async function getAdminAiToolCategories() {
 
 export async function exportAdminAiToolTemplates() {
   return apiFetch<AiToolTemplateExport>("/admin/ai/tool-templates/export");
-}
-
-export async function getAdminAiWorkflows() {
-  return apiFetch<AiWorkflow[]>("/admin/ai-workflows");
 }
 
 function text(formData: FormData, name: string) {
@@ -463,9 +573,17 @@ export async function enableAiModelPresetAction(formData: FormData) {
     body: JSON.stringify({
       displayName: text(formData, "displayName"),
       providerModelName: text(formData, "providerModelName"),
+      baseUrl: text(formData, "baseUrl"),
+      webSocketUrl: text(formData, "webSocketUrl"),
+      region: text(formData, "region"),
+      apiKey: text(formData, "apiKey"),
+      clearApiKey: checked(formData, "clearApiKey"),
       capabilityTags: text(formData, "capabilityTags").split(",").map((item) => item.trim()).filter(Boolean),
       inputPrice: numberText(formData, "inputPrice"),
       outputPrice: numberText(formData, "outputPrice"),
+      pricingMode: text(formData, "pricingMode"),
+      pricingUnit: text(formData, "pricingUnit"),
+      pricingConfig: jsonText(formData, "pricingConfig"),
       isEnabled: checked(formData, "isEnabled")
     })
   });
@@ -483,9 +601,17 @@ export async function updateAiModelInstanceAction(formData: FormData) {
     body: JSON.stringify({
       displayName: text(formData, "displayName"),
       providerModelName: text(formData, "providerModelName"),
+      baseUrl: text(formData, "baseUrl"),
+      webSocketUrl: text(formData, "webSocketUrl"),
+      region: text(formData, "region"),
+      apiKey: text(formData, "apiKey"),
+      clearApiKey: checked(formData, "clearApiKey"),
       capabilityTags: text(formData, "capabilityTags").split(",").map((item) => item.trim()).filter(Boolean),
       inputPrice: numberText(formData, "inputPrice"),
       outputPrice: numberText(formData, "outputPrice"),
+      pricingMode: text(formData, "pricingMode"),
+      pricingUnit: text(formData, "pricingUnit"),
+      pricingConfig: jsonText(formData, "pricingConfig"),
       isEnabled: checked(formData, "isEnabled")
     })
   });
@@ -493,6 +619,27 @@ export async function updateAiModelInstanceAction(formData: FormData) {
   revalidatePath("/admin/ai/providers");
   revalidatePath(`/admin/ai/providers/${providerId}`);
   revalidatePath("/admin/ai/model-aliases");
+}
+
+export async function checkAiModelInstanceDeleteAction(modelInstanceId: string) {
+  return apiFetch<AiModelInstanceDeleteCheck>(`/admin/ai/providers/model-instances/${modelInstanceId}/delete-check`);
+}
+
+export async function deleteAiModelInstanceAction(modelInstanceId: string, providerId: string) {
+  await apiFetch<{ deleted: boolean; modelInstanceId: string }>(`/admin/ai/providers/model-instances/${modelInstanceId}`, {
+    method: "DELETE",
+    body: JSON.stringify({})
+  });
+
+  revalidatePath("/admin/ai/providers");
+  revalidatePath(`/admin/ai/providers/${providerId}`);
+  revalidatePath("/admin/ai/model-aliases");
+  revalidatePath("/admin/ai/config");
+  revalidatePath("/admin/ai-scenarios");
+
+  return {
+    deleted: true
+  };
 }
 
 export async function updateAiModelAliasAction(formData: FormData) {
@@ -505,6 +652,7 @@ export async function updateAiModelAliasAction(formData: FormData) {
   });
 
   revalidatePath("/admin/ai/model-aliases");
+  revalidatePath("/admin/ai/config");
   revalidatePath("/admin/ai-scenarios");
 }
 
@@ -627,25 +775,4 @@ export async function importAiToolTemplateAction(formData: FormData) {
   revalidatePath("/tools");
 
   return result;
-}
-
-export async function saveWorkflowAction(formData: FormData) {
-  const steps = [0, 1, 2].map((index) => ({
-    name: text(formData, `stepName${index}`),
-    prompt: text(formData, `stepPrompt${index}`)
-  }));
-
-  await apiFetch<AiWorkflow>("/admin/ai-workflows", {
-    method: "POST",
-    body: JSON.stringify({
-      name: text(formData, "name"),
-      slug: text(formData, "slug"),
-      description: text(formData, "description"),
-      costCredits: numberText(formData, "costCredits"),
-      isEnabled: checked(formData, "isEnabled"),
-      steps
-    })
-  });
-
-  revalidatePath("/admin/ai-workflows");
 }

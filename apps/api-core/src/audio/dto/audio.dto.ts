@@ -1,5 +1,17 @@
 import { Type } from "class-transformer";
-import { IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, MaxLength, Min, MinLength } from "class-validator";
+import {
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsNumber,
+  IsObject,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+  MinLength
+} from "class-validator";
 
 export class CreateAudioAssetDto {
   @IsIn(["SOURCE_SAMPLE", "PREVIEW", "TTS_OUTPUT"])
@@ -97,6 +109,10 @@ export class CreateTtsAudioTaskDto {
   @IsOptional()
   @IsBoolean()
   execute?: boolean;
+
+  @IsOptional()
+  @IsIn(["TOOL", "EXPERIENCE"])
+  source?: "TOOL" | "EXPERIENCE";
 }
 
 export class CreateVoiceCloneTaskDto {
@@ -144,6 +160,10 @@ export class CreateVoiceCloneTaskDto {
   @IsString()
   @MaxLength(160)
   ownerContact?: string;
+
+  @IsOptional()
+  @IsIn(["TOOL", "EXPERIENCE"])
+  source?: "TOOL" | "EXPERIENCE";
 }
 
 export class CreateVoiceDesignTaskDto {
@@ -171,6 +191,10 @@ export class CreateVoiceDesignTaskDto {
   @IsString()
   @MaxLength(40)
   language?: string;
+
+  @IsOptional()
+  @IsIn(["TOOL", "EXPERIENCE"])
+  source?: "TOOL" | "EXPERIENCE";
 }
 
 export class UpdateVoiceAssetDto {
@@ -179,6 +203,38 @@ export class UpdateVoiceAssetDto {
   @MinLength(1)
   @MaxLength(80)
   name?: string;
+}
+
+export class CreatePlatformVoiceAssetDto {
+  @IsIn(["CLONED", "DESIGNED"])
+  type!: "CLONED" | "DESIGNED";
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(80)
+  name!: string;
+
+  @IsString()
+  @MaxLength(160)
+  providerVoiceId!: string;
+
+  @IsString()
+  modelInstanceId!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  language?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(600)
+  previewAudioUrl?: string;
 }
 
 export class SetDefaultVoiceDto {
@@ -190,66 +246,6 @@ export class SetDefaultVoiceDto {
   @IsString()
   @MaxLength(160)
   systemVoiceId?: string;
-}
-
-export class CreateAudioPricingRuleDto {
-  @IsIn(["TTS", "VOICE_CLONE", "VOICE_DESIGN"])
-  operationType!: "TTS" | "VOICE_CLONE" | "VOICE_DESIGN";
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(160)
-  model?: string;
-
-  @IsIn(["PER_CHARACTER", "PER_TASK", "PER_SECOND"])
-  billingMode!: "PER_CHARACTER" | "PER_TASK" | "PER_SECOND";
-
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  creditsPerUnit!: number;
-
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  minimumCredits!: number;
-
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  modelMultiplier!: number;
-
-  @IsOptional()
-  @IsBoolean()
-  isEnabled?: boolean;
-}
-
-export class UpdateAudioPricingRuleDto {
-  @IsOptional()
-  @IsIn(["PER_CHARACTER", "PER_TASK", "PER_SECOND"])
-  billingMode?: "PER_CHARACTER" | "PER_TASK" | "PER_SECOND";
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  creditsPerUnit?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  minimumCredits?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  modelMultiplier?: number;
-
-  @IsOptional()
-  @IsBoolean()
-  isEnabled?: boolean;
 }
 
 export class ReviewVoiceAssetDto {
@@ -308,8 +304,80 @@ export class UpdateSystemVoiceDto {
 
 export class UpdateAudioModelDto {
   @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  displayName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  modelName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(400)
+  baseUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(400)
+  webSocketUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  region?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  apiKey?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  clearApiKey?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(40, { each: true })
+  capabilityTags?: string[];
+
+  @IsOptional()
   @IsBoolean()
   isEnabled?: boolean;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  inputPrice?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  outputPrice?: number;
+
+  @IsOptional()
+  @IsIn(["TOKENS", "REQUEST", "CHARACTERS", "IMAGES", "SECONDS"])
+  pricingMode?: "TOKENS" | "REQUEST" | "CHARACTERS" | "IMAGES" | "SECONDS";
+
+  @IsOptional()
+  @IsIn(["K_TOKENS", "M_TOKENS", "REQUEST", "CHARACTER", "K_CHARACTERS", "TEN_K_CHARACTERS", "IMAGE", "SECOND"])
+  pricingUnit?:
+    | "K_TOKENS"
+    | "M_TOKENS"
+    | "REQUEST"
+    | "CHARACTER"
+    | "K_CHARACTERS"
+    | "TEN_K_CHARACTERS"
+    | "IMAGE"
+    | "SECOND";
+
+  @IsOptional()
+  @IsObject()
+  pricingConfig?: Record<string, unknown>;
 
   @IsOptional()
   @IsIn(["tts-default", "tts-fast", "voice-clone-default", "voice-design-default", "audio-preview"])

@@ -1,4 +1,136 @@
-export const aiPresetVersion = "2026.05";
+export const aiPresetVersion = "2026.05.22";
+
+const pricingSources = {
+  deepSeek: "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+  aliyunModelStudio: "https://help.aliyun.com/zh/model-studio/model-pricing"
+} as const;
+
+const deepSeekV4FlashPricing = {
+  mode: "TOKEN_CACHE",
+  currency: "CNY",
+  unit: "M_TOKENS",
+  inputCacheHit: 0.02,
+  inputCacheMiss: 1,
+  output: 2,
+  discountWindows: [
+    {
+      label: "优惠时段",
+      timezone: "Asia/Shanghai",
+      startTime: "16:30",
+      endTime: "00:30",
+      inputCacheHit: 0.01,
+      inputCacheMiss: 0.5,
+      output: 1
+    }
+  ],
+  source: pricingSources.deepSeek,
+  note: "DeepSeek V4 Flash 标准时段官方价格；优惠时段价格保存在 discountWindows 中。"
+};
+
+function aliyunTieredTokenPricing(
+  tiers: Array<{
+    label: string;
+    minInputTokens: number;
+    maxInputTokens: number | null;
+    input: number;
+    output: number;
+    reasoningOutput?: number;
+  }>,
+  note: string
+) {
+  return {
+    mode: "TOKEN_TIERED",
+    currency: "CNY",
+    unit: "M_TOKENS",
+    tierBasis: "REQUEST_INPUT_TOKENS",
+    tiers,
+    source: pricingSources.aliyunModelStudio,
+    note
+  };
+}
+
+const qwenPlusPricing = aliyunTieredTokenPricing(
+  [
+    {
+      label: "输入 <= 128K",
+      minInputTokens: 0,
+      maxInputTokens: 128000,
+      input: 0.8,
+      output: 2,
+      reasoningOutput: 8
+    },
+    {
+      label: "128K < 输入 <= 256K",
+      minInputTokens: 128001,
+      maxInputTokens: 256000,
+      input: 4,
+      output: 20,
+      reasoningOutput: 24
+    },
+    {
+      label: "256K < 输入 <= 1M",
+      minInputTokens: 256001,
+      maxInputTokens: 1000000,
+      input: 10,
+      output: 48,
+      reasoningOutput: 64
+    }
+  ],
+  "阿里云百炼 Qwen Plus 按单次请求输入 Token 总量分档；当前模型未标记推理能力，列表摘要使用非思考输出价格。"
+);
+
+const qwen36PlusPricing = aliyunTieredTokenPricing(
+  [
+    {
+      label: "输入 <= 256K",
+      minInputTokens: 0,
+      maxInputTokens: 256000,
+      input: 2,
+      output: 12
+    },
+    {
+      label: "256K < 输入 <= 1M",
+      minInputTokens: 256001,
+      maxInputTokens: 1000000,
+      input: 8,
+      output: 48
+    }
+  ],
+  "阿里云百炼 Qwen3.6 Plus 按单次请求输入 Token 总量分档。"
+);
+
+const qwen36FlashPricing = aliyunTieredTokenPricing(
+  [
+    {
+      label: "输入 <= 1M",
+      minInputTokens: 0,
+      maxInputTokens: 1000000,
+      input: 0.5,
+      output: 3
+    }
+  ],
+  "阿里云百炼 Qwen3.6 Flash 按单次请求输入 Token 总量分档。"
+);
+
+const qwen36MaxPreviewPricing = aliyunTieredTokenPricing(
+  [
+    {
+      label: "输入 <= 128K",
+      minInputTokens: 0,
+      maxInputTokens: 128000,
+      input: 9,
+      output: 54
+    },
+    {
+      label: "128K < 输入 <= 256K",
+      minInputTokens: 128001,
+      maxInputTokens: 256000,
+      input: 15,
+      output: 90
+    }
+  ],
+  "阿里云百炼 Qwen3.6 Max Preview 按单次请求输入 Token 总量分档。"
+);
 
 export const aiCapabilityTags = [
   "TEXT",
@@ -163,6 +295,7 @@ export const providerPresets = [
         providerModelName: "deepseek-chat",
         capabilityTags: ["TEXT", "STREAMING", "LOW_COST", "CHINA_FRIENDLY"],
         supportsStreaming: true,
+        pricingConfig: deepSeekV4FlashPricing,
         recommendedAlias: "fast-chat"
       },
       {
@@ -171,6 +304,7 @@ export const providerPresets = [
         providerModelName: "deepseek-reasoner",
         capabilityTags: ["TEXT", "REASONING", "STREAMING", "CHINA_FRIENDLY"],
         supportsStreaming: true,
+        pricingConfig: deepSeekV4FlashPricing,
         recommendedAlias: "reasoning"
       }
     ]
@@ -342,6 +476,7 @@ export const providerPresets = [
         capabilityTags: ["TEXT", "TOOLS", "STREAMING", "CHINA_FRIENDLY"],
         supportsStreaming: true,
         supportsTools: true,
+        pricingConfig: qwenPlusPricing,
         recommendedAlias: "default-chat"
       },
       {
@@ -353,6 +488,7 @@ export const providerPresets = [
         supportsStreaming: true,
         supportsVision: true,
         supportsTools: true,
+        pricingConfig: qwen36PlusPricing,
         recommendedAlias: "default-chat"
       },
       {
@@ -363,6 +499,7 @@ export const providerPresets = [
         contextWindow: 1000000,
         supportsStreaming: true,
         supportsTools: true,
+        pricingConfig: qwen36FlashPricing,
         recommendedAlias: "fast-chat"
       },
       {
@@ -373,6 +510,7 @@ export const providerPresets = [
         contextWindow: 256000,
         supportsStreaming: true,
         supportsTools: true,
+        pricingConfig: qwen36MaxPreviewPricing,
         recommendedAlias: "reasoning"
       },
       {

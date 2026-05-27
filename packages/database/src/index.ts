@@ -28,15 +28,16 @@ export type {
   PaymentProduct,
   PaymentProvider,
   PaymentScene,
+  ProductBillingMode,
   Prisma,
   RefreshTokenType,
+  SmsCodePurpose,
   UserStatus,
   VoiceConsent,
   VoiceConsentType,
   VoiceAssetStatus,
   VoiceAssetType,
-  VoiceAssetVisibility,
-  WorkflowRunStatus
+  VoiceAssetVisibility
 } from "../generated/client/index.js";
 
 let prismaClient: PrismaClient | null = null;

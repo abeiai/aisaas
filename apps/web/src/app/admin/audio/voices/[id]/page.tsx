@@ -42,12 +42,16 @@ export default async function AdminAudioVoiceDetailPage({ params }: PageProps) {
   const { id } = await params;
   const voice = await getAdminVoiceAsset(id);
   const sourceFileUrl = getAdminAudioSourceFileUrl(voice.sourceSampleFilePath);
+  const detailTitle = voice.isPlatform ? "编辑平台音色" : "编辑用户音色";
+  const detailDescription = voice.isPlatform
+    ? "查看并处理平台复刻、平台设计音色的展示、启用禁用和使用记录。"
+    : "查看并处理用户音色的授权、样本、使用记录和审核状态。";
 
   return (
     <AdminShell
       active="/admin/audio/voices"
-      title="编辑用户音色"
-      description="查看并处理用户音色的授权、样本、使用记录和审核状态。"
+      title={detailTitle}
+      description={detailDescription}
     >
       <div className="flex flex-col gap-6">
         <Button asChild className="w-fit" variant="outline">
@@ -143,6 +147,22 @@ function Info({ label, value, badge }: { label: string; value: string; badge?: s
 }
 
 function ConsentCard({ voice }: { voice: AdminVoiceAsset }) {
+  if (voice.isPlatform) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>平台音色说明</CardTitle>
+          <CardDescription>平台音色由管理员维护，可像系统音色一样提供给所有用户使用。</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm leading-6 text-muted-foreground">
+            平台复刻音色和平台设计音色不绑定前台用户授权记录。请确保添加前已完成必要的声音授权、商用许可和合规确认。
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card>
       <CardHeader>

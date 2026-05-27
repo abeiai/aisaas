@@ -25,6 +25,7 @@ interface VditorEditorProps {
   minHeight?: number;
   name: string;
   placeholder?: string;
+  required?: boolean;
 }
 
 function imageMarkdown(asset: MediaAsset) {
@@ -41,7 +42,8 @@ export function VditorEditor({
   mediaAssets = [],
   minHeight = 520,
   name,
-  placeholder = "在这里开始撰写内容"
+  placeholder = "在这里开始撰写内容",
+  required = false
 }: VditorEditorProps) {
   const editorRef = useRef<VditorHandle | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -159,7 +161,7 @@ export function VditorEditor({
           defaultValue={defaultValue}
           name={name}
           placeholder={placeholder}
-          required
+          required={required}
         />
         <FieldDescription>Vditor 加载失败，已切换为普通正文输入框。</FieldDescription>
       </Field>

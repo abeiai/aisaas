@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { APP_INTERCEPTOR } from "@nestjs/core";
+import { resolve } from "node:path";
 import { AdminAuthModule } from "./admin-auth/admin-auth.module.js";
 import { AiModule } from "./ai/ai.module.js";
 import { AudioModule } from "./audio/audio.module.js";
@@ -22,6 +23,7 @@ import { WalletModule } from "./wallet/wallet.module.js";
 @Module({
   imports: [
     ConfigModule.forRoot({
+      envFilePath: [resolve(process.cwd(), "../../.env"), resolve(process.cwd(), ".env")],
       isGlobal: true
     }),
     AuthModule,

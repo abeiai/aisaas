@@ -157,6 +157,14 @@ async function main() {
       sortOrder: 17
     },
     {
+      key: "siteMenus",
+      label: "站点菜单结构",
+      value: "",
+      description: "菜单管理保存的结构化菜单数据，包含菜单项、层级和展示位置。",
+      isPublic: true,
+      sortOrder: 18
+    },
+    {
       key: "footerText",
       label: "Footer 文案",
       value: "面向中国市场的简体中文 AI SaaS / 内容型工具站底座。",
@@ -393,92 +401,12 @@ async function main() {
     `默认 AI 工具模板已就绪：${toolSeedResult.categoryCount} 个分类，${toolSeedResult.templateCount} 个模板，新增 ${toolSeedResult.createdCount} 个，保留 ${toolSeedResult.preservedCount} 个。`
   );
 
-  const workflowSteps = [
-    {
-      name: "生成初稿",
-      prompt: "根据输入生成初稿",
-      sortOrder: 0
-    },
-    {
-      name: "改写优化",
-      prompt: "保持事实不变并优化表达",
-      sortOrder: 1
-    },
-    {
-      name: "总结要点",
-      prompt: "总结为三条要点",
-      sortOrder: 2
-    }
-  ];
-  const existingWorkflow = await prisma.aiWorkflow.findUnique({
-    where: {
-      slug: "content-three-step"
-    },
-    include: {
-      steps: {
-        orderBy: {
-          sortOrder: "asc"
-        }
-      }
-    }
-  });
-
-  if (existingWorkflow) {
-    await prisma.aiWorkflow.update({
-      where: {
-        id: existingWorkflow.id
-      },
-      data: {
-        name: "内容三步工作流",
-        description: "输入后依次生成、改写和总结。",
-        costCredits: 0,
-        isEnabled: true
-      }
-    });
-
-    for (const step of workflowSteps) {
-      const existingStep = existingWorkflow.steps.find((item) => item.sortOrder === step.sortOrder);
-
-      if (existingStep) {
-        await prisma.aiWorkflowStep.update({
-          where: {
-            id: existingStep.id
-          },
-          data: step
-        });
-      } else {
-        await prisma.aiWorkflowStep.create({
-          data: {
-            workflowId: existingWorkflow.id,
-            ...step
-          }
-        });
-      }
-    }
-  } else {
-    await prisma.aiWorkflow.create({
-      data: {
-        name: "内容三步工作流",
-        slug: "content-three-step",
-        description: "输入后依次生成、改写和总结。",
-        costCredits: 0,
-        isEnabled: true,
-        steps: {
-          create: workflowSteps
-        }
-      }
-    });
-  }
-
-  console.log("默认 AI 工作流已就绪：内容三步工作流。");
-
   const aiPresetResult = await seedAiPresets(prisma);
   console.log(
     `AI Provider / Model Preset 已就绪：${aiPresetResult.providerCount} 个 Provider，${aiPresetResult.modelCount} 个模型。`
   );
 
   await seedAiProvider(prisma);
-  await seedAudioPricingRules(prisma);
 
   const users = await prisma.user.findMany({
     select: {
@@ -582,59 +510,4 @@ async function seedAiProvider(prisma: ReturnType<typeof getPrismaClient>) {
 
 function normalizeBaseUrl(value: string) {
   return value.replace(/\/+$/, "");
-}
-
-async function seedAudioPricingRules(prisma: ReturnType<typeof getPrismaClient>) {
-  const rules = [
-    {
-      operationType: "TTS" as const,
-      model: "*",
-      billingMode: "PER_CHARACTER" as const,
-      creditsPerUnit: "5",
-      minimumCredits: 5,
-      modelMultiplier: "1"
-    },
-    {
-      operationType: "VOICE_DESIGN" as const,
-      model: "*",
-      billingMode: "PER_TASK" as const,
-      creditsPerUnit: "200",
-      minimumCredits: 200,
-      modelMultiplier: "1"
-    },
-    {
-      operationType: "VOICE_CLONE" as const,
-      model: "*",
-      billingMode: "PER_TASK" as const,
-      creditsPerUnit: "300",
-      minimumCredits: 300,
-      modelMultiplier: "1"
-    }
-  ];
-
-  await Promise.all(
-    rules.map((rule) =>
-      prisma.audioPricingRule.upsert({
-        where: {
-          operationType_model: {
-            operationType: rule.operationType,
-            model: rule.model
-          }
-        },
-        update: {
-          billingMode: rule.billingMode,
-          creditsPerUnit: rule.creditsPerUnit,
-          minimumCredits: rule.minimumCredits,
-          modelMultiplier: rule.modelMultiplier,
-          isEnabled: true
-        },
-        create: {
-          ...rule,
-          isEnabled: true
-        }
-      })
-    )
-  );
-
-  console.log("默认语音计费规则已就绪。");
 }

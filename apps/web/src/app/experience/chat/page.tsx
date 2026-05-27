@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { AiChatConsole } from "@/components/experience/ai-chat-console";
 import { getOptionalCurrentUser } from "@/lib/auth-actions";
+import { getWallet } from "@/lib/billing-api";
 import { getExperienceChatModels } from "@/lib/experience-api";
 
 export const metadata: Metadata = {
@@ -14,6 +15,7 @@ export default async function ExperienceChatPage() {
     getExperienceChatModels(),
     getOptionalCurrentUser()
   ]);
+  const wallet = currentUser ? await getWallet().catch(() => null) : null;
 
-  return <AiChatConsole currentUser={currentUser} models={models} />;
+  return <AiChatConsole availableCredits={wallet?.availableCredits ?? null} currentUser={currentUser} models={models} />;
 }

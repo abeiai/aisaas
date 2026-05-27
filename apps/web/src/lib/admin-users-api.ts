@@ -110,7 +110,7 @@ export interface AdminUserDetail {
   };
   wallet: AdminWallet;
   paymentOrders: AdminUserPaymentOrder[];
-  rechargeRecords: AdminUserPaymentOrder[];
+  rechargeRecords: AdminLedgerEntry[];
   consumeRecords: AdminLedgerEntry[];
   ledgerEntries: AdminLedgerEntry[];
   aiTasks: AdminUserAiTask[];
@@ -192,6 +192,20 @@ export async function adjustUserCreditsAction(formData: FormData) {
     body: JSON.stringify({
       amount: numberValue(formData, "amount"),
       reason: text(formData, "reason")
+    })
+  });
+
+  revalidateUserPaths(id);
+}
+
+export async function rechargeUserCreditsAction(formData: FormData) {
+  const id = text(formData, "id");
+  await apiFetch(`/admin/users/${id}/credits/recharge`, {
+    method: "POST",
+    body: JSON.stringify({
+      amount: numberValue(formData, "amount"),
+      reasonType: text(formData, "reasonType"),
+      reason: text(formData, "reason") || undefined
     })
   });
 

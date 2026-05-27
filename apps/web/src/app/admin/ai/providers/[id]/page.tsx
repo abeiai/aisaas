@@ -1,20 +1,19 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { ArrowLeft, CheckCircle2, KeyRound, TestTube2 } from "lucide-react";
+import { ArrowLeft, KeyRound, TestTube2 } from "lucide-react";
 
+import { ProviderModelManager } from "@/components/ai/provider-model-manager";
+import { AudioModelConfigSection } from "@/components/audio/audio-model-config-section";
 import { AdminShell } from "@/components/shell/admin-shell";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
-  enableAiModelPresetAction,
   getAdminAiProviderPreset,
   testAiProviderPresetAction,
-  updateAiModelInstanceAction,
   updateAiProviderPresetAction
 } from "@/lib/ai-admin-api";
+import { getAdminAudioModels } from "@/lib/audio-admin-api";
 
 export const dynamic = "force-dynamic";
 
@@ -26,9 +25,29 @@ export default async function AdminAiProviderPresetDetailPage({
   const { id } = await params;
   const provider = await getAdminAiProviderPreset(id);
   const instance = provider.instance;
+  const isAudioProvider = provider.adapterType === "DASHSCOPE_AUDIO" || provider.modality === "AUDIO";
 
-  if (provider.adapterType === "DASHSCOPE_AUDIO" || provider.modality === "AUDIO") {
-    redirect("/admin/audio/models");
+  if (isAudioProvider) {
+    const models = await getAdminAudioModels();
+
+    return (
+      <AdminShell
+        active="/admin/ai/providers"
+        title={provider.displayName}
+        description="管理语音 Provider、语音模型启停、能力标签、定价和用途绑定。"
+      >
+        <div className="flex flex-col gap-6">
+          <Button asChild className="w-fit" variant="outline">
+            <Link href="/admin/ai/providers">
+              <ArrowLeft data-icon="inline-start" />
+              返回 Provider 列表
+            </Link>
+          </Button>
+
+          <AudioModelConfigSection models={models} provider={provider} />
+        </div>
+      </AdminShell>
+    );
   }
 
   return (
@@ -48,7 +67,7 @@ export default async function AdminAiProviderPresetDetailPage({
         <Card>
           <CardHeader>
             <CardTitle>Provider 配置</CardTitle>
-            <CardDescription>API Key 会加密存储，后台不会显示完整密钥。</CardDescription>
+            <CardDescription>这里保存供应商级默认 API Key 和默认端点；具体模型可以在下方列表中覆盖 Base URL、地域和独立 API Key。</CardDescription>
           </CardHeader>
           <CardContent>
             <form action={updateAiProviderPresetAction} className="grid gap-5 lg:grid-cols-2">
@@ -59,17 +78,17 @@ export default async function AdminAiProviderPresetDetailPage({
                   <Input id="name" name="name" defaultValue={instance?.name ?? provider.displayName} required />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="baseUrl">Base URL</FieldLabel>
+                  <FieldLabel htmlFor="baseUrl">默认 Base URL</FieldLabel>
                   <Input id="baseUrl" name="baseUrl" defaultValue={instance?.baseUrl ?? provider.defaultBaseUrl} required />
-                  <FieldDescription>文本 Provider 使用 HTTP Base URL，语音 Provider 使用阿里云百炼 HTTP 地址。</FieldDescription>
+                  <FieldDescription>模型未单独配置 Base URL 时使用此默认值。</FieldDescription>
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="webSocketUrl">WebSocket URL</FieldLabel>
+                  <FieldLabel htmlFor="webSocketUrl">默认 WebSocket URL</FieldLabel>
                   <Input id="webSocketUrl" name="webSocketUrl" defaultValue={instance?.webSocketUrl ?? provider.defaultWebSocketUrl ?? ""} />
                   <FieldDescription>仅语音流式合成需要配置，其他 Provider 可留空。</FieldDescription>
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="region">地域</FieldLabel>
+                  <FieldLabel htmlFor="region">默认地域</FieldLabel>
                   <Input id="region" name="region" defaultValue={instance?.region ?? provider.region?.split(",")[0] ?? ""} />
                   <FieldDescription>阿里云语音支持 cn-beijing 或 intl-singapore。</FieldDescription>
                 </Field>
@@ -106,78 +125,7 @@ export default async function AdminAiProviderPresetDetailPage({
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>可用模型</CardTitle>
-            <CardDescription>启用模型后可在模型别名页绑定到 default-chat、reasoning 等业务别名。</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-5">
-            {provider.modelPresets.map((modelPreset) => {
-              const modelInstance = instance?.modelInstances.find((item) => item.modelPresetId === modelPreset.id);
-
-              return (
-                <div className="rounded-md border border-border bg-background p-4" key={modelPreset.id}>
-                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-medium">{modelPreset.displayName}</p>
-                        {modelPreset.recommendedAlias ? <Badge variant="outline">{modelPreset.recommendedAlias}</Badge> : null}
-                        {modelPreset.isDeprecated ? <Badge variant="muted">可能已过期</Badge> : null}
-                      </div>
-                      <p className="mt-1 text-sm text-muted-foreground">{modelPreset.providerModelName}</p>
-                    </div>
-                    <Badge variant={modelInstance?.isEnabled ? "secondary" : "muted"}>
-                      {modelInstance?.isEnabled ? "已启用" : "未启用"}
-                    </Badge>
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {modelPreset.capabilityTags.map((tag) => (
-                      <Badge key={tag} variant="outline">{tag}</Badge>
-                    ))}
-                  </div>
-                  {modelPreset.deprecatedMessage ? (
-                    <p className="mt-3 text-sm text-muted-foreground">该模型可能已过期，建议切换到推荐模型：{modelPreset.deprecatedMessage}</p>
-                  ) : null}
-                  <form action={modelInstance ? updateAiModelInstanceAction : enableAiModelPresetAction} className="mt-4 grid gap-4 lg:grid-cols-3">
-                    <input name="providerId" type="hidden" value={provider.id} />
-                    <input name="modelPresetId" type="hidden" value={modelPreset.id} />
-                    <input name="id" type="hidden" value={modelInstance?.id ?? ""} />
-                    <Field>
-                      <FieldLabel htmlFor={`${modelPreset.id}-display`}>展示名</FieldLabel>
-                      <Input id={`${modelPreset.id}-display`} name="displayName" defaultValue={modelInstance?.displayName ?? modelPreset.displayName} required />
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor={`${modelPreset.id}-provider-model-name`}>Provider 模型名</FieldLabel>
-                      <Input id={`${modelPreset.id}-provider-model-name`} name="providerModelName" defaultValue={modelInstance?.providerModelName ?? modelPreset.providerModelName} required />
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor={`${modelPreset.id}-tags`}>能力标签</FieldLabel>
-                      <Input id={`${modelPreset.id}-tags`} name="capabilityTags" defaultValue={(modelInstance?.capabilityTags ?? modelPreset.capabilityTags).join(",")} />
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor={`${modelPreset.id}-input-price`}>输入价格</FieldLabel>
-                      <Input id={`${modelPreset.id}-input-price`} min="0" name="inputPrice" step="0.0001" type="number" defaultValue={modelInstance?.inputPrice ?? "1"} />
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor={`${modelPreset.id}-output-price`}>输出价格</FieldLabel>
-                      <Input id={`${modelPreset.id}-output-price`} min="0" name="outputPrice" step="0.0001" type="number" defaultValue={modelInstance?.outputPrice ?? "4"} />
-                    </Field>
-                    <div className="flex flex-wrap items-end gap-4 text-sm">
-                      <label className="flex items-center gap-2">
-                        <input defaultChecked={modelInstance?.isEnabled ?? false} name="isEnabled" type="checkbox" />
-                        启用模型
-                      </label>
-                      <Button type="submit">
-                        <CheckCircle2 data-icon="inline-start" />
-                        {modelInstance ? "更新模型" : "启用模型"}
-                      </Button>
-                    </div>
-                  </form>
-                </div>
-              );
-            })}
-          </CardContent>
-        </Card>
+        <ProviderModelManager provider={provider} />
       </div>
     </AdminShell>
   );

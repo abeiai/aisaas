@@ -12,16 +12,18 @@ export async function proxy(request: NextRequest) {
     }
 
     const adminAccessToken = request.cookies.get("aisaas_admin_access")?.value;
+    const adminRefreshToken = request.cookies.get("aisaas_admin_refresh")?.value;
 
-    if (!adminAccessToken && isPageNavigation) {
+    if (!adminAccessToken && !adminRefreshToken && isPageNavigation) {
       return NextResponse.redirect(new URL("/admin/login", request.url));
     }
   }
 
   if (pathname.startsWith("/dashboard")) {
     const userAccessToken = request.cookies.get("aisaas_user_access")?.value;
+    const userRefreshToken = request.cookies.get("aisaas_user_refresh")?.value;
 
-    if (!userAccessToken && isPageNavigation) {
+    if (!userAccessToken && !userRefreshToken && isPageNavigation) {
       return NextResponse.redirect(new URL("/login", request.url));
     }
   }

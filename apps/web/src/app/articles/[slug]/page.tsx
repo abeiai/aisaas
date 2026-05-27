@@ -94,7 +94,7 @@ export default async function ArticleDetailPage({
 
   return (
     <PublicShell>
-      <article className="mx-auto flex max-w-3xl flex-col gap-8 px-5 py-16">
+      <article className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 py-16 sm:px-8 lg:px-10">
         <Button asChild variant="ghost" className="w-fit">
           <Link href="/articles">
             <ArrowLeft data-icon="inline-start" />

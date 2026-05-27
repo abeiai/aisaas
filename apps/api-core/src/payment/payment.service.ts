@@ -3,6 +3,7 @@ import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { getPrismaClient, type Prisma } from "@aisaas/database";
 import { AppException } from "../common/app-exception.js";
 import { CreatePaymentOrderDto } from "./dto/create-payment-order.dto.js";
+import { UpsertBillingProductDto } from "./dto/billing-product.dto.js";
 import { AlipayClient } from "./alipay.client.js";
 import { amountToCents, WechatPayClient } from "./wechat-pay.client.js";
 import { PaymentConfigService } from "./payment-config.service.js";
@@ -19,28 +20,50 @@ import type {
 
 export { type PaymentProvider } from "./payment-channel.types.js";
 
-export const creditPackages = [
+const defaultBillingProducts = [
   {
     code: "starter",
     name: "入门充值包",
     amountCny: "19.90",
-    credits: 1990
+    credits: 1990,
+    description: "适合体验基础内容生成流程。",
+    benefitsMarkdown: "- 适合体验基础内容生成流程\n- 支持基础 AI 对话、文章生成和工具体验\n- 充值点数长期有效，可在用户中心查看流水",
+    sortOrder: 10
   },
   {
     code: "growth",
     name: "增长充值包",
     amountCny: "49.90",
-    credits: 5990
+    credits: 5990,
+    description: "适合连续使用和小规模内容运营。",
+    benefitsMarkdown: "- 适合连续使用和小规模内容运营\n- 支持更高频的文本、图片、语音等体验区任务\n- 推荐给正在验证工具站内容生产流程的用户",
+    sortOrder: 20
   },
   {
     code: "pro",
     name: "专业充值包",
     amountCny: "99.00",
-    credits: 12900
+    credits: 12900,
+    description: "适合高频任务和团队试运行。",
+    benefitsMarkdown: "- 适合高频任务和团队试运行\n- 支持多场景 AI 任务消耗与钱包流水追踪\n- 推荐给内容运营、产品验证和团队内部测试使用",
+    sortOrder: 30
   }
 ] as const;
 
-type CreditPackage = (typeof creditPackages)[number];
+type RechargeProduct = {
+  id: string;
+  code: string;
+  name: string;
+  billingMode: string;
+  amountCny: { toString(): string };
+  credits: number;
+  description: string | null;
+  benefitsMarkdown: string | null;
+  sortOrder: number;
+  isEnabled: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+};
 type AvailablePaymentProduct = Awaited<ReturnType<PaymentConfigService["listAvailableProducts"]>>[number];
 
 interface NotifyInput {
@@ -79,16 +102,17 @@ export class PaymentService {
       throw new AppException(40004, "支付方式未启用或配置不完整", HttpStatus.BAD_REQUEST);
     }
 
-    const selectedPackage = this.getPackage(dto.packageCode);
+    const selectedPackage = await this.getPackage(dto.packageCode);
     const order = await this.prisma.paymentOrder.create({
       data: {
         userId,
+        rechargeProductId: selectedPackage.id,
         provider: dto.provider,
         scene,
         product,
         action: this.paymentAction(product),
         orderNo: this.createOrderNo(),
-        amountCny: selectedPackage.amountCny,
+        amountCny: selectedPackage.amountCny.toString(),
         credits: selectedPackage.credits,
         clientIp,
         userAgent,
@@ -644,14 +668,257 @@ export class PaymentService {
     });
   }
 
-  private getPackage(packageCode: string): CreditPackage {
-    const selectedPackage = creditPackages.find((item) => item.code === packageCode);
+  async listRechargeProducts() {
+    await this.ensureDefaultBillingProducts();
+
+    const products = await this.prisma.billingProduct.findMany({
+      where: {
+        billingMode: "RECHARGE",
+        isEnabled: true
+      },
+      orderBy: [
+        {
+          sortOrder: "asc"
+        },
+        {
+          createdAt: "asc"
+        }
+      ]
+    });
+
+    return products.map((product) => this.toBillingProduct(product));
+  }
+
+  async listAdminBillingProducts() {
+    await this.ensureDefaultBillingProducts();
+
+    const products = await this.prisma.billingProduct.findMany({
+      orderBy: [
+        {
+          sortOrder: "asc"
+        },
+        {
+          createdAt: "asc"
+        }
+      ]
+    });
+
+    return products.map((product) => this.toBillingProduct(product));
+  }
+
+  async createAdminBillingProduct(dto: UpsertBillingProductDto) {
+    const billingMode = dto.billingMode ?? "RECHARGE";
+
+    if (billingMode !== "RECHARGE") {
+      throw new AppException(40001, "订阅模式和混合模式暂未开放", HttpStatus.BAD_REQUEST);
+    }
+
+    const product = await this.prisma.billingProduct.create({
+      data: {
+        code: await this.resolveBillingProductCode(dto.code),
+        name: dto.name.trim(),
+        billingMode,
+        amountCny: this.normalizeAmountCny(dto.amountCny),
+        credits: dto.credits,
+        description: this.normalizeOptionalText(dto.description),
+        benefitsMarkdown: this.normalizeOptionalText(dto.benefitsMarkdown),
+        sortOrder: dto.sortOrder ?? 100,
+        isEnabled: dto.isEnabled ?? true
+      }
+    });
+
+    return this.toBillingProduct(product);
+  }
+
+  async updateAdminBillingProduct(id: string, dto: UpsertBillingProductDto) {
+    const existing = await this.prisma.billingProduct.findUnique({
+      where: {
+        id
+      }
+    });
+
+    if (!existing) {
+      throw new AppException(40401, "产品不存在", HttpStatus.NOT_FOUND);
+    }
+
+    const billingMode = dto.billingMode ?? existing.billingMode;
+
+    if (billingMode !== "RECHARGE") {
+      throw new AppException(40001, "订阅模式和混合模式暂未开放", HttpStatus.BAD_REQUEST);
+    }
+
+    const product = await this.prisma.billingProduct.update({
+      where: {
+        id
+      },
+      data: {
+        code: await this.resolveBillingProductCode(dto.code ?? existing.code, existing.id),
+        name: dto.name.trim(),
+        billingMode,
+        amountCny: this.normalizeAmountCny(dto.amountCny),
+        credits: dto.credits,
+        description: this.normalizeOptionalText(dto.description),
+        benefitsMarkdown: this.normalizeOptionalText(dto.benefitsMarkdown),
+        sortOrder: dto.sortOrder ?? existing.sortOrder,
+        isEnabled: dto.isEnabled ?? false
+      }
+    });
+
+    return this.toBillingProduct(product);
+  }
+
+  async deleteAdminBillingProduct(id: string) {
+    const relatedOrderCount = await this.prisma.paymentOrder.count({
+      where: {
+        rechargeProductId: id
+      }
+    });
+
+    if (relatedOrderCount > 0) {
+      throw new AppException(40004, "该产品已有支付订单，不能删除，可改为停用", HttpStatus.BAD_REQUEST);
+    }
+
+    await this.prisma.billingProduct.delete({
+      where: {
+        id
+      }
+    });
+
+    return {};
+  }
+
+  private async getPackage(packageCode: string): Promise<RechargeProduct> {
+    await this.ensureDefaultBillingProducts();
+    const selectedPackage = await this.prisma.billingProduct.findFirst({
+      where: {
+        code: packageCode,
+        billingMode: "RECHARGE",
+        isEnabled: true
+      }
+    });
 
     if (!selectedPackage) {
       throw new AppException(40001, "充值套餐不存在", HttpStatus.BAD_REQUEST);
     }
 
     return selectedPackage;
+  }
+
+  private async ensureDefaultBillingProducts() {
+    for (const product of defaultBillingProducts) {
+      await this.prisma.billingProduct.upsert({
+        where: {
+          code: product.code
+        },
+        update: {},
+        create: {
+          code: product.code,
+          name: product.name,
+          billingMode: "RECHARGE",
+          amountCny: product.amountCny,
+          credits: product.credits,
+          description: product.description,
+          benefitsMarkdown: product.benefitsMarkdown,
+          sortOrder: product.sortOrder,
+          isEnabled: true
+        }
+      });
+    }
+  }
+
+  private async createBillingProductCode() {
+    for (let index = 0; index < 5; index += 1) {
+      const code = `recharge-${Date.now().toString(36)}-${randomBytes(2).toString("hex")}`;
+      const existing = await this.prisma.billingProduct.findUnique({
+        where: {
+          code
+        },
+        select: {
+          id: true
+        }
+      });
+
+      if (!existing) {
+        return code;
+      }
+    }
+
+    throw new AppException(50001, "产品编码生成失败", HttpStatus.INTERNAL_SERVER_ERROR);
+  }
+
+  private async resolveBillingProductCode(value?: string, existingId?: string) {
+    const code = value?.trim() || (existingId ? "" : await this.createBillingProductCode());
+
+    if (!code) {
+      throw new AppException(40001, "产品编码不能为空", HttpStatus.BAD_REQUEST);
+    }
+
+    if (code.length > 64 || !/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(code)) {
+      throw new AppException(
+        40001,
+        "产品编码只能使用小写字母、数字和短横线，且不能以短横线开头或结尾",
+        HttpStatus.BAD_REQUEST
+      );
+    }
+
+    const existing = await this.prisma.billingProduct.findUnique({
+      where: {
+        code
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (existing && existing.id !== existingId) {
+      throw new AppException(40001, "产品编码已存在", HttpStatus.BAD_REQUEST);
+    }
+
+    return code;
+  }
+
+  private normalizeAmountCny(value: string) {
+    const amount = Number(value);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new AppException(40001, "价格必须大于 0", HttpStatus.BAD_REQUEST);
+    }
+
+    return amount.toFixed(2);
+  }
+
+  private normalizeOptionalText(value: string | undefined) {
+    const text = value?.trim();
+
+    return text || null;
+  }
+
+  private toBillingProduct(product: RechargeProduct) {
+    return {
+      id: product.id,
+      code: product.code,
+      name: product.name,
+      billingMode: product.billingMode,
+      billingModeName: this.billingModeName(product.billingMode),
+      amountCny: product.amountCny.toString(),
+      credits: product.credits,
+      description: product.description ?? "",
+      benefitsMarkdown: product.benefitsMarkdown ?? "",
+      sortOrder: product.sortOrder,
+      isEnabled: product.isEnabled,
+      createdAt: product.createdAt,
+      updatedAt: product.updatedAt
+    };
+  }
+
+  private billingModeName(mode: string) {
+    const names: Record<string, string> = {
+      RECHARGE: "充值模式",
+      SUBSCRIPTION: "订阅模式",
+      MIXED: "混合模式"
+    };
+
+    return names[mode] ?? mode;
   }
 
   private createOrderNo() {

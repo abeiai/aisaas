@@ -17,12 +17,12 @@ interface AuthPanelProps {
 export function AuthPanel({ title, description, children, footer }: AuthPanelProps) {
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto grid min-h-screen max-w-6xl px-5 py-10 lg:grid-cols-[1fr_440px] lg:gap-12">
+      <div className="grid min-h-screen w-full px-5 py-10 lg:grid-cols-[1fr_440px] lg:gap-12">
         <section className="hidden flex-col justify-center gap-8 lg:flex">
           <Link className="font-display text-3xl font-light" href="/">
             AI SaaS
           </Link>
-          <div className="flex max-w-2xl flex-col gap-5">
+          <div className="flex w-full flex-col gap-5">
             <p className="w-fit rounded-full bg-secondary px-3 py-1 text-xs font-semibold">
               简体中文工具站底座
             </p>

@@ -1,15 +1,29 @@
 import Link from "next/link";
-import { ArrowLeft, Coins, ExternalLink, Sparkles } from "lucide-react";
+import { Coins, ExternalLink } from "lucide-react";
 
-import { PublicShell } from "@/components/shell/public-shell";
+import { DashboardShell } from "@/components/shell/dashboard-shell";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getAiTasks, type AiTask } from "@/lib/ai-api";
+import { getAudioTasks, type AudioTask } from "@/lib/audio-api";
 import { getCurrentUser } from "@/lib/auth-actions";
 
 export const dynamic = "force-dynamic";
+
+type TaskStatus = AiTask["status"] | AudioTask["status"];
+
+interface UnifiedTaskRow {
+  id: string;
+  type: string;
+  summary: string;
+  source: string;
+  status: TaskStatus;
+  statusName: string;
+  credits: number | null;
+  createdAt: string;
+  href: string;
+}
 
 function formatDate(value: string | null) {
   if (!value) {
@@ -21,7 +35,7 @@ function formatDate(value: string | null) {
   });
 }
 
-function statusVariant(status: AiTask["status"]) {
+function statusVariant(status: TaskStatus) {
   if (status === "SUCCEEDED") {
     return "secondary" as const;
   }
@@ -34,51 +48,97 @@ function statusVariant(status: AiTask["status"]) {
 }
 
 function previewText(task: AiTask) {
-  const value = typeof task.input?.text === "string" ? task.input.text : "";
+  const value =
+    task.inputPreview ||
+    (typeof task.input?.text === "string" ? task.input.text : "") ||
+    task.input?.variables?.prompt ||
+    "";
 
   return value.length > 42 ? `${value.slice(0, 42)}...` : value || "无输入内容";
 }
 
-function consumedCredits(task: AiTask) {
-  return (task.actualCredits ?? task.estimatedCredits).toLocaleString("zh-CN");
+function audioPreviewText(task: AudioTask) {
+  const value = task.inputText ?? task.voiceAsset?.name ?? task.sourceAudioAsset?.objectKey ?? "";
+
+  return value.length > 42 ? `${value.slice(0, 42)}...` : value || "无输入内容";
+}
+
+function aiTaskType(task: AiTask) {
+  const capabilities = task.scenario.requiredCapabilities.map((item) => item.toUpperCase());
+
+  if (capabilities.includes("VIDEO_GENERATION")) {
+    return "视频任务";
+  }
+
+  if (capabilities.includes("IMAGE_GENERATION")) {
+    return "图片任务";
+  }
+
+  return "文本任务";
+}
+
+function aiTaskSource(task: AiTask) {
+  return task.scenario.slug.startsWith("experience-") ? "体验区" : "工具";
+}
+
+function audioTaskSource(task: AudioTask) {
+  const source = typeof task.providerPayload?.source === "string" ? task.providerPayload.source : "";
+
+  if (source === "EXPERIENCE") {
+    return "体验区";
+  }
+
+  return "工具";
+}
+
+function consumedCredits(value: number | null) {
+  return value === null ? "未结算" : `${value.toLocaleString("zh-CN")} 点`;
+}
+
+function toAiTaskRow(task: AiTask): UnifiedTaskRow {
+  return {
+    id: `ai:${task.id}`,
+    type: aiTaskType(task),
+    summary: previewText(task),
+    source: aiTaskSource(task),
+    status: task.status,
+    statusName: task.statusName,
+    credits: task.actualCredits,
+    createdAt: task.createdAt,
+    href: `/dashboard/tasks/${task.id}`
+  };
+}
+
+function toAudioTaskRow(task: AudioTask): UnifiedTaskRow {
+  return {
+    id: `audio:${task.id}`,
+    type: task.typeName,
+    summary: audioPreviewText(task),
+    source: audioTaskSource(task),
+    status: task.status,
+    statusName: task.statusName,
+    credits: task.actualCredits,
+    createdAt: task.createdAt,
+    href: `/dashboard/audio-tasks/${task.id}`
+  };
 }
 
 export default async function TasksPage() {
   await getCurrentUser();
-  const tasks = await getAiTasks();
+  const [aiTasks, audioTasks] = await Promise.all([
+    getAiTasks().catch(() => []),
+    getAudioTasks().catch(() => [])
+  ]);
+  const tasks = [...aiTasks.map(toAiTaskRow), ...audioTasks.map(toAudioTaskRow)]
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+    .slice(0, 50);
   const succeededCount = tasks.filter((task) => task.status === "SUCCEEDED").length;
   const failedCount = tasks.filter((task) => task.status === "FAILED").length;
-  const totalCredits = tasks.reduce((sum, task) => sum + (task.actualCredits ?? 0), 0);
+  const totalCredits = tasks.reduce((sum, task) => sum + (task.credits ?? 0), 0);
 
   return (
-    <PublicShell>
-      <section className="mx-auto flex max-w-6xl flex-col gap-8 px-5 py-12">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div className="flex max-w-3xl flex-col gap-4">
-            <Badge>任务历史</Badge>
-            <h1 className="font-display text-5xl font-light leading-tight tracking-normal">
-              AI 生成记录
-            </h1>
-            <p className="text-base leading-7 text-muted-foreground">
-              查看最近 50 条 AI 任务、任务状态、点数消耗和生成结果。
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <Button asChild>
-              <Link href="/tools">
-                <Sparkles data-icon="inline-start" />
-                创建新任务
-              </Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link href="/dashboard">
-                <ArrowLeft data-icon="inline-start" />
-                返回用户中心
-              </Link>
-            </Button>
-          </div>
-        </div>
-
+    <DashboardShell active="tasks">
+      <section className="flex w-full flex-col gap-8 px-5 py-8">
         <div className="grid gap-4 md:grid-cols-3">
           <Card>
             <CardHeader>
@@ -103,41 +163,43 @@ export default async function TasksPage() {
         <Card>
           <CardHeader>
             <CardTitle>任务列表</CardTitle>
-            <CardDescription>点击查看可回到对应工具详情页继续编辑输入。</CardDescription>
+            <CardDescription>统一展示文本、图片、视频和语音任务记录。</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="overflow-hidden rounded-md border border-border">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>工具</TableHead>
-                    <TableHead>输入摘要</TableHead>
+                    <TableHead>类型</TableHead>
+                    <TableHead>摘要</TableHead>
+                    <TableHead>来源</TableHead>
                     <TableHead>状态</TableHead>
-                    <TableHead>点数</TableHead>
+                    <TableHead>消耗点数</TableHead>
                     <TableHead>时间</TableHead>
-                    <TableHead>操作</TableHead>
+                    <TableHead>查看</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {tasks.length > 0 ? (
                     tasks.map((task) => (
                       <TableRow key={task.id}>
-                        <TableCell>{task.scenario.name}</TableCell>
-                        <TableCell className="max-w-[260px]">{previewText(task)}</TableCell>
+                        <TableCell>{task.type}</TableCell>
+                        <TableCell className="max-w-[280px]">{task.summary}</TableCell>
+                        <TableCell>{task.source}</TableCell>
                         <TableCell>
                           <Badge variant={statusVariant(task.status)}>{task.statusName}</Badge>
                         </TableCell>
                         <TableCell>
                           <span className="inline-flex items-center gap-2">
                             <Coins data-icon="inline-start" />
-                            {consumedCredits(task)} 点
+                            {consumedCredits(task.credits)}
                           </span>
                         </TableCell>
                         <TableCell>{formatDate(task.createdAt)}</TableCell>
                         <TableCell>
                           <Link
                             className="inline-flex items-center gap-2 text-sm font-medium"
-                            href={`/dashboard/tasks/${task.id}`}
+                            href={task.href}
                           >
                             查看
                             <ExternalLink />
@@ -147,8 +209,8 @@ export default async function TasksPage() {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell className="text-muted-foreground" colSpan={6}>
-                        暂无 AI 任务。可以先进入工具列表创建第一条生成任务。
+                      <TableCell className="text-muted-foreground" colSpan={7}>
+                        暂无任务。可以先进入工具或体验区创建第一条生成任务。
                       </TableCell>
                     </TableRow>
                   )}
@@ -158,6 +220,6 @@ export default async function TasksPage() {
           </CardContent>
         </Card>
       </section>
-    </PublicShell>
+    </DashboardShell>
   );
 }

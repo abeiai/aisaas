@@ -1,33 +1,23 @@
+import { Bot, CheckCircle2, Link2, Tags } from "lucide-react";
+
 import { AdminShell } from "@/components/shell/admin-shell";
-import { AdminTableSection } from "@/components/shell/admin-table-section";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { TableCell, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { getAdminAiModelAliases, updateAiModelAliasAction, type AiModelAliasPayload } from "@/lib/ai-admin-api";
 import { getAdminSystemConfigs, updateAiConfigAction } from "@/lib/settings-api";
 
 export const dynamic = "force-dynamic";
 
-const aiConfigKeys = new Set([
-  "defaultAiModel",
-  "aiSaveFullContent",
-  "audioVoiceCloneReviewRequired",
-  "audioVoiceDesignReviewRequired",
-  "audioUserPublicVoiceEnabled",
-  "audioCloneDefaultVisibility",
-  "audioDesignDefaultVisibility",
-  "audioSafetyNotice",
-  "audioCloneConsentText",
-  "audioDownloadNotice"
-]);
-
 export default async function AdminAiConfigPage() {
-  const settings = await getAdminSystemConfigs();
-  const aiSettings = settings.filter((setting) => aiConfigKeys.has(setting.key));
+  const [settings, modelAliasPayload] = await Promise.all([
+    getAdminSystemConfigs(),
+    getAdminAiModelAliases()
+  ]);
   const configByKey = new Map(settings.map((setting) => [setting.key, setting.value]));
 
   return (
@@ -169,25 +159,147 @@ export default async function AdminAiConfigPage() {
           </CardContent>
         </Card>
 
-        <AdminTableSection
-          title="AI 配置项"
-          description="这里只展示智能中枢相关的系统配置项。"
-          headers={["配置项", "当前值", "可公开", "更新时间"]}
-        >
-          {aiSettings.map((setting) => (
-            <TableRow key={setting.key}>
-              <TableCell className="font-medium">{setting.label}</TableCell>
-              <TableCell className="font-mono text-muted-foreground">{setting.value}</TableCell>
-              <TableCell>
-                <Badge variant={setting.isPublic ? "secondary" : "muted"}>
-                  {setting.isPublic ? "公开" : "后台"}
-                </Badge>
-              </TableCell>
-              <TableCell>{new Date(setting.updatedAt).toLocaleDateString("zh-CN")}</TableCell>
-            </TableRow>
-          ))}
-        </AdminTableSection>
+        <DefaultModelsSection payload={modelAliasPayload} />
       </div>
     </AdminShell>
+  );
+}
+
+function DefaultModelsSection({ payload }: { payload: AiModelAliasPayload }) {
+  const boundCount = payload.aliases.filter((alias) => alias.modelInstance).length;
+
+  return (
+    <section id="default-models" className="grid gap-5">
+      <div className="flex flex-col gap-2">
+        <h2 className="text-xl font-semibold tracking-normal">默认模型</h2>
+        <p className="text-sm text-muted-foreground">
+          为聊天、推理、视觉、图片、视频和语音等业务用途指定默认模型，业务场景读取这些用途绑定。
+        </p>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardContent className="flex items-center justify-between gap-4 p-5">
+            <div>
+              <p className="text-sm text-muted-foreground">默认模型项</p>
+              <p className="mt-1 text-2xl font-semibold">{payload.aliases.length}</p>
+            </div>
+            <Link2 className="size-5 text-muted-foreground" />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center justify-between gap-4 p-5">
+            <div>
+              <p className="text-sm text-muted-foreground">已绑定</p>
+              <p className="mt-1 text-2xl font-semibold">{boundCount}</p>
+            </div>
+            <CheckCircle2 className="size-5 text-muted-foreground" />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center justify-between gap-4 p-5">
+            <div>
+              <p className="text-sm text-muted-foreground">可选模型</p>
+              <p className="mt-1 text-2xl font-semibold">{payload.modelInstances.length}</p>
+            </div>
+            <Bot className="size-5 text-muted-foreground" />
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-2 2xl:grid-cols-3">
+        {payload.aliases.map((alias) => (
+          <Card className="flex min-h-[360px] flex-col" key={alias.aliasKey}>
+            <CardHeader className="gap-4 border-b border-border">
+              <div className="flex flex-col gap-2">
+                <div className="flex items-start justify-between gap-3">
+                  <CardTitle className="text-xl">{alias.displayName}</CardTitle>
+                  <Badge variant={alias.modelInstance ? "secondary" : "muted"}>{alias.statusName}</Badge>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className="font-mono">用途：{alias.aliasKey}</Badge>
+                  {alias.modelInstance?.isEnabled ? <Badge variant="outline">模型已启用</Badge> : null}
+                </div>
+                <CardDescription className="min-h-10">{alias.description || "未填写默认模型说明。"}</CardDescription>
+              </div>
+            </CardHeader>
+            <CardContent className="flex flex-1 flex-col gap-5 pt-5">
+              {alias.modelInstance ? (
+                <div className="rounded-lg border border-border bg-background p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs text-muted-foreground">当前绑定模型</p>
+                      <p className="mt-1 truncate font-semibold">{alias.modelInstance.displayName}</p>
+                    </div>
+                    <Bot className="size-4 text-muted-foreground" />
+                  </div>
+                  <div className="mt-4 grid gap-3 text-sm">
+                    <Info label="Provider" value={alias.modelInstance.providerPresetName || alias.modelInstance.providerName} />
+                    <Info label="模型名" value={alias.modelInstance.providerModelName} mono />
+                    <Info label="Provider 状态" value={alias.modelInstance.providerStatus} />
+                  </div>
+                </div>
+              ) : (
+                <div className="flex min-h-[152px] flex-col items-center justify-center rounded-lg border border-dashed border-border bg-secondary/40 p-5 text-center">
+                  <Link2 className="size-5 text-muted-foreground" />
+                  <p className="mt-3 font-medium">尚未绑定默认模型</p>
+                  <p className="mt-1 text-sm text-muted-foreground">相关业务场景会返回中文配置提示。</p>
+                </div>
+              )}
+
+              <div className="flex min-h-10 flex-wrap gap-2">
+                {alias.modelInstance?.capabilityTags.length ? (
+                  alias.modelInstance.capabilityTags.map((tag) => (
+                    <Badge key={tag} variant="outline">
+                      <Tags data-icon="inline-start" />
+                      {tag}
+                    </Badge>
+                  ))
+                ) : (
+                  <span className="text-sm text-muted-foreground">暂无能力标签</span>
+                )}
+              </div>
+
+              <form action={updateAiModelAliasAction} className="mt-auto grid gap-3 border-t border-border pt-5">
+                <input name="aliasKey" type="hidden" value={alias.aliasKey} />
+                <Field>
+                  <FieldLabel htmlFor={`${alias.aliasKey}-model`}>选择默认模型</FieldLabel>
+                  <Select
+                    id={`${alias.aliasKey}-model`}
+                    name="modelInstanceId"
+                    defaultValue={alias.modelInstanceId ?? ""}
+                  >
+                    <option value="">未配置</option>
+                    {payload.modelInstances.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.providerPresetName} / {model.displayName} / {model.providerModelName}
+                      </option>
+                    ))}
+                  </Select>
+                  <FieldDescription>
+                    {alias.modelInstance
+                      ? `${alias.modelInstance.providerPresetName} · ${alias.modelInstance.providerModelName}`
+                      : "未配置时，相关业务场景会提示需要先配置默认模型。"}
+                  </FieldDescription>
+                </Field>
+                <Button type="submit">
+                  <Link2 data-icon="inline-start" />
+                  保存绑定
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Info({ label, mono = false, value }: { label: string; mono?: boolean; value: string }) {
+  return (
+    <div className="grid gap-1">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className={mono ? "break-all font-mono text-sm" : "break-all font-medium"}>{value}</span>
+    </div>
   );
 }

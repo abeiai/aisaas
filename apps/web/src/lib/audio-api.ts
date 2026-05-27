@@ -87,12 +87,14 @@ export interface VoiceAsset {
   reviewedAt?: string | null;
   deletedAt?: string | null;
   isDefault?: boolean;
+  isPlatform?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
 
 export interface VoiceLibrary {
   systemVoices: VoiceAsset[];
+  platformVoices: VoiceAsset[];
   customVoices: VoiceAsset[];
   defaultVoice: {
     voiceAssetId: string | null;
@@ -108,6 +110,12 @@ export interface AudioModelOption {
   providerName: string | null;
   modelName: string | null;
   capabilityTags: string[];
+  inputPrice: string;
+  outputPrice: string;
+  pricingMode: "TOKENS" | "TOKEN_CACHE" | "TOKEN_TIERED" | "REQUEST" | "CHARACTERS" | "IMAGES" | "SECONDS" | "VIDEO_SECONDS";
+  pricingUnit: "K_TOKENS" | "M_TOKENS" | "REQUEST" | "CHARACTER" | "K_CHARACTERS" | "TEN_K_CHARACTERS" | "IMAGE" | "SECOND";
+  pricingConfig: unknown;
+  creditsPerCny: number;
   statusName: string;
 }
 
@@ -131,6 +139,7 @@ export interface AudioTask {
   errorMessage: string | null;
   requestId: string | null;
   providerPayload: {
+    source?: "TOOL" | "EXPERIENCE";
     audioUrl?: string;
     previewAudioUrl?: string;
     raw?: {
@@ -288,6 +297,7 @@ function revalidateAudioPaths(extraPath?: string) {
     revalidatePath(extraPath);
   }
   revalidatePath("/dashboard");
+  revalidatePath("/dashboard/tasks");
   revalidatePath("/dashboard/voices");
   revalidatePath("/dashboard/audio-tasks");
   revalidatePath("/dashboard/billing");
@@ -324,6 +334,7 @@ export async function createAudioToolTaskAction(formData: FormData) {
           name: fieldText(formData, "name"),
           modelAlias: modelAlias || "voice-clone-default",
           language: "zh-CN",
+          source: "TOOL",
           description: fieldText(formData, "description") || undefined,
           consentAccepted: true,
           consentStatement:
@@ -343,7 +354,8 @@ export async function createAudioToolTaskAction(formData: FormData) {
           previewText: fieldText(formData, "previewText") || undefined,
           name: fieldText(formData, "name"),
           modelAlias: modelAlias || "voice-design-default",
-          language: "zh-CN"
+          language: "zh-CN",
+          source: "TOOL"
         })
       });
       target = `${basePath}?voice=${voice.id}&${voice.status === "FAILED" ? "failed=1" : "created=1"}`;
@@ -358,6 +370,7 @@ export async function createAudioToolTaskAction(formData: FormData) {
           voiceAssetId,
           voice,
           modelAlias: modelAlias || "tts-default",
+          source: "TOOL",
           speed: fieldNumber(formData, "speed"),
           pitch: fieldNumber(formData, "pitch"),
           volume: fieldNumber(formData, "volume"),
@@ -390,6 +403,7 @@ export async function createTtsAudioTaskAction(formData: FormData) {
         voiceAssetId: text(formData, "voiceAssetId") || undefined,
         voice: text(formData, "voice") || undefined,
         modelAlias: text(formData, "modelAlias") || "tts-default",
+        source: "TOOL",
         speed: numberValue(formData, "speed"),
         pitch: numberValue(formData, "pitch"),
         volume: numberValue(formData, "volume"),
@@ -430,6 +444,7 @@ export async function createExperienceTtsAudioTaskAction(formData: FormData) {
         voiceAssetId,
         voice,
         modelAlias,
+        source: "EXPERIENCE",
         speed: numberValue(formData, "speed"),
         pitch: numberValue(formData, "pitch"),
         volume: numberValue(formData, "volume"),
@@ -478,7 +493,8 @@ async function resolveExperiencePresetVoice(voiceChoice: string, modelAlias: str
       previewText: preset.previewText,
       name: preset.name,
       modelAlias,
-      language: "zh-CN"
+      language: "zh-CN",
+      source: "EXPERIENCE"
     })
   });
 
@@ -503,7 +519,8 @@ export async function createVoiceDesignAction(formData: FormData) {
         previewText: text(formData, "previewText") || undefined,
         name: text(formData, "name"),
         modelAlias: text(formData, "modelAlias") || "voice-design-default",
-        language: "zh-CN"
+        language: "zh-CN",
+        source: "TOOL"
       })
     });
     target = `${basePath}?voice=${voice.id}&${voice.status === "FAILED" ? "failed=1" : "created=1"}`;
@@ -540,6 +557,7 @@ export async function createVoiceCloneAction(formData: FormData) {
         name: text(formData, "name"),
         modelAlias: text(formData, "modelAlias") || "voice-clone-default",
         language: "zh-CN",
+        source: "TOOL",
         description: text(formData, "description") || undefined,
         consentAccepted: true,
         consentStatement: text(formData, "consentStatement"),

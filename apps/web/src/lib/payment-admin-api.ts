@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 
-import type { PaymentOrder, PaymentProvider } from "@/lib/billing-api";
+import type { PaymentOrder, PaymentProvider, RechargeProduct } from "@/lib/billing-api";
 
 interface ApiResponse<TData> {
   code: number;
@@ -77,6 +77,10 @@ export async function getPaymentNotifyLogs(orderNo?: string) {
   return apiFetch<PaymentNotifyLog[]>(`/admin/payments/notify-logs${query}`);
 }
 
+export async function getAdminBillingProducts() {
+  return apiFetch<RechargeProduct[]>("/admin/products");
+}
+
 function text(formData: FormData, name: string) {
   return String(formData.get(name) ?? "").trim();
 }
@@ -87,6 +91,62 @@ async function paymentMutation(path: string) {
   });
   revalidatePath("/admin");
   revalidatePath("/admin/payments");
+}
+
+function numberValue(formData: FormData, name: string, fallback = 0) {
+  const value = Number(text(formData, name));
+
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function checkboxValue(formData: FormData, name: string) {
+  return formData.get(name) === "on";
+}
+
+function productPayload(formData: FormData) {
+  return {
+    code: text(formData, "code"),
+    billingMode: text(formData, "billingMode") || "RECHARGE",
+    name: text(formData, "name"),
+    amountCny: text(formData, "amountCny"),
+    credits: numberValue(formData, "credits"),
+    description: text(formData, "description"),
+    benefitsMarkdown: text(formData, "benefitsMarkdown"),
+    sortOrder: numberValue(formData, "sortOrder", 100),
+    isEnabled: checkboxValue(formData, "isEnabled")
+  };
+}
+
+export async function createBillingProductAction(formData: FormData) {
+  await apiFetch<RechargeProduct>("/admin/products", {
+    method: "POST",
+    body: JSON.stringify(productPayload(formData))
+  });
+  revalidatePath("/admin");
+  revalidatePath("/admin/products");
+  revalidatePath("/dashboard/billing");
+  revalidatePath("/pricing");
+}
+
+export async function updateBillingProductAction(formData: FormData) {
+  await apiFetch<RechargeProduct>(`/admin/products/${text(formData, "id")}`, {
+    method: "PATCH",
+    body: JSON.stringify(productPayload(formData))
+  });
+  revalidatePath("/admin");
+  revalidatePath("/admin/products");
+  revalidatePath("/dashboard/billing");
+  revalidatePath("/pricing");
+}
+
+export async function deleteBillingProductAction(formData: FormData) {
+  await apiFetch(`/admin/products/${text(formData, "id")}`, {
+    method: "DELETE"
+  });
+  revalidatePath("/admin");
+  revalidatePath("/admin/products");
+  revalidatePath("/dashboard/billing");
+  revalidatePath("/pricing");
 }
 
 export async function syncPaymentOrderAction(formData: FormData) {

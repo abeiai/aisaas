@@ -38,6 +38,7 @@ export default async function TextToSpeechPage({
   ]);
   const configuredModels = models.filter((model) => model.aliasKey.startsWith("tts") || model.aliasKey === "audio-preview");
   const systemVoices = library?.systemVoices ?? [];
+  const platformVoices = library?.platformVoices.filter((voice) => voice.status === "READY") ?? [];
   const customVoices = library?.customVoices.filter((voice) => voice.status === "READY") ?? [];
   const resultUrl = task ? audioUrl(task) : null;
   const balanceError = query.error?.includes("点数余额不足");
@@ -45,9 +46,9 @@ export default async function TextToSpeechPage({
 
   return (
     <PublicShell>
-      <section className="mx-auto flex max-w-6xl flex-col gap-8 px-5 py-12">
+      <section className="flex w-full flex-col gap-8 px-5 py-12">
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div className="flex max-w-3xl flex-col gap-4">
+          <div className="flex w-full flex-col gap-4">
             <Badge>语音工具</Badge>
             <h1 className="font-display text-5xl font-light leading-tight tracking-normal md:text-6xl">
               文字转语音
@@ -69,7 +70,7 @@ export default async function TextToSpeechPage({
               </Link>
             </Button>
             <Button asChild variant="outline">
-              <Link href="/dashboard/audio-tasks">音频任务</Link>
+              <Link href="/dashboard/tasks">任务历史</Link>
             </Button>
           </div>
         </div>
@@ -154,14 +155,19 @@ export default async function TextToSpeechPage({
                     <Field>
                       <FieldLabel htmlFor="voiceAssetId">我的音色</FieldLabel>
                       <Select id="voiceAssetId" name="voiceAssetId" defaultValue={query.voice ?? library?.defaultVoice.voiceAssetId ?? ""}>
-                        <option value="">不使用自定义音色</option>
+                        <option value="">不使用平台或自定义音色</option>
+                        {platformVoices.map((voice) => (
+                          <option key={voice.id} value={voice.id}>
+                            {voice.name} · {voice.type === "CLONED" ? "平台复刻音色" : "平台设计音色"}
+                          </option>
+                        ))}
                         {customVoices.map((voice) => (
                           <option key={voice.id} value={voice.id}>
                             {voice.name} · {voice.typeName}
                           </option>
                         ))}
                       </Select>
-                      <FieldDescription>选择自定义音色时会校验音色的 targetModel。</FieldDescription>
+                      <FieldDescription>选择平台或自定义音色时会校验音色的 targetModel。</FieldDescription>
                     </Field>
                   </div>
 

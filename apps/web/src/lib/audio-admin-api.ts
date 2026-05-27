@@ -11,23 +11,6 @@ interface ApiResponse<TData> {
 }
 
 export type AudioOperationType = "TTS" | "VOICE_CLONE" | "VOICE_DESIGN";
-export type AudioBillingMode = "PER_CHARACTER" | "PER_TASK" | "PER_SECOND";
-
-export interface AudioPricingRule {
-  id: string;
-  operationType: AudioOperationType;
-  operationTypeName: string;
-  model: string;
-  billingMode: AudioBillingMode;
-  billingModeName: string;
-  creditsPerUnit: number;
-  minimumCredits: number;
-  modelMultiplier: number;
-  isEnabled: boolean;
-  statusName: string;
-  createdAt: string;
-  updatedAt: string;
-}
 
 export interface AudioUsageSummary {
   requestCount: number;
@@ -191,6 +174,7 @@ export interface AdminVoiceAsset {
   disabledReason: string | null;
   reviewedAt: string | null;
   deletedAt: string | null;
+  isPlatform: boolean;
   taskCount: number;
   recentTasks: Array<{
     id: string;
@@ -256,12 +240,19 @@ export interface AdminAudioModel {
   providerName: string;
   providerDisplayName: string;
   providerStatus: string;
+  baseUrl: string | null;
+  webSocketUrl: string | null;
   region: string | null;
+  hasCustomApiKey: boolean;
+  apiKeyPreview: string;
   capabilityTags: string[];
   isEnabled: boolean;
   statusName: string;
-  priceMultiplier: number | null;
-  pricingRules: AudioPricingRule[];
+  inputPrice: string;
+  outputPrice: string;
+  pricingMode: AudioModelPricingMode;
+  pricingUnit: AudioModelPricingUnit;
+  pricingConfig: unknown | null;
   aliases: Array<{
     id: string;
     aliasKey: string;
@@ -275,6 +266,30 @@ export interface AdminAudioModel {
   supportsVoiceClone: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export type AudioModelPricingMode = "TOKENS" | "REQUEST" | "CHARACTERS" | "IMAGES" | "SECONDS";
+export type AudioModelPricingUnit =
+  | "K_TOKENS"
+  | "M_TOKENS"
+  | "REQUEST"
+  | "CHARACTER"
+  | "K_CHARACTERS"
+  | "TEN_K_CHARACTERS"
+  | "IMAGE"
+  | "SECOND";
+
+export interface AudioModelDeleteCheck {
+  modelInstanceId: string;
+  canDelete: boolean;
+  aliasKeys: string[];
+  boundScenarios: Array<{
+    name: string;
+    slug: string;
+    isEnabled: boolean;
+    aliasKey: string | null;
+  }>;
+  message: string;
 }
 
 export interface AdminAudioTask {
@@ -405,10 +420,6 @@ function buildQuery(filters: Record<string, string | undefined>) {
   return query ? `?${query}` : "";
 }
 
-export async function getAdminAudioPricingRules() {
-  return apiFetch<AudioPricingRule[]>("/admin/audio/pricing-rules");
-}
-
 export async function getAdminAudioModels() {
   return apiFetch<AdminAudioModel[]>("/admin/audio/models");
 }
@@ -438,7 +449,36 @@ export async function getAdminVoiceAsset(id: string) {
   return apiFetch<AdminVoiceAsset>(`/admin/audio/voices/${id}`);
 }
 
-export async function getAdminAudioTasks(filters: { user?: string; status?: string; type?: string }) {
+export async function createAdminPlatformVoiceAction(formData: FormData) {
+  await apiFetch<AdminVoiceAsset>("/admin/audio/voices/platform", {
+    method: "POST",
+    body: JSON.stringify({
+      type: text(formData, "type"),
+      name: text(formData, "name"),
+      providerVoiceId: text(formData, "providerVoiceId"),
+      modelInstanceId: text(formData, "modelInstanceId"),
+      language: text(formData, "language") || undefined,
+      description: text(formData, "description") || undefined,
+      previewAudioUrl: text(formData, "previewAudioUrl") || undefined
+    })
+  });
+
+  revalidatePath("/admin/audio/voices");
+  revalidatePath("/experience/voice");
+  revalidatePath("/dashboard/voices");
+}
+
+export async function getAdminAudioTasks(filters: {
+  user?: string;
+  status?: string;
+  type?: string;
+  provider?: string;
+  model?: string;
+  startTime?: string;
+  endTime?: string;
+  page?: string;
+  pageSize?: string;
+}) {
   return apiFetch<AdminAudioTask[]>(`/admin/audio/tasks${buildQuery(filters)}`);
 }
 
@@ -460,6 +500,18 @@ export async function updateAudioModelAction(formData: FormData) {
   await apiFetch<AdminAudioModel>(`/admin/audio/models/${id}`, {
     method: "PATCH",
     body: JSON.stringify({
+      displayName: text(formData, "displayName"),
+      modelName: text(formData, "modelName"),
+      baseUrl: text(formData, "baseUrl"),
+      webSocketUrl: text(formData, "webSocketUrl"),
+      region: text(formData, "region"),
+      apiKey: text(formData, "apiKey"),
+      clearApiKey: checked(formData, "clearApiKey"),
+      capabilityTags: text(formData, "capabilityTags").split(",").map((item) => item.trim()).filter(Boolean),
+      inputPrice: numberText(formData, "inputPrice"),
+      outputPrice: numberText(formData, "outputPrice"),
+      pricingMode: text(formData, "pricingMode"),
+      pricingUnit: text(formData, "pricingUnit"),
       isEnabled: checked(formData, "isEnabled"),
       aliasKey: text(formData, "aliasKey") || undefined,
       aliasDisplayName: text(formData, "aliasDisplayName") || undefined,
@@ -468,43 +520,28 @@ export async function updateAudioModelAction(formData: FormData) {
   });
 
   revalidatePath("/admin/audio/models");
+  revalidatePath("/admin/ai/providers");
 }
 
-export async function createAudioPricingRuleAction(formData: FormData) {
-  await apiFetch<AudioPricingRule>("/admin/audio/pricing-rules", {
-    method: "POST",
-    body: JSON.stringify({
-      operationType: text(formData, "operationType"),
-      model: text(formData, "model") || "*",
-      billingMode: text(formData, "billingMode"),
-      creditsPerUnit: numberText(formData, "creditsPerUnit"),
-      minimumCredits: numberText(formData, "minimumCredits"),
-      modelMultiplier: numberText(formData, "modelMultiplier"),
-      isEnabled: checked(formData, "isEnabled")
-    })
-  });
-
-  revalidatePath("/admin/audio/usage");
-  revalidatePath("/admin/audio/pricing");
-  revalidatePath("/admin/audio/models");
+export async function checkAudioModelDeleteAction(modelInstanceId: string) {
+  return apiFetch<AudioModelDeleteCheck>(`/admin/audio/models/${modelInstanceId}/delete-check`);
 }
 
-export async function updateAudioPricingRuleAction(formData: FormData) {
-  const id = text(formData, "id");
-  await apiFetch<AudioPricingRule>(`/admin/audio/pricing-rules/${id}`, {
-    method: "PATCH",
-    body: JSON.stringify({
-      billingMode: text(formData, "billingMode"),
-      creditsPerUnit: numberText(formData, "creditsPerUnit"),
-      minimumCredits: numberText(formData, "minimumCredits"),
-      modelMultiplier: numberText(formData, "modelMultiplier"),
-      isEnabled: checked(formData, "isEnabled")
-    })
+export async function deleteAudioModelAction(modelInstanceId: string) {
+  await apiFetch<{ deleted: boolean; modelInstanceId: string }>(`/admin/audio/models/${modelInstanceId}`, {
+    method: "DELETE",
+    body: JSON.stringify({})
   });
 
-  revalidatePath("/admin/audio/usage");
-  revalidatePath("/admin/audio/pricing");
   revalidatePath("/admin/audio/models");
+  revalidatePath("/admin/ai/providers");
+  revalidatePath("/admin/audio/voices");
+  revalidatePath("/admin/ai/model-aliases");
+  revalidatePath("/admin/ai/config");
+
+  return {
+    deleted: true
+  };
 }
 
 export async function reviewVoiceAssetAction(formData: FormData) {
@@ -518,7 +555,6 @@ export async function reviewVoiceAssetAction(formData: FormData) {
   });
 
   revalidatePath("/admin/audio/safety");
-  revalidatePath("/admin/audio/reviews");
   revalidatePath("/admin/audio/voices");
   revalidatePath(`/admin/audio/voices/${id}`);
 }
@@ -534,7 +570,6 @@ export async function deleteAdminVoiceAssetAction(formData: FormData) {
   });
 
   revalidatePath("/admin/audio/safety");
-  revalidatePath("/admin/audio/reviews");
   revalidatePath("/admin/audio/voices");
   revalidatePath(`/admin/audio/voices/${id}`);
 }
@@ -617,7 +652,6 @@ export async function toggleAdminUserVoiceEnabledAction(formData: FormData) {
   revalidatePath("/admin/audio/voices");
   revalidatePath(`/admin/audio/voices/${id}`);
   revalidatePath("/admin/audio/safety");
-  revalidatePath("/admin/audio/reviews");
 }
 
 export async function deleteAdminUserVoiceQuickAction(formData: FormData) {
@@ -634,5 +668,4 @@ export async function deleteAdminUserVoiceQuickAction(formData: FormData) {
   revalidatePath("/admin/audio/voices");
   revalidatePath(`/admin/audio/voices/${id}`);
   revalidatePath("/admin/audio/safety");
-  revalidatePath("/admin/audio/reviews");
 }

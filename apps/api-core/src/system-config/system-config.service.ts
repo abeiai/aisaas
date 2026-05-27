@@ -37,6 +37,14 @@ const configDefinitions = [
     sortOrder: 17
   },
   {
+    key: "siteMenus",
+    label: "站点菜单结构",
+    value: "",
+    description: "菜单管理保存的结构化菜单数据，包含菜单项、层级和展示位置。",
+    isPublic: true,
+    sortOrder: 18
+  },
+  {
     key: "footerText",
     label: "Footer 文案",
     value: "面向中国市场的简体中文 AI SaaS / 内容型工具站底座。",
@@ -373,7 +381,7 @@ export class SystemConfigService {
   }
 
   private isEmptyAllowed(key: ConfigKey) {
-    return key === "siteLogo" || key === "serviceQrCode";
+    return key === "siteLogo" || key === "serviceQrCode" || key === "siteMenus";
   }
 
   private normalizeConfigValue(key: ConfigKey, value: string) {
@@ -387,6 +395,10 @@ export class SystemConfigService {
 
     if (key === "publicNavItems") {
       return normalizePublicNavItems(value);
+    }
+
+    if (key === "siteMenus") {
+      return normalizeSiteMenus(value);
     }
 
     if (
@@ -457,6 +469,128 @@ function normalizePublicNavItems(value: string) {
     .join("\n");
 }
 
+function normalizeSiteMenus(value: string) {
+  if (!value.trim()) {
+    return "";
+  }
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new AppException(40001, "菜单结构不是合法 JSON", HttpStatus.BAD_REQUEST);
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new AppException(40001, "菜单结构格式错误", HttpStatus.BAD_REQUEST);
+  }
+
+  const source = parsed as {
+    version?: unknown;
+    menus?: unknown;
+    locations?: unknown;
+  };
+
+  if (!Array.isArray(source.menus) || source.menus.length > 8) {
+    throw new AppException(40001, "菜单数量不能超过 8 个", HttpStatus.BAD_REQUEST);
+  }
+
+  const menus = source.menus.map((menuInput, menuIndex) => {
+    if (!menuInput || typeof menuInput !== "object" || Array.isArray(menuInput)) {
+      throw new AppException(40001, "菜单数据格式错误", HttpStatus.BAD_REQUEST);
+    }
+
+    const menu = menuInput as {
+      id?: unknown;
+      name?: unknown;
+      items?: unknown;
+    };
+    const id = String(menu.id ?? `menu-${menuIndex + 1}`).trim();
+    const name = String(menu.name ?? "").trim();
+
+    if (!/^[a-zA-Z0-9_-]{1,80}$/.test(id)) {
+      throw new AppException(40001, "菜单 ID 格式不合法", HttpStatus.BAD_REQUEST);
+    }
+
+    if (!name || name.length > 40) {
+      throw new AppException(40001, "菜单名称不能为空且不能超过 40 个字符", HttpStatus.BAD_REQUEST);
+    }
+
+    if (!Array.isArray(menu.items) || menu.items.length > 80) {
+      throw new AppException(40001, "单个菜单最多包含 80 个菜单项", HttpStatus.BAD_REQUEST);
+    }
+
+    return {
+      id,
+      name,
+      items: menu.items.map((itemInput, itemIndex) => normalizeSiteMenuItem(itemInput, itemIndex))
+    };
+  });
+
+  const menuIds = new Set(menus.map((menu) => menu.id));
+  const locationsInput =
+    source.locations && typeof source.locations === "object" && !Array.isArray(source.locations)
+      ? (source.locations as { primaryMenuId?: unknown; footerMenuId?: unknown })
+      : {};
+  const primaryMenuId = String(locationsInput.primaryMenuId ?? "").trim();
+  const footerMenuId = String(locationsInput.footerMenuId ?? "").trim();
+
+  return JSON.stringify({
+    version: 1,
+    menus,
+    locations: {
+      primaryMenuId: menuIds.has(primaryMenuId) ? primaryMenuId : "",
+      footerMenuId: menuIds.has(footerMenuId) ? footerMenuId : ""
+    }
+  });
+}
+
+function normalizeSiteMenuItem(itemInput: unknown, itemIndex: number) {
+  if (!itemInput || typeof itemInput !== "object" || Array.isArray(itemInput)) {
+    throw new AppException(40001, "菜单项格式错误", HttpStatus.BAD_REQUEST);
+  }
+
+  const item = itemInput as {
+    id?: unknown;
+    type?: unknown;
+    label?: unknown;
+    href?: unknown;
+    referenceId?: unknown;
+    depth?: unknown;
+  };
+  const id = String(item.id ?? `item-${itemIndex + 1}`).trim();
+  const type = String(item.type ?? "custom").trim();
+  const label = String(item.label ?? "").trim();
+  const href = String(item.href ?? "").trim();
+  const depth = Number(item.depth ?? 0);
+
+  if (!/^[a-zA-Z0-9_-]{1,100}$/.test(id)) {
+    throw new AppException(40001, "菜单项 ID 格式不合法", HttpStatus.BAD_REQUEST);
+  }
+
+  if (!["page", "article", "category", "custom"].includes(type)) {
+    throw new AppException(40001, "菜单项类型不合法", HttpStatus.BAD_REQUEST);
+  }
+
+  if (!label || label.length > 40) {
+    throw new AppException(40001, "菜单项名称不能为空且不能超过 40 个字符", HttpStatus.BAD_REQUEST);
+  }
+
+  if (!isSafeMenuHref(href)) {
+    throw new AppException(40001, "菜单项链接必须是安全的站内路径或 http(s) 链接", HttpStatus.BAD_REQUEST);
+  }
+
+  return {
+    id,
+    type,
+    label,
+    href,
+    referenceId: String(item.referenceId ?? "").trim(),
+    depth: depth === 1 ? 1 : 0
+  };
+}
+
 function isSafeInternalHref(value: string) {
   return (
     value.startsWith("/") &&
@@ -465,4 +599,22 @@ function isSafeInternalHref(value: string) {
     !value.includes(">") &&
     !value.toLowerCase().includes("javascript:")
   );
+}
+
+function isSafeMenuHref(value: string) {
+  if (isSafeInternalHref(value)) {
+    return true;
+  }
+
+  if (value.includes("<") || value.includes(">")) {
+    return false;
+  }
+
+  try {
+    const url = new URL(value);
+
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
 }

@@ -22,6 +22,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
+import { UserAccountMenu } from "@/components/shell/user-account-menu";
 import { Textarea } from "@/components/ui/textarea";
 import type { PublicUser } from "@/lib/auth-actions";
 import type { ExperienceVideoModel } from "@/lib/experience-api";
@@ -29,6 +30,7 @@ import { cn } from "@/lib/utils";
 
 interface VideoGenerationConsoleProps {
   currentUser: PublicUser | null;
+  availableCredits?: number | null;
   models: ExperienceVideoModel[];
 }
 
@@ -99,7 +101,7 @@ const ratios = ["16:9", "9:16", "1:1", "4:3", "3:4"] as const;
 const resolutions = ["高清 720P", "高清 1080P"] as const;
 const durations = [5, 10] as const;
 
-export function VideoGenerationConsole({ currentUser, models }: VideoGenerationConsoleProps) {
+export function VideoGenerationConsole({ currentUser, availableCredits, models }: VideoGenerationConsoleProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [history, setHistory] = useState<VideoJob[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -454,6 +456,11 @@ export function VideoGenerationConsole({ currentUser, models }: VideoGenerationC
                 </option>
               ))}
             </Select>
+            <UserAccountMenu
+              availableCredits={availableCredits}
+              loginHref={`/login?next=${encodeURIComponent("/experience/video")}`}
+              user={currentUser}
+            />
           </div>
         </header>
 

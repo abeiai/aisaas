@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { ArrowLeft, Download, Play } from "lucide-react";
 
-import { PublicShell } from "@/components/shell/public-shell";
+import { DashboardShell } from "@/components/shell/dashboard-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -49,23 +49,16 @@ export default async function AudioTaskDetailPage({
   const url = audioUrl(task);
 
   return (
-    <PublicShell>
-      <section className="mx-auto flex max-w-6xl flex-col gap-8 px-5 py-12">
-        <Button asChild className="w-fit" variant="outline">
-          <Link href="/dashboard/audio-tasks">
-            <ArrowLeft data-icon="inline-start" />
-            返回音频任务
-          </Link>
-        </Button>
-
-        <div className="flex max-w-3xl flex-col gap-4">
+    <DashboardShell active="tasks">
+      <section className="flex w-full flex-col gap-8 px-5 py-8">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Button asChild className="w-fit" variant="outline">
+            <Link href="/dashboard/tasks">
+              <ArrowLeft data-icon="inline-start" />
+              返回任务历史
+            </Link>
+          </Button>
           <Badge variant={statusVariant(task.status)}>{task.statusName}</Badge>
-          <h1 className="font-display text-5xl font-light leading-tight tracking-normal">
-            {task.typeName}
-          </h1>
-          <p className="text-base leading-7 text-muted-foreground">
-            查看本次音频任务的输入文本、音色、模型、点数消耗、输出音频和错误信息。
-          </p>
         </div>
 
         <Card>
@@ -145,7 +138,7 @@ export default async function AudioTaskDetailPage({
           </CardContent>
         </Card>
       </section>
-    </PublicShell>
+    </DashboardShell>
   );
 }
 

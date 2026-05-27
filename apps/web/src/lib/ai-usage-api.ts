@@ -28,6 +28,11 @@ export interface UsageTopItem {
   value: number;
 }
 
+export interface UsageGroup extends UsageSummary {
+  id: string;
+  name: string;
+}
+
 export interface UsageOption {
   id: string;
   name: string;
@@ -52,6 +57,9 @@ export interface AiUsageDashboard {
       date: string;
     } & UsageSummary
   >;
+  byProvider: UsageGroup[];
+  byModel: UsageGroup[];
+  byTool: UsageGroup[];
   providers: UsageOption[];
   models: UsageOption[];
   updatedAt: string;

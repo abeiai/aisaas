@@ -119,6 +119,24 @@ export async function updateSystemConfigAction(formData: FormData) {
   revalidatePath("/robots.txt");
 }
 
+export async function updateMenuConfigAction(formData: FormData) {
+  await apiFetch<SystemConfig[]>("/system-config", {
+    method: "PATCH",
+    body: JSON.stringify({
+      siteMenus: text(formData, "siteMenus")
+    })
+  });
+
+  revalidatePath("/admin");
+  revalidatePath("/admin/menus");
+  revalidatePath("/");
+  revalidatePath("/features");
+  revalidatePath("/use-cases");
+  revalidatePath("/tools");
+  revalidatePath("/pricing");
+  revalidatePath("/articles");
+}
+
 export async function updateAiConfigAction(formData: FormData) {
   await apiFetch<SystemConfig[]>("/system-config", {
     method: "PATCH",
@@ -140,6 +158,7 @@ export async function updateAiConfigAction(formData: FormData) {
   revalidatePath("/admin/ai/config");
   revalidatePath("/tools/voice-clone");
   revalidatePath("/tools/voice-design");
+  revalidatePath("/dashboard/tasks");
   revalidatePath("/dashboard/voices");
   revalidatePath("/dashboard/audio-tasks");
   revalidatePath("/admin/audio/safety");

@@ -38,8 +38,8 @@ export default async function ArticlesPage() {
 
   return (
     <PublicShell>
-      <section className="mx-auto flex max-w-6xl flex-col gap-8 px-5 py-16">
-        <div className="flex max-w-3xl flex-col gap-4">
+      <section className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-16 sm:px-8 lg:px-10">
+        <div className="flex w-full flex-col gap-4">
           <Badge>文章列表</Badge>
           <h1 className="font-display text-5xl font-light leading-tight tracking-normal">
             内容运营与产品建设记录

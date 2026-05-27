@@ -1,13 +1,21 @@
+import { estimateTokenCost, type AiModelPricingConfig, type AiModelPricingUnit } from "./model-pricing.js";
+
+const creditsPerCny = 100;
+
 export interface TokenUsage {
   inputTokens?: number | null;
   outputTokens?: number | null;
   totalTokens?: number | null;
+  inputCacheHitTokens?: number | null;
+  inputCacheMissTokens?: number | null;
 }
 
 export interface UsageCostInput {
   usage?: TokenUsage | null;
   inputPrice: number;
   outputPrice: number;
+  pricingUnit?: AiModelPricingUnit | string | null;
+  pricingConfig?: AiModelPricingConfig;
   fallbackCredits: number;
   maxCredits: number;
   minCredits?: number;
@@ -18,16 +26,18 @@ export function calculateUsageCredits(input: UsageCostInput) {
   const usage = input.usage;
 
   if (usage && hasTokenUsage(usage)) {
-    const inputTokens = positiveNumber(usage.inputTokens);
-    const outputTokens = positiveNumber(usage.outputTokens);
-    const totalTokens = positiveNumber(usage.totalTokens);
-    const effectiveInputTokens = inputTokens || Math.max(0, totalTokens - outputTokens);
-    const effectiveOutputTokens = outputTokens;
     const rawCredits =
-      (effectiveInputTokens * Math.max(0, input.inputPrice)) / 1000 +
-      (effectiveOutputTokens * Math.max(0, input.outputPrice)) / 1000;
+      estimateTokenCost({
+        usage,
+        pricingConfig: input.pricingConfig,
+        inputPrice: input.inputPrice,
+        outputPrice: input.outputPrice,
+        pricingUnit: input.pricingUnit
+      }) ?? 0;
 
-    return clampCredits(Math.ceil(rawCredits || minCredits), minCredits, input.maxCredits);
+    const usageCredits = input.pricingConfig?.currency === "CNY" ? rawCredits * creditsPerCny : rawCredits;
+
+    return clampCredits(Math.ceil(usageCredits || minCredits), minCredits, input.maxCredits);
   }
 
   return clampCredits(Math.ceil(input.fallbackCredits), minCredits, input.maxCredits);

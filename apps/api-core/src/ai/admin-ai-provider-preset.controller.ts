@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Req } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req } from "@nestjs/common";
 import { AdminAuthService } from "../admin-auth/admin-auth.service.js";
 import { successResponse } from "../common/api-response.js";
 import { writeAdminOperationLog } from "../security/admin-operation-log.js";
@@ -68,6 +68,13 @@ export class AdminAiProviderPresetController {
     return successResponse(result);
   }
 
+  @Get("model-instances/:modelInstanceId/delete-check")
+  async checkModelInstanceDelete(@Req() request: unknown, @Param("modelInstanceId") modelInstanceId: string) {
+    await this.adminAuthService.me(request as never);
+
+    return successResponse(await this.aiService.checkModelInstanceDelete(modelInstanceId));
+  }
+
   @Post(":id/model-presets/:modelPresetId/enable")
   async enableModel(
     @Req() request: unknown,
@@ -109,5 +116,22 @@ export class AdminAiProviderPresetController {
     });
 
     return successResponse(model);
+  }
+
+  @Delete("model-instances/:modelInstanceId")
+  async deleteModelInstance(@Req() request: unknown, @Param("modelInstanceId") modelInstanceId: string) {
+    const admin = await this.adminAuthService.me(request as never);
+    const result = await this.aiService.deleteModelInstance(modelInstanceId);
+
+    await writeAdminOperationLog({
+      adminUserId: admin.id,
+      action: "DELETE_AI_MODEL_INSTANCE",
+      resourceType: "AI_MODEL_INSTANCE",
+      resourceId: modelInstanceId,
+      description: "删除 AI 模型实例",
+      request: request as HeaderRequestLike
+    });
+
+    return successResponse(result);
   }
 }

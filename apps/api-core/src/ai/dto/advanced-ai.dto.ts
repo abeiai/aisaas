@@ -236,6 +236,30 @@ export class UpdateAiModelInstanceDto {
   providerModelName?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(400)
+  baseUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(400)
+  webSocketUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  region?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  apiKey?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  clearApiKey?: boolean;
+
+  @IsOptional()
   @IsArray()
   @ArrayMaxSize(12)
   @IsString({
@@ -254,6 +278,26 @@ export class UpdateAiModelInstanceDto {
   @IsNumber()
   @Min(0)
   outputPrice?: number;
+
+  @IsOptional()
+  @IsIn(["TOKENS", "TOKEN_CACHE", "TOKEN_TIERED", "REQUEST", "CHARACTERS", "IMAGES", "SECONDS", "VIDEO_SECONDS"])
+  pricingMode?:
+    | "TOKENS"
+    | "TOKEN_CACHE"
+    | "TOKEN_TIERED"
+    | "REQUEST"
+    | "CHARACTERS"
+    | "IMAGES"
+    | "SECONDS"
+    | "VIDEO_SECONDS";
+
+  @IsOptional()
+  @IsIn(["K_TOKENS", "M_TOKENS", "REQUEST", "CHARACTER", "K_CHARACTERS", "IMAGE", "SECOND"])
+  pricingUnit?: "K_TOKENS" | "M_TOKENS" | "REQUEST" | "CHARACTER" | "K_CHARACTERS" | "IMAGE" | "SECOND";
+
+  @IsOptional()
+  @IsObject()
+  pricingConfig?: Record<string, unknown>;
 
   @IsOptional()
   @IsBoolean()
@@ -292,52 +336,4 @@ export class AgentToolRunDto {
   @IsDefined()
   @IsObject()
   input!: Record<string, unknown>;
-}
-
-export class WorkflowStepDto {
-  @IsString()
-  @MaxLength(80)
-  name!: string;
-
-  @IsString()
-  @MaxLength(4000)
-  prompt!: string;
-}
-
-export class CreateWorkflowDto {
-  @IsString()
-  @MaxLength(80)
-  name!: string;
-
-  @IsString()
-  @MaxLength(80)
-  slug!: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(240)
-  description?: string;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  costCredits?: number;
-
-  @IsOptional()
-  @IsBoolean()
-  isEnabled?: boolean;
-
-  @IsArray()
-  @ArrayMaxSize(6)
-  @ValidateNested({ each: true })
-  @Type(() => WorkflowStepDto)
-  steps!: WorkflowStepDto[];
-}
-
-export class RunWorkflowDto {
-  @IsString()
-  @Min(2)
-  @MaxLength(2000)
-  input!: string;
 }

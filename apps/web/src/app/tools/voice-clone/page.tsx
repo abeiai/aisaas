@@ -47,9 +47,9 @@ export default async function VoiceClonePage({
 
   return (
     <PublicShell>
-      <section className="mx-auto flex max-w-6xl flex-col gap-8 px-5 py-12">
+      <section className="flex w-full flex-col gap-8 px-5 py-12">
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div className="flex max-w-3xl flex-col gap-4">
+          <div className="flex w-full flex-col gap-4">
             <Badge>语音工具</Badge>
             <h1 className="font-display text-5xl font-light leading-tight tracking-normal md:text-6xl">
               声音复刻
@@ -208,7 +208,7 @@ export default async function VoiceClonePage({
                   </>
                 ) : (
                   <div className="rounded-md border border-dashed border-border bg-background p-6 text-sm text-muted-foreground">
-                    暂无复刻结果。提交后可以在这里查看音色状态，也可以到音色库和音频任务页继续跟踪。
+                    暂无复刻结果。提交后可以在这里查看音色状态，也可以到音色库和任务历史继续跟踪。
                   </div>
                 )}
               </CardContent>

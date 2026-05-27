@@ -19,7 +19,7 @@ export default async function RegisterPage({
   return (
     <AuthPanel
       title="用户注册"
-      description="创建前台用户账号，注册后可直接进入 AI 工具、任务历史和点数充值。"
+      description="支持邮箱密码注册和手机验证码注册，注册后可直接进入 AI 工具、任务历史和点数充值。"
       footer={{
         label: "已经有账号？",
         href: loginHref,

@@ -25,7 +25,17 @@ interface AuthTokens {
 export interface PublicUser {
   id: string;
   email: string;
+  phone: string | null;
+  phoneVerifiedAt: string | null;
   nickname: string;
+  status: string;
+}
+
+export interface PublicAdmin {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
   status: string;
 }
 
@@ -178,6 +188,54 @@ export async function registerAction(
   redirect(next);
 }
 
+export async function sendLoginPhoneCodeAction(
+  _previousState: AuthActionState,
+  formData: FormData
+): Promise<AuthActionState> {
+  const phone = String(formData.get("phone") ?? "").trim();
+  const purpose = String(formData.get("purpose") ?? "LOGIN") || "LOGIN";
+
+  try {
+    const result = await postJson<{ message: string }>("/auth/phone-code", {
+      phone,
+      purpose
+    });
+
+    if (!result.ok) {
+      return { error: result.message };
+    }
+
+    return { success: result.data.message || "验证码已发送" };
+  } catch {
+    return { error: "短信服务暂不可用，请稍后再试" };
+  }
+}
+
+export async function phoneLoginAction(
+  _previousState: AuthActionState,
+  formData: FormData
+): Promise<AuthActionState> {
+  const phone = String(formData.get("phone") ?? "").trim();
+  const code = String(formData.get("code") ?? "").trim();
+  const nickname = String(formData.get("nickname") ?? "").trim();
+  const next = safeNextPath(formData.get("next"));
+
+  let result: Awaited<ReturnType<typeof postJson<AuthTokens>>>;
+
+  try {
+    result = await postJson<AuthTokens>("/auth/phone-login", { phone, code, nickname });
+  } catch {
+    return { error: "认证服务暂不可用，请稍后再试" };
+  }
+
+  if (!result.ok) {
+    return { error: result.message };
+  }
+
+  await setSessionCookies(userAccessCookie, userRefreshCookie, result.data);
+  redirect(next);
+}
+
 export async function getCurrentUser() {
   try {
     return await apiFetch<PublicUser>("/auth/me");
@@ -191,6 +249,14 @@ export async function getOptionalCurrentUser() {
     return await apiFetch<PublicUser>("/auth/me");
   } catch {
     return null;
+  }
+}
+
+export async function getCurrentAdmin() {
+  try {
+    return await apiFetch<PublicAdmin>("/admin-auth/me");
+  } catch {
+    redirect("/admin/login");
   }
 }
 
@@ -214,6 +280,51 @@ export async function updateProfileAction(
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/profile");
   return { success: "资料已保存" };
+}
+
+export async function sendBindPhoneCodeAction(
+  _previousState: AuthActionState,
+  formData: FormData
+): Promise<AuthActionState> {
+  const phone = String(formData.get("phone") ?? "").trim();
+
+  try {
+    const result = await apiFetch<{ message: string }>("/auth/phone-code", {
+      method: "POST",
+      body: JSON.stringify({
+        phone,
+        purpose: "BIND_PHONE"
+      })
+    });
+
+    return { success: result.message || "验证码已发送" };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "验证码发送失败" };
+  }
+}
+
+export async function bindPhoneAction(
+  _previousState: AuthActionState,
+  formData: FormData
+): Promise<AuthActionState> {
+  const phone = String(formData.get("phone") ?? "").trim();
+  const code = String(formData.get("code") ?? "").trim();
+
+  try {
+    await apiFetch<PublicUser>("/auth/phone", {
+      method: "PATCH",
+      body: JSON.stringify({
+        phone,
+        code
+      })
+    });
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "手机号绑定失败" };
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/profile");
+  return { success: "手机号已绑定" };
 }
 
 export async function changePasswordAction(

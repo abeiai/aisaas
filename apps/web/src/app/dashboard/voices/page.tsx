@@ -1,9 +1,9 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { ArrowLeft, CheckCircle2, Mic2, MoreHorizontal, Volume2 } from "lucide-react";
+import { CheckCircle2, Mic2, MoreHorizontal } from "lucide-react";
 
 import { VoiceDeleteForm } from "@/components/audio/voice-delete-form";
-import { PublicShell } from "@/components/shell/public-shell";
+import { DashboardShell } from "@/components/shell/dashboard-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,38 +28,13 @@ export default async function VoicesPage() {
   const safetyNotice =
     configByKey.get("audioSafetyNotice") ??
     "AI 生成语音可能被误用，请勿用于冒充他人、诈骗、侵权、虚假宣传或违法违规用途。声音复刻仅允许上传本人声音或已获得授权的声音。生成音频建议标注为 AI 生成语音。";
+  const platformVoices = library.platformVoices.filter((voice) => voice.status === "READY");
   const clonedVoices = library.customVoices.filter((voice) => voice.type === "CLONED");
   const designedVoices = library.customVoices.filter((voice) => voice.type === "DESIGNED");
 
   return (
-    <PublicShell>
-      <section className="mx-auto flex max-w-6xl flex-col gap-8 px-5 py-12">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div className="flex max-w-3xl flex-col gap-4">
-            <Badge>我的音色库</Badge>
-            <h1 className="font-display text-5xl font-light leading-tight tracking-normal">
-              管理可用于语音合成的音色
-            </h1>
-            <p className="text-base leading-7 text-muted-foreground">
-              系统音色可直接使用，复刻和设计音色只对当前账号可见。被禁用、删除或未就绪的音色不可用于合成。
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <Button asChild>
-              <Link href="/tools/text-to-speech">
-                <Volume2 data-icon="inline-start" />
-                去合成语音
-              </Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link href="/dashboard">
-                <ArrowLeft data-icon="inline-start" />
-                返回用户中心
-              </Link>
-            </Button>
-          </div>
-        </div>
-
+    <DashboardShell active="voices">
+      <section className="flex w-full flex-col gap-8 px-5 py-8">
         <Card>
           <CardContent className="pt-6 text-sm leading-6 text-muted-foreground">
             {safetyNotice}
@@ -72,6 +47,10 @@ export default async function VoicesPage() {
           ))}
         </VoiceSection>
 
+        <VoiceSection title="平台音色" description="平台复刻和平台设计音色由管理员维护，所有用户可用。">
+          {platformVoices.length > 0 ? platformVoices.map((voice) => <PlatformVoiceCard key={voice.id} voice={voice} />) : <EmptyVoice />}
+        </VoiceSection>
+
         <VoiceSection title="我的复刻音色" description="通过声音复刻任务创建，默认 PRIVATE。">
           {clonedVoices.length > 0 ? clonedVoices.map((voice) => <CustomVoiceCard key={voice.id} voice={voice} />) : <EmptyVoice />}
         </VoiceSection>
@@ -80,7 +59,7 @@ export default async function VoicesPage() {
           {designedVoices.length > 0 ? designedVoices.map((voice) => <CustomVoiceCard key={voice.id} voice={voice} />) : <EmptyVoice />}
         </VoiceSection>
       </section>
-    </PublicShell>
+    </DashboardShell>
   );
 }
 
@@ -155,6 +134,48 @@ function SupportBadge({ label, value }: { label: string; value?: boolean }) {
       {label}
       {value ? "支持" : "不支持"}
     </Badge>
+  );
+}
+
+function PlatformVoiceCard({ voice }: { voice: VoiceAsset }) {
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex size-10 items-center justify-center rounded-md bg-secondary">
+            <Mic2 />
+          </div>
+          <Badge variant={voice.isDefault ? "secondary" : "outline"}>
+            {voice.isDefault ? "默认" : voice.type === "CLONED" ? "平台复刻音色" : "平台设计音色"}
+          </Badge>
+        </div>
+        <CardTitle>{voice.name}</CardTitle>
+        <CardDescription>{voice.description ?? voice.targetModel}</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <div className="flex flex-wrap gap-2 text-xs">
+          {voice.providerVoiceId ? <Badge variant="outline">{voice.providerVoiceId}</Badge> : null}
+          {voice.language ? <Badge variant="muted">{voice.language}</Badge> : null}
+          <Badge variant="muted">{voice.targetModel}</Badge>
+        </div>
+        {voice.previewAudioUrl ? <audio className="w-full" controls src={voice.previewAudioUrl} /> : null}
+        <div className="flex flex-wrap gap-3">
+          <form action={setDefaultVoiceAction}>
+            <input name="voiceAssetId" type="hidden" value={voice.id} />
+            <Button size="sm" type="submit" variant={voice.isDefault ? "outline" : "default"}>
+              <CheckCircle2 data-icon="inline-start" />
+              设为默认
+            </Button>
+          </form>
+          <Button asChild size="sm" variant="outline">
+            <Link href={`/tools/text-to-speech?voice=${voice.id}`}>
+              使用
+              <MoreHorizontal data-icon="inline-end" />
+            </Link>
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

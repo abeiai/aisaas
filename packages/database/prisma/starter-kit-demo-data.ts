@@ -146,9 +146,9 @@ export const starterKitDemoSystemConfigs = [
   },
   {
     key: "audioDemoPricingNote",
-    label: "语音计费示例说明",
-    value: "语音合成按字符计费，声音设计和声音复刻按任务计费；失败任务会释放冻结点数。",
-    description: "Starter Kit 语音工具 Demo 的计费说明文案。",
+    label: "语音模型价格说明",
+    value: "语音任务统一按后台语音模型价格预估、冻结和结算；失败任务会释放冻结点数。",
+    description: "Starter Kit 语音工具 Demo 的模型价格说明文案。",
     isPublic: true,
     sortOrder: 320
   }
@@ -157,30 +157,3 @@ export const starterKitDemoSystemConfigs = [
 export const starterKitLegacyDemoArticleSlugs = ["demo"];
 export const starterKitLegacyDemoCategorySlugs = ["product-design"];
 export const starterKitDemoPaymentOrderPrefix = "DEMO-";
-
-export const starterKitDemoAudioPricingRules = [
-  {
-    operationType: "TTS" as const,
-    model: "demo-voice-model",
-    billingMode: "PER_CHARACTER" as const,
-    creditsPerUnit: "4",
-    minimumCredits: 4,
-    modelMultiplier: "1"
-  },
-  {
-    operationType: "VOICE_DESIGN" as const,
-    model: "demo-voice-model",
-    billingMode: "PER_TASK" as const,
-    creditsPerUnit: "180",
-    minimumCredits: 180,
-    modelMultiplier: "1"
-  },
-  {
-    operationType: "VOICE_CLONE" as const,
-    model: "demo-voice-model",
-    billingMode: "PER_TASK" as const,
-    creditsPerUnit: "260",
-    minimumCredits: 260,
-    modelMultiplier: "1"
-  }
-] as const;

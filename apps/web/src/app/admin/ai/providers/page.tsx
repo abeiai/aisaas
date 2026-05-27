@@ -16,8 +16,7 @@ export default async function AdminAiProviderPresetsPage() {
   return (
     <AdminShell
       active="/admin/ai/providers"
-      title="AI Provider 快速配置"
-      description="查看内置 Provider，填写 API Key，启用模型并完成连接测试。"
+      title="模型配置"
     >
       <div className="grid gap-5 xl:grid-cols-2">
         {providers.map((provider) => (

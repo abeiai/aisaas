@@ -49,7 +49,7 @@ function RenderedModule({ module }: { module: ContentModule }) {
 function SlideshowModule({ module }: { module: ContentModule }) {
   return (
     <section className="bg-background">
-      <div className="mx-auto max-w-6xl px-5 py-12">
+      <div className="w-full px-5 py-12">
         <div className="flex snap-x gap-4 overflow-x-auto pb-2">
           {module.items.map((item) => {
             const config = item.config ?? {};
@@ -99,7 +99,7 @@ function ImageCardListModule({ module }: { module: ContentModule }) {
 
   return (
     <section className="bg-background">
-      <div className="mx-auto max-w-6xl px-5 py-12">
+      <div className="w-full px-5 py-12">
         <div className={gridClass(cardsPerRow)}>
           {module.items.map((item) => (
             <ModuleLink className="group overflow-hidden rounded-md border border-border bg-card" href={item.resolvedHref} key={item.id}>
@@ -154,7 +154,7 @@ function SplitImageTextModule({ module }: { module: ContentModule }) {
 
   return (
     <section className="bg-background">
-      <div className="mx-auto grid max-w-6xl gap-10 px-5 py-16 md:grid-cols-2">
+      <div className="grid w-full gap-10 px-5 py-16 md:grid-cols-2">
         {imageLeft ? image : text}
         {imageLeft ? text : image}
       </div>

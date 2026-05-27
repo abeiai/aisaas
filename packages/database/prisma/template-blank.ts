@@ -3,7 +3,6 @@ import { aiToolCategories, aiToolTemplates } from "./ai-tool-template-data.js";
 import {
   starterKitDemoArticles,
   starterKitDemoArticleCategories,
-  starterKitDemoAudioPricingRules,
   starterKitDemoPages,
   starterKitDemoPaymentOrderPrefix,
   starterKitLegacyDemoArticleSlugs,
@@ -29,16 +28,12 @@ async function main() {
   console.log("开始清理 Starter Kit 示例内容。");
   console.log("保留：管理员账号、系统基础配置、Provider Preset、Model Preset 和模型别名。");
 
-  const workflowResult = await clearDemoWorkflows(prisma);
   const aiResult = await clearDemoAiTools(prisma, toolSlugs, toolCategorySlugs);
-  const audioResult = await clearDemoAudioPricing(prisma);
   const paymentResult = await clearDemoPayments(prisma);
   const cmsResult = await clearDemoCms(prisma, articleSlugs, articleCategorySlugs, pageSlugs);
 
-  console.log(`示例 AI 工作流：删除 ${workflowResult.workflows} 个工作流。`);
   console.log(`示例 AI 任务：删除 ${aiResult.tasks} 条任务。`);
   console.log(`示例 AI 工具：删除 ${aiResult.scenarios} 个模板，删除 ${aiResult.categories} 个分类。`);
-  console.log(`示例语音计费：删除 ${audioResult.pricingRules} 条规则。`);
   console.log(`示例订单：删除 ${paymentResult.orders} 个订单，删除 ${paymentResult.notifyLogs} 条回调日志。`);
   console.log(`示例文章：删除 ${cmsResult.articles} 篇，删除 ${cmsResult.categories} 个分类。`);
   console.log(`示例单页：删除 ${cmsResult.pages} 个。`);
@@ -60,66 +55,6 @@ function assertBlankTemplateAllowed() {
   }
 
   console.warn("警告：template:blank 会删除 Starter Kit 示例内容。生产环境执行前必须先备份数据库。");
-}
-
-async function clearDemoWorkflows(prisma: ReturnType<typeof getPrismaClient>) {
-  const workflowSlugs = ["content-three-step"];
-  const runSteps = await prisma.aiWorkflowRunStep.deleteMany({
-    where: {
-      OR: [
-        {
-          run: {
-            workflow: {
-              slug: {
-                in: workflowSlugs
-              }
-            }
-          }
-        },
-        {
-          step: {
-            workflow: {
-              slug: {
-                in: workflowSlugs
-              }
-            }
-          }
-        }
-      ]
-    }
-  });
-  const runs = await prisma.aiWorkflowRun.deleteMany({
-    where: {
-      workflow: {
-        slug: {
-          in: workflowSlugs
-        }
-      }
-    }
-  });
-  const steps = await prisma.aiWorkflowStep.deleteMany({
-    where: {
-      workflow: {
-        slug: {
-          in: workflowSlugs
-        }
-      }
-    }
-  });
-  const workflows = await prisma.aiWorkflow.deleteMany({
-    where: {
-      slug: {
-        in: workflowSlugs
-      }
-    }
-  });
-
-  return {
-    runSteps: runSteps.count,
-    runs: runs.count,
-    steps: steps.count,
-    workflows: workflows.count
-  };
 }
 
 async function clearDemoAiTools(
@@ -178,21 +113,6 @@ async function clearDemoAiTools(
     tasks: tasks.count,
     scenarios: scenarios.count,
     categories: categories.count
-  };
-}
-
-async function clearDemoAudioPricing(prisma: ReturnType<typeof getPrismaClient>) {
-  const pricingRules = await prisma.audioPricingRule.deleteMany({
-    where: {
-      OR: starterKitDemoAudioPricingRules.map((rule) => ({
-        operationType: rule.operationType,
-        model: rule.model
-      }))
-    }
-  });
-
-  return {
-    pricingRules: pricingRules.count
   };
 }
 

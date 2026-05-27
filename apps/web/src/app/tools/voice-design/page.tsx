@@ -43,9 +43,9 @@ export default async function VoiceDesignPage({
 
   return (
     <PublicShell>
-      <section className="mx-auto flex max-w-6xl flex-col gap-8 px-5 py-12">
+      <section className="flex w-full flex-col gap-8 px-5 py-12">
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div className="flex max-w-3xl flex-col gap-4">
+          <div className="flex w-full flex-col gap-4">
             <Badge>语音工具</Badge>
             <h1 className="font-display text-5xl font-light leading-tight tracking-normal md:text-6xl">
               声音设计

@@ -19,6 +19,7 @@ import {
   type VoiceLibrary
 } from "@/lib/audio-api";
 import { getOptionalCurrentUser } from "@/lib/auth-actions";
+import { getWallet } from "@/lib/billing-api";
 import { cosyVoiceV35Presets } from "@/lib/cosyvoice-v35-presets";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +38,12 @@ const fallbackModels: VoiceModelOption[] = [
     statusName: "登录后加载",
     providerName: "阿里云 DashScope",
     modelName: null,
-    isConfigured: false
+    isConfigured: false,
+    inputPrice: "0",
+    outputPrice: "0",
+    pricingMode: "CHARACTERS",
+    pricingUnit: "TEN_K_CHARACTERS",
+    creditsPerCny: 100
   }
 ];
 
@@ -52,14 +58,22 @@ export default async function ExperienceVoicePage({
   let library: VoiceLibrary | null = null;
   let tasks: AudioTask[] = [];
   let task: AudioTask | null = null;
+  let availableCredits: number | null = null;
 
   if (currentUser) {
-    [models, library, tasks, task] = await Promise.all([
+    const [modelsResult, libraryResult, tasksResult, taskResult, wallet] = await Promise.all([
       getAudioModels().catch(() => []),
       getVoiceLibrary().catch(() => null),
       getAudioTasks().catch(() => []),
-      query.task ? getAudioTask(query.task).catch(() => null) : Promise.resolve(null)
+      query.task ? getAudioTask(query.task).catch(() => null) : Promise.resolve(null),
+      getWallet().catch(() => null)
     ]);
+
+    models = modelsResult;
+    library = libraryResult;
+    tasks = tasksResult;
+    task = taskResult;
+    availableCredits = wallet?.availableCredits ?? null;
   }
 
   const voiceModels = mapVoiceModels(models);
@@ -70,6 +84,7 @@ export default async function ExperienceVoicePage({
   return (
     <VoiceConsole
       createAction={createExperienceTtsAudioTaskAction}
+      availableCredits={availableCredits}
       currentTask={currentTask}
       currentUser={currentUser}
       error={query.error}
@@ -89,7 +104,12 @@ function mapVoiceModels(models: AudioModelOption[]): VoiceModelOption[] {
       statusName: model.statusName,
       providerName: model.providerName,
       modelName: model.modelName,
-      isConfigured: model.isConfigured
+      isConfigured: model.isConfigured,
+      inputPrice: model.inputPrice,
+      outputPrice: model.outputPrice,
+      pricingMode: model.pricingMode,
+      pricingUnit: model.pricingUnit,
+      creditsPerCny: model.creditsPerCny
     }));
 
   return options.length > 0 ? options : fallbackModels;
@@ -117,8 +137,21 @@ function mapVoiceOptions(library: VoiceLibrary | null): VoiceOption[] {
     supportedModels: voice.supportedModels ?? [],
     ssmlSupported: voice.ssmlSupported,
     instructSupported: voice.instructSupported,
-    timestampSupported: voice.timestampSupported
-  }));
+      timestampSupported: voice.timestampSupported
+    }));
+  const platformVoices = (library.platformVoices ?? [])
+    .filter((voice) => voice.status === "READY")
+    .map((voice) => ({
+      value: `voice:${voice.id}`,
+      name: voice.name,
+      description: voice.description,
+      badge: voice.type === "CLONED" ? "平台复刻音色" : "平台设计音色",
+      previewAudioUrl: voice.previewAudioUrl,
+      language: voice.language,
+      languages: voice.languages ?? [],
+      supportedModels: voice.targetModel ? [voice.targetModel] : [],
+      isDefault: defaultVoiceAssetId === voice.id
+    }));
   const customVoices = library.customVoices
     .filter((voice) => voice.status === "READY")
     .map((voice) => ({
@@ -132,7 +165,7 @@ function mapVoiceOptions(library: VoiceLibrary | null): VoiceOption[] {
       supportedModels: voice.targetModel ? [voice.targetModel] : [],
       isDefault: defaultVoiceAssetId === voice.id
     }));
-  const options = [...customVoices, ...systemVoices, ...fallbackVoices];
+  const options = [...customVoices, ...platformVoices, ...systemVoices, ...fallbackVoices];
 
   return options.length > 0 ? options : fallbackVoices;
 }

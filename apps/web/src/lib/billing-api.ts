@@ -96,29 +96,21 @@ export interface AvailablePaymentProduct {
   requiresAuthorization: boolean;
 }
 
-export const rechargePackages = [
-  {
-    code: "starter",
-    name: "入门充值包",
-    amountCny: "19.90",
-    credits: 1990,
-    description: "适合体验基础内容生成流程。"
-  },
-  {
-    code: "growth",
-    name: "增长充值包",
-    amountCny: "49.90",
-    credits: 5990,
-    description: "适合连续使用和小规模内容运营。"
-  },
-  {
-    code: "pro",
-    name: "专业充值包",
-    amountCny: "99.00",
-    credits: 12900,
-    description: "适合高频任务和团队试运行。"
-  }
-] as const;
+export interface RechargeProduct {
+  id: string;
+  code: string;
+  name: string;
+  billingMode: "RECHARGE" | "SUBSCRIPTION" | "MIXED";
+  billingModeName: string;
+  amountCny: string;
+  credits: number;
+  description: string;
+  benefitsMarkdown: string;
+  sortOrder: number;
+  isEnabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
 
 function getApiBaseUrl() {
   return process.env.API_BASE_URL ?? "http://localhost:7342/api";
@@ -171,6 +163,10 @@ export async function getAvailablePaymentProducts() {
   return apiFetch<AvailablePaymentProduct[]>("/payment/products");
 }
 
+export async function getRechargeProducts() {
+  return apiFetch<RechargeProduct[]>("/payment/recharge-products", {}, { user: false });
+}
+
 function text(formData: FormData, name: string) {
   return String(formData.get(name) ?? "").trim();
 }
@@ -179,11 +175,39 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "请求失败";
 }
 
+function safeReturnPath(value: string, fallback = "/dashboard/billing") {
+  if (!value || !value.startsWith("/") || value.startsWith("//") || value.startsWith("/admin")) {
+    return fallback;
+  }
+
+  return value.split("?")[0] || fallback;
+}
+
+function paymentReturnTarget(returnPath: string, packageCode: string, params: Record<string, string>) {
+  const searchParams = new URLSearchParams();
+
+  if ((returnPath === "/pricing" || returnPath === "/pricing/checkout") && packageCode) {
+    searchParams.set("package", packageCode);
+  }
+
+  Object.entries(params).forEach(([key, value]) => {
+    if (value) {
+      searchParams.set(key, value);
+    }
+  });
+
+  const query = searchParams.toString();
+
+  return query ? `${returnPath}?${query}` : returnPath;
+}
+
 export async function createPaymentOrderAction(formData: FormData) {
   "use server";
 
   let target: string;
   const requestHeaders = await headers();
+  const packageCode = text(formData, "packageCode");
+  const returnPath = safeReturnPath(text(formData, "returnPath"));
 
   try {
     const order = await apiFetch<PaymentOrder>("/payment/orders", {
@@ -194,17 +218,19 @@ export async function createPaymentOrderAction(formData: FormData) {
       },
       body: JSON.stringify({
         provider: text(formData, "provider"),
-        packageCode: text(formData, "packageCode"),
+        packageCode,
         scene: text(formData, "scene")
       })
     });
-    target = `/dashboard/billing?order=${order.id}`;
+    target = paymentReturnTarget(returnPath, packageCode, { order: order.id });
   } catch (error) {
-    target = `/dashboard/billing?error=${encodeURIComponent(errorMessage(error))}`;
+    target = paymentReturnTarget(returnPath, packageCode, { error: errorMessage(error) });
   }
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/billing");
+  revalidatePath("/pricing");
+  revalidatePath("/pricing/checkout");
   redirect(target);
 }
 
@@ -214,6 +240,8 @@ export async function mockPayOrderAction(formData: FormData) {
   const orderId = text(formData, "orderId");
   const orderNo = text(formData, "orderNo");
   const provider = text(formData, "provider") as PaymentProvider;
+  const packageCode = text(formData, "packageCode");
+  const returnPath = safeReturnPath(text(formData, "returnPath"));
   const notifyPath = `/payment/mock/${provider}/notify`;
   let target: string;
 
@@ -230,12 +258,17 @@ export async function mockPayOrderAction(formData: FormData) {
       },
       { user: false }
     );
-    target = `/dashboard/billing?order=${orderId}&paid=1`;
+    target = paymentReturnTarget(returnPath, packageCode, { order: orderId, paid: "1" });
   } catch (error) {
-    target = `/dashboard/billing?order=${orderId}&error=${encodeURIComponent(errorMessage(error))}`;
+    target = paymentReturnTarget(returnPath, packageCode, {
+      order: orderId,
+      error: errorMessage(error)
+    });
   }
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/billing");
+  revalidatePath("/pricing");
+  revalidatePath("/pricing/checkout");
   redirect(target);
 }

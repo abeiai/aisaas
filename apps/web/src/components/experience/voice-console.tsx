@@ -23,6 +23,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
+import { UserAccountMenu } from "@/components/shell/user-account-menu";
 import { Textarea } from "@/components/ui/textarea";
 import type { PublicUser } from "@/lib/auth-actions";
 import { cosyVoiceV35PresetPrefix } from "@/lib/cosyvoice-v35-presets";
@@ -35,6 +36,11 @@ export interface VoiceModelOption {
   providerName: string | null;
   modelName: string | null;
   isConfigured: boolean;
+  inputPrice: string;
+  outputPrice: string;
+  pricingMode: "TOKENS" | "TOKEN_CACHE" | "TOKEN_TIERED" | "REQUEST" | "CHARACTERS" | "IMAGES" | "SECONDS" | "VIDEO_SECONDS";
+  pricingUnit: "K_TOKENS" | "M_TOKENS" | "REQUEST" | "CHARACTER" | "K_CHARACTERS" | "TEN_K_CHARACTERS" | "IMAGE" | "SECOND";
+  creditsPerCny: number;
 }
 
 export interface VoiceOption {
@@ -73,6 +79,7 @@ export interface CurrentVoiceTask extends VoiceTaskItem {
 
 interface VoiceConsoleProps {
   currentUser: PublicUser | null;
+  availableCredits?: number | null;
   models: VoiceModelOption[];
   voices: VoiceOption[];
   history: VoiceTaskItem[];
@@ -96,6 +103,7 @@ interface VoiceConsoleDraft {
 
 export function VoiceConsole({
   currentUser,
+  availableCredits,
   models,
   voices,
   history,
@@ -117,6 +125,11 @@ export function VoiceConsole({
   const selectedModelOption = useMemo(
     () => models.find((model) => model.aliasKey === selectedModel) ?? models[0],
     [models, selectedModel]
+  );
+  const estimatedBillingCharacters = useMemo(() => estimateTtsBillingCharacters(text), [text]);
+  const estimatedCredits = useMemo(
+    () => estimateVoiceCredits(selectedModelOption, estimatedBillingCharacters),
+    [estimatedBillingCharacters, selectedModelOption]
   );
   const compatibleVoices = useMemo(() => {
     const modelName = selectedModelOption?.modelName;
@@ -145,7 +158,7 @@ export function VoiceConsole({
   const modelWarning = !hasConfiguredModel
     ? "尚未配置可用语音模型，请先在后台启用阿里云百炼语音 Provider 并绑定语音模型。"
     : !selectedModelReady
-      ? "当前选择的语音模型别名尚未配置可用模型。"
+      ? "当前选择的语音默认模型尚未配置可用模型。"
       : !selectedVoiceSupported
         ? `当前音色需要 ${requiredModelsText}，请切换兼容模型或后台完成配置。`
         : null;
@@ -363,7 +376,7 @@ export function VoiceConsole({
             </h1>
             <p className="text-sm text-muted-foreground">体验区 · 语音合成</p>
           </div>
-          <div className="flex min-w-[300px] max-w-[520px] flex-1 items-end justify-end gap-3">
+          <div className="flex min-w-[300px] max-w-[580px] flex-1 items-end justify-end gap-3">
             <label className="flex w-full max-w-[420px] flex-col gap-1 text-xs font-medium text-muted-foreground">
               选择模型
               <Select name="modelAlias" value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)}>
@@ -375,6 +388,11 @@ export function VoiceConsole({
                 {models.length === 0 ? <option value="tts-default">默认语音合成模型 · 登录后加载</option> : null}
               </Select>
             </label>
+            <UserAccountMenu
+              availableCredits={availableCredits}
+              loginHref={`/login?next=${encodeURIComponent("/experience/voice")}`}
+              user={currentUser}
+            />
           </div>
         </header>
 
@@ -414,6 +432,10 @@ export function VoiceConsole({
                     </span>
                     <span>
                       {text.length.toLocaleString("zh-CN")} / {textLimit.toLocaleString("zh-CN")} 字符
+                    </span>
+                    <span>
+                      计费字符 {estimatedBillingCharacters.toLocaleString("zh-CN")} · 预估{" "}
+                      {estimatedCredits.toLocaleString("zh-CN")} 点
                     </span>
                   </div>
                 </div>
@@ -536,7 +558,7 @@ export function VoiceConsole({
             <VoiceResult task={currentTask} />
             <div className="flex shrink-0 items-center justify-end gap-3">
               <span className="text-sm text-muted-foreground">
-                {currentUser ? "声贝消耗按实际生成结果结算" : "登录后可生成语音"}
+                {currentUser ? "预估仅用于冻结，成功后按接口 usage.characters 结算" : "登录后可生成语音"}
               </span>
               {currentUser ? (
                 <VoiceSubmitButton disabled={!canSubmit} />
@@ -558,6 +580,29 @@ export function VoiceConsole({
 
 function defaultModelAlias(models: VoiceModelOption[]) {
   return models.find((model) => model.isConfigured)?.aliasKey ?? models[0]?.aliasKey ?? "tts-default";
+}
+
+function estimateTtsBillingCharacters(text: string) {
+  let count = 0;
+
+  for (const char of text) {
+    count += (char.codePointAt(0) ?? 0) <= 0x7f ? 1 : 2;
+  }
+
+  return count;
+}
+
+function estimateVoiceCredits(model: VoiceModelOption | undefined, characterCount: number) {
+  if (!model || model.pricingMode !== "CHARACTERS") {
+    return 0;
+  }
+
+  const pricePerUnit = Math.max(0, Number(model.inputPrice || 0));
+  const creditsPerCny = Math.max(0, model.creditsPerCny || 100);
+  const unitSize = model.pricingUnit === "CHARACTER" ? 1 : model.pricingUnit === "K_CHARACTERS" ? 1000 : 10000;
+  const cost = (Math.max(0, characterCount) / unitSize) * pricePerUnit;
+
+  return cost > 0 ? Math.ceil(Math.max(1, cost * creditsPerCny)) : 0;
 }
 
 function isVoiceConsoleDraft(value: unknown): value is VoiceConsoleDraft {

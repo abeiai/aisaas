@@ -31,6 +31,14 @@ import {
   type ProviderAdapterType,
   type ProviderTextAttachment
 } from "./provider-adapters.js";
+import {
+  normalizeModelPricingConfig,
+  normalizePricingMode,
+  normalizePricingUnit,
+  pricingConfigToJson,
+  pricingSummaryFromConfig,
+  type AiModelPricingConfig
+} from "./model-pricing.js";
 
 type AiTaskStatus =
   | "CREATED"
@@ -40,6 +48,20 @@ type AiTaskStatus =
   | "FAILED"
   | "CANCELLED"
   | "COMPENSATED";
+
+type AdminAiTaskType = "TEXT" | "IMAGE" | "VIDEO";
+
+interface AdminAiTaskListFilters {
+  taskType?: string;
+  provider?: string;
+  model?: string;
+  status?: string;
+  startTime?: string;
+  endTime?: string;
+  user?: string;
+  page?: string;
+  pageSize?: string;
+}
 
 type CreditReservationStatus = "RESERVED" | "SETTLED" | "RELEASED" | "EXPIRED" | "FAILED";
 const audioRecommendedAliasKeys = [
@@ -276,6 +298,8 @@ interface ActiveAiModel {
   capabilityTags?: string[];
   inputPrice: { toString(): string };
   outputPrice: { toString(): string };
+  pricingUnit?: string | null;
+  pricingConfig?: AiModelPricingConfig;
   provider: {
     id: string | null;
     instanceId?: string | null;
@@ -509,7 +533,7 @@ export class AiService {
       .filter((model) => {
         const capabilityTags = jsonStringArray(model.capabilityTags);
 
-        return Boolean(model.providerInstance.credential) && capabilityTags.includes("TEXT");
+        return this.hasModelRuntimeApiKey(model) && capabilityTags.includes("TEXT");
       })
       .map((model) => ({
         id: model.id,
@@ -571,7 +595,7 @@ export class AiService {
       .filter((model) => {
         const capabilityTags = jsonStringArray(model.capabilityTags);
 
-        return Boolean(model.providerInstance.credential) && capabilityTags.includes("IMAGE_GENERATION");
+        return this.hasModelRuntimeApiKey(model) && capabilityTags.includes("IMAGE_GENERATION");
       })
       .map((model) => {
         const capabilityTags = jsonStringArray(model.capabilityTags);
@@ -599,49 +623,126 @@ export class AiService {
   }
 
   async generateImage(userId: string, dto: CreateImageGenerationDto): Promise<ImageGenerationResult> {
-    void userId;
-
     const prompt = dto.prompt.trim();
+    const scenario = await this.ensureExperienceImageScenario();
     const model = await this.getImageGenerationModel(dto.modelInstanceId);
+    const activeModel = this.activeModelFromInstance(model, scenario, null);
     const capabilityTags = jsonStringArray(model.capabilityTags);
     const maxReferenceImages = imageReferenceLimit(model.providerModelName, capabilityTags);
     const referenceImages = normalizeImageReferences(dto.referenceImages, maxReferenceImages);
     const count = Math.max(1, Math.min(dto.count || 1, imageOutputLimit(capabilityTags, model.providerModelName)));
     const width = Math.max(512, Math.min(dto.width || 1024, 4096));
     const height = Math.max(512, Math.min(dto.height || 1024, 4096));
-    const response = await this.callDashScopeImageGeneration({
-      baseUrl: model.providerInstance.baseUrl,
-      apiKeyEncrypted: model.providerInstance.credential!.apiKeyEncrypted,
-      modelName: model.providerModelName,
-      prompt,
-      width,
-      height,
-      count,
-      referenceImages
-    });
-    const imageUrls = extractDashScopeImageUrls(response);
+    const runtime = this.resolveModelRuntimeConfig(model, model.providerInstance, model.providerInstance.providerPreset);
 
-    if (imageUrls.length === 0) {
-      throw new AppException(50201, "图片生成接口未返回图片，请稍后重试。", HttpStatus.BAD_GATEWAY);
+    if (!runtime.apiKeyEncrypted) {
+      throw new AppException(
+        40001,
+        runtime.apiKeyMessage ?? "图片生成模型尚未配置 API Key，请先在后台填写。",
+        HttpStatus.BAD_REQUEST
+      );
     }
 
-    return {
-      id: randomUUID(),
+    const estimatedCredits = imageGenerationCreditsFromModel(model, count);
+    const reservedTask = await this.reserveCredits(
+      userId,
+      scenario,
       prompt,
-      modelId: model.id,
-      modelName: model.displayName,
-      providerName: model.providerInstance.name,
-      width,
-      height,
-      count: imageUrls.length,
-      createdAt: new Date().toISOString(),
-      requestId: stringValue(response.request_id) ?? null,
-      images: imageUrls.map((url, index) => ({
+      activeModel,
+      {
+        variables: {
+          prompt,
+          width: String(width),
+          height: String(height),
+          count: String(count),
+          ratio: dto.ratio ?? "",
+          resolution: dto.resolution ?? "",
+          mode: dto.mode ?? "",
+          referenceImageCount: String(referenceImages.length)
+        },
+        renderedPrompt: prompt,
+        knowledgeBaseId: null,
+        knowledgeContext: ""
+      },
+      estimatedCredits
+    );
+    const startedAt = Date.now();
+
+    await this.prisma.aiTask.update({
+      where: {
+        id: reservedTask.id
+      },
+      data: {
+        status: "RUNNING"
+      }
+    });
+
+    try {
+      const response = await this.callDashScopeImageGeneration({
+        baseUrl: runtime.baseUrl,
+        apiKeyEncrypted: runtime.apiKeyEncrypted,
+        modelName: model.providerModelName,
+        prompt,
+        width,
+        height,
+        count,
+        referenceImages
+      });
+      const imageUrls = extractDashScopeImageUrls(response);
+
+      if (imageUrls.length === 0) {
+        throw new AppException(50201, "图片生成接口未返回图片，请稍后重试。", HttpStatus.BAD_GATEWAY);
+      }
+
+      const requestId = stringValue(response.request_id) ?? null;
+      const images = imageUrls.map((url, index) => ({
         id: randomUUID(),
         url,
         alt: `${prompt.slice(0, 80)} - ${index + 1}`
-      }))
-    };
+      }));
+      const outputText = imageGenerationOutputText(prompt, images);
+
+      await this.writeAiCallLog(reservedTask.id, activeModel, {
+        requestId,
+        latencyMs: Date.now() - startedAt,
+        success: true
+      });
+
+      await this.settleSuccessfulTask(
+        reservedTask.id,
+        {
+          text: outputText,
+          provider: model.providerInstance.name,
+          model: model.providerModelName,
+          requestId,
+          latencyMs: Date.now() - startedAt
+        },
+        estimatedCredits
+      );
+
+      return {
+        id: reservedTask.id,
+        prompt,
+        modelId: model.id,
+        modelName: model.displayName,
+        providerName: model.providerInstance.name,
+        width,
+        height,
+        count: images.length,
+        createdAt: reservedTask.createdAt.toISOString(),
+        requestId,
+        images
+      };
+    } catch (error) {
+      await this.writeAiCallLog(reservedTask.id, activeModel, {
+        latencyMs: Date.now() - startedAt,
+        success: false,
+        errorCode: error instanceof AppException ? String(error.code) : "IMAGE_GENERATION_FAILED",
+        errorMessage: this.providerErrorMessage(error)
+      });
+      await this.releaseFailedTask(reservedTask.id, this.providerErrorMessage(error));
+      throw error;
+    }
   }
 
   private async getImageGenerationModel(modelInstanceId: string) {
@@ -667,10 +768,6 @@ export class AiService {
 
     if (!model.isEnabled || model.providerInstance.status !== "ENABLED") {
       throw new AppException(40001, "所选图片模型或 Provider 未启用，请先在后台完成配置。", HttpStatus.BAD_REQUEST);
-    }
-
-    if (!model.providerInstance.credential) {
-      throw new AppException(40001, "图片生成 Provider 尚未配置 API Key，请先在后台填写。", HttpStatus.BAD_REQUEST);
     }
 
     if (!capabilityTags.includes("IMAGE_GENERATION")) {
@@ -791,7 +888,7 @@ export class AiService {
       .filter((model) => {
         const capabilityTags = jsonStringArray(model.capabilityTags);
 
-        return Boolean(model.providerInstance.credential) && capabilityTags.includes("VIDEO_GENERATION");
+        return this.hasModelRuntimeApiKey(model) && capabilityTags.includes("VIDEO_GENERATION");
       })
       .map((model) => {
         const capabilityTags = jsonStringArray(model.capabilityTags);
@@ -817,69 +914,233 @@ export class AiService {
   }
 
   async generateVideo(userId: string, dto: CreateVideoGenerationDto): Promise<VideoGenerationResult> {
-    void userId;
-
     const prompt = dto.prompt.trim();
+    const scenario = await this.ensureExperienceVideoScenario();
     const model = await this.getVideoGenerationModel(dto.modelInstanceId);
+    const activeModel = this.activeModelFromInstance(model, scenario, null);
     const capabilityTags = jsonStringArray(model.capabilityTags);
     const maxReferenceFiles = videoReferenceLimit(model.providerModelName, capabilityTags);
     const referenceFiles = normalizeVideoReferences(dto.referenceFiles, maxReferenceFiles, model.providerModelName, capabilityTags);
     const duration = Math.max(3, Math.min(dto.duration ?? videoDefaultDuration(model.providerModelName), 10));
     const ratio = normalizedVideoRatio(dto.ratio);
     const resolution = normalizedVideoResolution(dto.resolution);
-    const response = await this.callDashScopeVideoGeneration({
-      baseUrl: model.providerInstance.baseUrl,
-      apiKeyEncrypted: model.providerInstance.credential!.apiKeyEncrypted,
-      modelName: model.providerModelName,
-      prompt,
-      ratio,
-      resolution,
-      duration,
-      referenceFiles
-    });
-    const providerTaskId = dashScopeTaskId(response);
-    const videoUrl = extractDashScopeVideoUrls(response)[0] ?? null;
+    const runtime = this.resolveModelRuntimeConfig(model, model.providerInstance, model.providerInstance.providerPreset);
 
-    if (!providerTaskId && !videoUrl) {
-      throw new AppException(50201, "视频生成接口未返回任务编号，请稍后重试。", HttpStatus.BAD_GATEWAY);
+    if (!runtime.apiKeyEncrypted) {
+      throw new AppException(
+        40001,
+        runtime.apiKeyMessage ?? "视频生成模型尚未配置 API Key，请先在后台填写。",
+        HttpStatus.BAD_REQUEST
+      );
     }
 
-    return {
-      id: randomUUID(),
-      prompt,
-      modelId: model.id,
-      modelName: model.displayName,
-      providerName: model.providerInstance.name,
-      ratio,
-      resolution,
+    const estimatedCredits = videoGenerationCreditsFromModel(model, {
       duration,
-      createdAt: new Date().toISOString(),
-      requestId: stringValue(response.request_id) ?? null,
-      providerTaskId: providerTaskId ?? randomUUID(),
-      status: videoUrl ? "SUCCEEDED" : "RUNNING",
-      statusName: videoUrl ? "生成完成" : "任务已提交",
-      videoUrl,
-      errorMessage: null
-    };
+      resolution,
+      modelName: model.providerModelName
+    });
+    const reservedTask = await this.reserveCredits(
+      userId,
+      scenario,
+      prompt,
+      activeModel,
+      {
+        variables: {
+          prompt,
+          ratio,
+          resolution,
+          duration: String(duration),
+          referenceFileCount: String(referenceFiles.length)
+        },
+        renderedPrompt: prompt,
+        knowledgeBaseId: null,
+        knowledgeContext: ""
+      },
+      estimatedCredits
+    );
+    const startedAt = Date.now();
+
+    await this.prisma.aiTask.update({
+      where: {
+        id: reservedTask.id
+      },
+      data: {
+        status: "RUNNING"
+      }
+    });
+
+    try {
+      const response = await this.callDashScopeVideoGeneration({
+        baseUrl: runtime.baseUrl,
+        apiKeyEncrypted: runtime.apiKeyEncrypted,
+        modelName: model.providerModelName,
+        prompt,
+        ratio,
+        resolution,
+        duration,
+        referenceFiles
+      });
+      const providerTaskId = dashScopeTaskId(response);
+      const videoUrl = extractDashScopeVideoUrls(response)[0] ?? null;
+
+      if (!providerTaskId && !videoUrl) {
+        throw new AppException(50201, "视频生成接口未返回任务编号，请稍后重试。", HttpStatus.BAD_GATEWAY);
+      }
+
+      const requestId = stringValue(response.request_id) ?? null;
+      const status = videoUrl ? "SUCCEEDED" : "RUNNING";
+      const outputText = videoGenerationOutputText(prompt, {
+        providerTaskId,
+        status,
+        statusName: videoUrl ? "生成完成" : "任务已提交",
+        videoUrl,
+        ratio,
+        resolution,
+        duration
+      });
+
+      await this.writeAiCallLog(reservedTask.id, activeModel, {
+        requestId,
+        latencyMs: Date.now() - startedAt,
+        success: true
+      });
+
+      if (videoUrl) {
+        await this.settleSuccessfulTask(
+          reservedTask.id,
+          {
+            text: outputText,
+            provider: model.providerInstance.name,
+            model: model.providerModelName,
+            requestId,
+            latencyMs: Date.now() - startedAt
+          },
+          estimatedCredits
+        );
+      } else {
+        const outputPreview = contentPreview(outputText, 1000);
+
+        await this.prisma.aiTask.update({
+          where: {
+            id: reservedTask.id
+          },
+          data: {
+            output: reservedTask.saveFullContent ? outputText : outputPreview,
+            outputPreview,
+            outputHash: contentHash(outputText),
+            providerName: model.providerInstance.name,
+            modelName: model.providerModelName
+          }
+        });
+      }
+
+      return {
+        id: reservedTask.id,
+        prompt,
+        modelId: model.id,
+        modelName: model.displayName,
+        providerName: model.providerInstance.name,
+        ratio,
+        resolution,
+        duration,
+        createdAt: reservedTask.createdAt.toISOString(),
+        requestId,
+        providerTaskId: providerTaskId ?? reservedTask.id,
+        status,
+        statusName: videoUrl ? "生成完成" : "任务已提交",
+        videoUrl,
+        errorMessage: null
+      };
+    } catch (error) {
+      await this.writeAiCallLog(reservedTask.id, activeModel, {
+        latencyMs: Date.now() - startedAt,
+        success: false,
+        errorCode: error instanceof AppException ? String(error.code) : "VIDEO_GENERATION_FAILED",
+        errorMessage: this.providerErrorMessage(error)
+      });
+      await this.releaseFailedTask(reservedTask.id, this.providerErrorMessage(error));
+      throw error;
+    }
   }
 
   async getVideoGenerationTask(userId: string, taskId: string, modelInstanceId: string) {
-    void userId;
-
     const normalizedTaskId = emptyToNull(taskId);
     if (!normalizedTaskId) {
       throw new AppException(40001, "视频任务编号不能为空", HttpStatus.BAD_REQUEST);
     }
 
     const model = await this.getVideoGenerationModel(modelInstanceId);
+    const runtime = this.resolveModelRuntimeConfig(model, model.providerInstance, model.providerInstance.providerPreset);
+
+    if (!runtime.apiKeyEncrypted) {
+      throw new AppException(
+        40001,
+        runtime.apiKeyMessage ?? "视频生成模型尚未配置 API Key，请先在后台填写。",
+        HttpStatus.BAD_REQUEST
+      );
+    }
+
     const response = await this.queryDashScopeVideoTask({
-      baseUrl: model.providerInstance.baseUrl,
-      apiKeyEncrypted: model.providerInstance.credential!.apiKeyEncrypted,
+      baseUrl: runtime.baseUrl,
+      apiKeyEncrypted: runtime.apiKeyEncrypted,
       taskId: normalizedTaskId
     });
     const status = dashScopeVideoStatus(response);
     const videoUrl = extractDashScopeVideoUrls(response)[0] ?? null;
     const errorMessage = dashScopeVideoTaskError(response);
+    const relatedTask = await this.findRunningVideoTask(userId, normalizedTaskId, model.id);
+
+    if (relatedTask) {
+      const activeModel = this.activeModelFromInstance(model, relatedTask.scenario, null);
+      const requestId = stringValue(response.request_id) ?? null;
+      const outputText = videoGenerationOutputText(aiTaskInputText(relatedTask.input) || relatedTask.inputPreview || "", {
+        providerTaskId: normalizedTaskId,
+        status,
+        statusName: videoTaskStatusName(status),
+        videoUrl,
+        ratio: null,
+        resolution: null,
+        duration: null
+      });
+
+      if (status === "SUCCEEDED" && videoUrl) {
+        await this.writeAiCallLog(relatedTask.id, activeModel, {
+          requestId,
+          success: true
+        });
+        await this.settleSuccessfulTask(
+          relatedTask.id,
+          {
+            text: outputText,
+            provider: model.providerInstance.name,
+            model: model.providerModelName,
+            requestId
+          },
+          relatedTask.estimatedCredits
+        );
+      } else if (status === "FAILED" || status === "CANCELLED") {
+        await this.writeAiCallLog(relatedTask.id, activeModel, {
+          requestId,
+          success: false,
+          errorCode: status,
+          errorMessage: errorMessage ?? videoTaskStatusName(status)
+        });
+        await this.releaseFailedTask(relatedTask.id, errorMessage ?? videoTaskStatusName(status));
+      } else {
+        const outputPreview = contentPreview(outputText, 1000);
+
+        await this.prisma.aiTask.update({
+          where: {
+            id: relatedTask.id
+          },
+          data: {
+            output: relatedTask.saveFullContent ? outputText : outputPreview,
+            outputPreview,
+            outputHash: contentHash(outputText)
+          }
+        });
+      }
+    }
 
     return {
       providerTaskId: normalizedTaskId,
@@ -889,6 +1150,33 @@ export class AiService {
       errorMessage,
       requestId: stringValue(response.request_id) ?? null
     };
+  }
+
+  private async findRunningVideoTask(userId: string, providerTaskId: string, modelInstanceId: string) {
+    return this.prisma.aiTask.findFirst({
+      where: {
+        userId,
+        aiModelInstanceId: modelInstanceId,
+        status: {
+          in: ["CREATED", "RESERVED", "RUNNING"]
+        },
+        OR: [
+          {
+            output: {
+              contains: providerTaskId
+            }
+          },
+          {
+            outputPreview: {
+              contains: providerTaskId
+            }
+          }
+        ]
+      },
+      include: {
+        scenario: true
+      }
+    });
   }
 
   private async getVideoGenerationModel(modelInstanceId: string) {
@@ -914,10 +1202,6 @@ export class AiService {
 
     if (!model.isEnabled || model.providerInstance.status !== "ENABLED") {
       throw new AppException(40001, "所选视频模型或 Provider 未启用，请先在后台完成配置。", HttpStatus.BAD_REQUEST);
-    }
-
-    if (!model.providerInstance.credential) {
-      throw new AppException(40001, "视频生成 Provider 尚未配置 API Key，请先在后台填写。", HttpStatus.BAD_REQUEST);
     }
 
     if (!capabilityTags.includes("VIDEO_GENERATION")) {
@@ -1509,8 +1793,123 @@ export class AiService {
     return tasks.map((task) => this.toTask(task));
   }
 
-  async listAdminTasks() {
+  async listAdminTasks(filters: AdminAiTaskListFilters = {}) {
+    const where: Prisma.AiTaskWhereInput = {};
+
+    if (isAiTaskStatus(filters.status)) {
+      where.status = filters.status;
+    }
+
+    const userKeyword = emptyToNull(filters.user);
+    if (userKeyword) {
+      where.user = {
+        OR: [
+          {
+            email: {
+              contains: userKeyword,
+              mode: "insensitive"
+            }
+          },
+          {
+            nickname: {
+              contains: userKeyword,
+              mode: "insensitive"
+            }
+          },
+          {
+            id: {
+              contains: userKeyword,
+              mode: "insensitive"
+            }
+          }
+        ]
+      };
+    }
+
+    const createdAt = adminTaskDateFilter(filters.startTime, filters.endTime);
+    if (createdAt) {
+      where.createdAt = createdAt;
+    }
+
+    const andFilters: Prisma.AiTaskWhereInput[] = [];
+    const providerKeyword = emptyToNull(filters.provider);
+    if (providerKeyword) {
+      andFilters.push({
+        OR: [
+          {
+            aiProviderInstanceId: providerKeyword
+          },
+          {
+            providerName: {
+              contains: providerKeyword,
+              mode: "insensitive"
+            }
+          },
+          {
+            callLogs: {
+              some: {
+                OR: [
+                  {
+                    providerInstanceId: providerKeyword
+                  },
+                  {
+                    provider: {
+                      contains: providerKeyword,
+                      mode: "insensitive"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      });
+    }
+
+    const modelKeyword = emptyToNull(filters.model);
+    if (modelKeyword) {
+      andFilters.push({
+        OR: [
+          {
+            aiModelInstanceId: modelKeyword
+          },
+          {
+            modelName: {
+              contains: modelKeyword,
+              mode: "insensitive"
+            }
+          },
+          {
+            callLogs: {
+              some: {
+                OR: [
+                  {
+                    modelInstanceId: modelKeyword
+                  },
+                  {
+                    model: {
+                      contains: modelKeyword,
+                      mode: "insensitive"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      });
+    }
+
+    if (andFilters.length > 0) {
+      where.AND = andFilters;
+    }
+
+    const taskType = normalizeAdminAiTaskType(filters.taskType);
+    const pageSize = parseAdminListPageSize(filters.pageSize, filters.page ? 50 : 100);
+    const page = parseAdminListPage(filters.page);
+    const take = taskType ? Math.min(Math.max(page * pageSize, 200), 1000) : pageSize;
     const tasks = await this.prisma.aiTask.findMany({
+      where,
       include: {
         user: {
           select: {
@@ -1537,10 +1936,17 @@ export class AiService {
       orderBy: {
         createdAt: "desc"
       },
-      take: 100
+      skip: taskType ? 0 : (page - 1) * pageSize,
+      take
     });
 
-    return tasks.map((task) => this.toTask(task));
+    const filteredTasks = taskType
+      ? tasks
+          .filter((task) => adminAiTaskMatchesTaskType(jsonStringArray(task.scenario.requiredCapabilities), taskType))
+          .slice((page - 1) * pageSize, page * pageSize)
+      : tasks;
+
+    return filteredTasks.map((task) => this.toTask(task));
   }
 
   async getAdminTask(id: string) {
@@ -1988,6 +2394,26 @@ export class AiService {
     const capabilityTags = normalizeCapabilityTags(
       dto.capabilityTags ?? jsonStringArray(modelPreset.capabilityTags)
     );
+    const pricingConfig =
+      normalizeModelPricingConfig(dto.pricingConfig) ?? normalizeModelPricingConfig(modelPreset.pricingConfig);
+    const pricingSummary = pricingSummaryFromConfig(pricingConfig, {
+      inputPrice: String(dto.inputPrice ?? 0),
+      outputPrice: String(dto.outputPrice ?? 0),
+      pricingMode: normalizePricingMode(dto.pricingMode),
+      pricingUnit: normalizePricingUnit(dto.pricingUnit, dto.pricingMode)
+    });
+    const modelApiKey = dto.apiKey?.trim();
+    const modelApiKeyData = modelApiKey
+      ? {
+          apiKeyEncrypted: this.encryptApiKey(modelApiKey),
+          apiKeyPreview: maskSecret(modelApiKey)
+        }
+      : dto.clearApiKey
+        ? {
+            apiKeyEncrypted: null,
+            apiKeyPreview: null
+          }
+        : {};
 
     const modelInstance = await this.prisma.aiModelInstance.upsert({
       where: {
@@ -1998,9 +2424,16 @@ export class AiService {
       },
       update: {
         displayName: dto.displayName?.trim() || modelPreset.displayName,
+        baseUrl: normalizeOptionalBaseUrl(dto.baseUrl),
+        webSocketUrl: dto.webSocketUrl === undefined ? undefined : emptyToNull(dto.webSocketUrl),
+        region: dto.region === undefined ? undefined : emptyToNull(dto.region),
+        ...modelApiKeyData,
         capabilityTags: capabilityTags as Prisma.InputJsonValue,
-        inputPrice: dto.inputPrice === undefined ? undefined : String(dto.inputPrice),
-        outputPrice: dto.outputPrice === undefined ? undefined : String(dto.outputPrice),
+        inputPrice: pricingSummary.inputPrice,
+        outputPrice: pricingSummary.outputPrice,
+        pricingMode: pricingSummary.pricingMode,
+        pricingUnit: pricingSummary.pricingUnit,
+        pricingConfig: pricingConfigToJson(pricingConfig),
         isEnabled: dto.isEnabled ?? true,
         modelPresetId: modelPreset.id
       },
@@ -2009,9 +2442,16 @@ export class AiService {
         modelPresetId: modelPreset.id,
         displayName: dto.displayName?.trim() || modelPreset.displayName,
         providerModelName: dto.providerModelName?.trim() || modelPreset.providerModelName,
+        baseUrl: normalizeOptionalBaseUrl(dto.baseUrl) ?? instance.baseUrl,
+        webSocketUrl: dto.webSocketUrl === undefined ? instance.webSocketUrl : emptyToNull(dto.webSocketUrl),
+        region: dto.region === undefined ? instance.region : emptyToNull(dto.region),
+        ...modelApiKeyData,
         capabilityTags: capabilityTags as Prisma.InputJsonValue,
-        inputPrice: String(dto.inputPrice ?? 0),
-        outputPrice: String(dto.outputPrice ?? 0),
+        inputPrice: pricingSummary.inputPrice,
+        outputPrice: pricingSummary.outputPrice,
+        pricingMode: pricingSummary.pricingMode,
+        pricingUnit: pricingSummary.pricingUnit,
+        pricingConfig: pricingConfigToJson(pricingConfig),
         isEnabled: dto.isEnabled ?? true
       }
     });
@@ -2032,6 +2472,33 @@ export class AiService {
       throw new AppException(40401, "AI 模型实例不存在", HttpStatus.NOT_FOUND);
     }
 
+    const pricingConfig =
+      dto.pricingConfig === undefined ? undefined : normalizeModelPricingConfig(dto.pricingConfig);
+    const pricingSummary =
+      pricingConfig === undefined
+        ? null
+        : pricingSummaryFromConfig(pricingConfig, {
+            inputPrice: dto.inputPrice === undefined ? existing.inputPrice.toString() : String(dto.inputPrice),
+            outputPrice: dto.outputPrice === undefined ? existing.outputPrice.toString() : String(dto.outputPrice),
+            pricingMode: dto.pricingMode === undefined ? normalizePricingMode(existing.pricingMode) : normalizePricingMode(dto.pricingMode),
+            pricingUnit:
+              dto.pricingUnit === undefined
+                ? normalizePricingUnit(existing.pricingUnit, dto.pricingMode ?? existing.pricingMode)
+                : normalizePricingUnit(dto.pricingUnit, dto.pricingMode ?? existing.pricingMode)
+          });
+    const modelApiKey = dto.apiKey?.trim();
+    const modelApiKeyData = modelApiKey
+      ? {
+          apiKeyEncrypted: this.encryptApiKey(modelApiKey),
+          apiKeyPreview: maskSecret(modelApiKey)
+        }
+      : dto.clearApiKey
+        ? {
+            apiKeyEncrypted: null,
+            apiKeyPreview: null
+          }
+        : {};
+
     const model = await this.prisma.aiModelInstance.update({
       where: {
         id
@@ -2039,17 +2506,128 @@ export class AiService {
       data: {
         displayName: dto.displayName?.trim(),
         providerModelName: dto.providerModelName?.trim(),
+        baseUrl: normalizeOptionalBaseUrl(dto.baseUrl),
+        webSocketUrl: dto.webSocketUrl === undefined ? undefined : emptyToNull(dto.webSocketUrl),
+        region: dto.region === undefined ? undefined : emptyToNull(dto.region),
+        ...modelApiKeyData,
         capabilityTags:
           dto.capabilityTags === undefined
             ? undefined
             : (normalizeCapabilityTags(dto.capabilityTags) as Prisma.InputJsonValue),
-        inputPrice: dto.inputPrice === undefined ? undefined : String(dto.inputPrice),
-        outputPrice: dto.outputPrice === undefined ? undefined : String(dto.outputPrice),
+        inputPrice: pricingSummary ? pricingSummary.inputPrice : dto.inputPrice === undefined ? undefined : String(dto.inputPrice),
+        outputPrice: pricingSummary ? pricingSummary.outputPrice : dto.outputPrice === undefined ? undefined : String(dto.outputPrice),
+        pricingMode: pricingSummary
+          ? pricingSummary.pricingMode
+          : dto.pricingMode === undefined
+            ? undefined
+            : normalizePricingMode(dto.pricingMode),
+        pricingUnit: pricingSummary
+          ? pricingSummary.pricingUnit
+          : dto.pricingUnit === undefined
+            ? undefined
+            : normalizePricingUnit(dto.pricingUnit, dto.pricingMode),
+        pricingConfig: pricingSummary ? pricingConfigToJson(pricingConfig ?? null) : undefined,
         isEnabled: dto.isEnabled
       }
     });
 
     return this.toModelInstance(model);
+  }
+
+  async checkModelInstanceDelete(modelInstanceId: string) {
+    const model = await this.prisma.aiModelInstance.findUnique({
+      where: {
+        id: modelInstanceId
+      },
+      include: {
+        aliases: true
+      }
+    });
+
+    if (!model) {
+      throw new AppException(40401, "AI 模型实例不存在", HttpStatus.NOT_FOUND);
+    }
+
+    const aliasKeys = model.aliases.map((alias) => alias.aliasKey);
+    const scenarioBindings = aliasKeys.length
+      ? await this.prisma.aiScenarioModelBinding.findMany({
+          where: {
+            OR: [
+              {
+                defaultModelAlias: {
+                  in: aliasKeys
+                }
+              },
+              {
+                fallbackModelAlias: {
+                  in: aliasKeys
+                }
+              }
+            ]
+          },
+          include: {
+            scenario: {
+              select: {
+                name: true,
+                slug: true,
+                isEnabled: true
+              }
+            }
+          },
+          orderBy: {
+            createdAt: "asc"
+          }
+        })
+      : [];
+    const boundScenarios = scenarioBindings.map((binding) => ({
+      name: binding.scenario.name,
+      slug: binding.scenario.slug,
+      isEnabled: binding.scenario.isEnabled,
+      aliasKey:
+        binding.defaultModelAlias && aliasKeys.includes(binding.defaultModelAlias)
+          ? binding.defaultModelAlias
+          : binding.fallbackModelAlias
+    }));
+
+    return {
+      modelInstanceId,
+      canDelete: boundScenarios.length === 0,
+      aliasKeys,
+      boundScenarios,
+      message:
+        boundScenarios.length > 0
+          ? `该模型仍被 ${boundScenarios.length} 个 AI 场景使用，请先解除模型别名绑定后再删除。`
+          : "该模型未被 AI 场景使用，可以删除。"
+    };
+  }
+
+  async deleteModelInstance(modelInstanceId: string) {
+    const check = await this.checkModelInstanceDelete(modelInstanceId);
+
+    if (!check.canDelete) {
+      throw new AppException(40001, check.message, HttpStatus.BAD_REQUEST);
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.aiModelAlias.updateMany({
+        where: {
+          modelInstanceId
+        },
+        data: {
+          modelInstanceId: null
+        }
+      }),
+      this.prisma.aiModelInstance.delete({
+        where: {
+          id: modelInstanceId
+        }
+      })
+    ]);
+
+    return {
+      deleted: true,
+      modelInstanceId
+    };
   }
 
   async listModelAliases() {
@@ -2218,28 +2796,25 @@ export class AiService {
       throw new AppException(40401, "AI Provider 实例不存在", HttpStatus.NOT_FOUND);
     }
 
-    const apiKey = this.resolveProviderTestApiKey(
-      preset.apiKeyEnvName,
-      instance.credential?.apiKeyEncrypted ?? null
-    );
+    const testModel = selectProviderTestModel(preset.adapterType, instance.modelInstances);
 
-    if (!apiKey.apiKeyEncrypted) {
+    if (!testModel) {
       const result = {
         success: false,
-        message:
-          apiKey.message ??
-          `尚未配置 API Key，请在后台填写或配置环境变量 ${preset.apiKeyEnvName}`
+        message: "请先启用至少一个可用于测试的模型"
       };
       await this.saveProviderTestResult(instance.id, result, "TEST_FAILED");
       return result;
     }
 
-    const modelName = selectProviderTestModelName(preset.adapterType, instance.modelInstances);
+    const runtime = this.resolveModelRuntimeConfig(testModel, instance, preset);
 
-    if (!modelName) {
+    if (!runtime.apiKeyEncrypted) {
       const result = {
         success: false,
-        message: "请先启用至少一个模型"
+        message:
+          runtime.apiKeyMessage ??
+          `尚未配置 API Key，请在 Provider 或模型上填写，或配置环境变量 ${preset.apiKeyEnvName}`
       };
       await this.saveProviderTestResult(instance.id, result, "TEST_FAILED");
       return result;
@@ -2247,17 +2822,24 @@ export class AiService {
 
     const adapter = getProviderAdapter(preset.adapterType);
     const result = await adapter.testConnection({
-      baseUrl: instance.baseUrl,
-      webSocketUrl: instance.webSocketUrl,
-      region: instance.region ?? preset.region,
-      apiKeyEncrypted: apiKey.apiKeyEncrypted,
-      modelName,
+      baseUrl: runtime.baseUrl,
+      webSocketUrl: runtime.webSocketUrl,
+      region: runtime.region,
+      apiKeyEncrypted: runtime.apiKeyEncrypted,
+      modelName: testModel.providerModelName,
       gatewayBaseUrl: process.env.AI_GATEWAY_BASE_URL ?? "http://localhost:7343",
       timeoutMs: Number(process.env.AI_PROVIDER_TEST_TIMEOUT_MS ?? 8000)
     });
+    const resultWithContext =
+      result.success || result.message !== "模型名称错误"
+        ? result
+        : {
+            success: false,
+            message: `模型名称错误：测试模型 ${testModel.providerModelName} 不被当前 Base URL 接受，请检查模型名或该模型的 Base URL。`
+          };
 
-    await this.saveProviderTestResult(instance.id, result, result.success ? "ENABLED" : "TEST_FAILED");
-    return result;
+    await this.saveProviderTestResult(instance.id, resultWithContext, resultWithContext.success ? "ENABLED" : "TEST_FAILED");
+    return resultWithContext;
   }
 
   private async preparePromptInput(userId: string, scenario: AiScenarioRecord, dto: CreateAiTaskDto) {
@@ -2622,8 +3204,10 @@ export class AiService {
       renderedPrompt: string;
       knowledgeBaseId: string | null;
       knowledgeContext: string;
-    }
+    },
+    estimatedCredits = scenario.costCredits
   ) {
+    const creditsToReserve = Math.max(0, Math.ceil(estimatedCredits));
     const saveFullContent = await this.shouldSaveFullAiContent();
     const inputPreview = contentPreview(input, 500);
     const knowledgeContextPreview = contentPreview(promptInput.knowledgeContext, 800);
@@ -2652,7 +3236,7 @@ export class AiService {
           inputPreview,
           inputHash: contentHash(input),
           saveFullContent,
-          estimatedCredits: scenario.costCredits
+          estimatedCredits: creditsToReserve
         }
       });
 
@@ -2662,15 +3246,15 @@ export class AiService {
         where: {
           userId,
           availableCredits: {
-            gte: scenario.costCredits
+            gte: creditsToReserve
           }
         },
         data: {
           availableCredits: {
-            decrement: scenario.costCredits
+            decrement: creditsToReserve
           },
           frozenCredits: {
-            increment: scenario.costCredits
+            increment: creditsToReserve
           }
         }
       });
@@ -2689,7 +3273,7 @@ export class AiService {
         data: {
           userId,
           taskId: task.id,
-          amount: scenario.costCredits,
+          amount: creditsToReserve,
           status: "RESERVED",
           idempotencyKey: `ai-task:${task.id}:reserve`,
           expiresAt: new Date(Date.now() + 30 * 60 * 1000)
@@ -2700,11 +3284,11 @@ export class AiService {
         data: {
           userId,
           type: "RESERVE",
-          amount: -scenario.costCredits,
+          amount: -creditsToReserve,
           balanceAfter: wallet.availableCredits,
           relatedTaskId: task.id,
           idempotencyKey: `ai-task:${task.id}:ledger-reserve`,
-          note: `${scenario.name}冻结 ${scenario.costCredits} 点`
+          note: `${scenario.name}冻结 ${creditsToReserve} 点`
         }
       });
 
@@ -3004,9 +3588,9 @@ export class AiService {
           }
         ],
         requiredCapabilities: ["TEXT", "STREAMING"],
-        costCredits: 0,
+        costCredits: 100,
         isEnabled: true,
-        templateVersion: "2026.05.17"
+        templateVersion: "2026.05.23"
       },
       create: {
         name: "AI 对话",
@@ -3022,11 +3606,103 @@ export class AiService {
           }
         ],
         requiredCapabilities: ["TEXT", "STREAMING"],
-        costCredits: 0,
+        costCredits: 100,
         isEnabled: true,
         sortOrder: 0,
         isBuiltIn: true,
-        templateVersion: "2026.05.17"
+        templateVersion: "2026.05.23"
+      },
+      include: {
+        modelBinding: true
+      }
+    });
+  }
+
+  private async ensureExperienceImageScenario() {
+    return this.prisma.aiScenario.upsert({
+      where: {
+        slug: "experience-image-generation"
+      },
+      update: {
+        promptTemplate: "{{prompt}}",
+        promptVariables: [
+          {
+            name: "prompt",
+            label: "图片提示词",
+            required: true,
+            placeholder: "描述要生成的图片"
+          }
+        ],
+        requiredCapabilities: ["IMAGE_GENERATION"],
+        costCredits: 0,
+        isEnabled: true,
+        templateVersion: "2026.05.25"
+      },
+      create: {
+        name: "图片生成",
+        slug: "experience-image-generation",
+        description: "体验区图片生成能力。",
+        promptTemplate: "{{prompt}}",
+        promptVariables: [
+          {
+            name: "prompt",
+            label: "图片提示词",
+            required: true,
+            placeholder: "描述要生成的图片"
+          }
+        ],
+        requiredCapabilities: ["IMAGE_GENERATION"],
+        costCredits: 0,
+        isEnabled: true,
+        sortOrder: 1,
+        isBuiltIn: true,
+        templateVersion: "2026.05.25"
+      },
+      include: {
+        modelBinding: true
+      }
+    });
+  }
+
+  private async ensureExperienceVideoScenario() {
+    return this.prisma.aiScenario.upsert({
+      where: {
+        slug: "experience-video-generation"
+      },
+      update: {
+        promptTemplate: "{{prompt}}",
+        promptVariables: [
+          {
+            name: "prompt",
+            label: "视频提示词",
+            required: true,
+            placeholder: "描述要生成的视频"
+          }
+        ],
+        requiredCapabilities: ["VIDEO_GENERATION"],
+        costCredits: 0,
+        isEnabled: true,
+        templateVersion: "2026.05.25"
+      },
+      create: {
+        name: "视频生成",
+        slug: "experience-video-generation",
+        description: "体验区视频生成能力。",
+        promptTemplate: "{{prompt}}",
+        promptVariables: [
+          {
+            name: "prompt",
+            label: "视频提示词",
+            required: true,
+            placeholder: "描述要生成的视频"
+          }
+        ],
+        requiredCapabilities: ["VIDEO_GENERATION"],
+        costCredits: 0,
+        isEnabled: true,
+        sortOrder: 2,
+        isBuiltIn: true,
+        templateVersion: "2026.05.25"
       },
       include: {
         modelBinding: true
@@ -3171,7 +3847,11 @@ export class AiService {
           throw error;
         }
 
-        throw new AppException(50201, "AI 流式生成失败，请稍后重试", HttpStatus.BAD_GATEWAY);
+        throw new AppException(
+          50201,
+          adapterError?.message ?? "AI 流式生成失败，请稍后重试",
+          HttpStatus.BAD_GATEWAY
+        );
       }
     }
 
@@ -3331,7 +4011,7 @@ export class AiService {
         errorCode: adapterError?.code ?? "AI_GATEWAY_ERROR",
         errorMessage: adapterError?.message ?? "AI Gateway 调用失败"
       });
-      throw new AppException(50201, "AI 生成失败，请稍后重试", HttpStatus.BAD_GATEWAY);
+      throw new AppException(50201, adapterError?.message ?? "AI 生成失败，请稍后重试", HttpStatus.BAD_GATEWAY);
     }
   }
 
@@ -3395,6 +4075,8 @@ export class AiService {
       usage: result.usage,
       inputPrice: Number(activeModel.inputPrice.toString()),
       outputPrice: Number(activeModel.outputPrice.toString()),
+      pricingUnit: activeModel.pricingUnit,
+      pricingConfig: activeModel.pricingConfig,
       fallbackCredits: scenario.costCredits,
       maxCredits: scenario.costCredits
     });
@@ -3427,6 +4109,59 @@ export class AiService {
         }
       ]
     });
+  }
+
+  private resolveModelRuntimeConfig(
+    model: {
+      baseUrl?: string | null;
+      webSocketUrl?: string | null;
+      region?: string | null;
+      apiKeyEncrypted?: string | null;
+    },
+    providerInstance: {
+      baseUrl: string;
+      webSocketUrl: string | null;
+      region: string | null;
+      credential?: {
+        apiKeyEncrypted: string;
+      } | null;
+    },
+    providerPreset: {
+      apiKeyEnvName: string;
+      region: string | null;
+    }
+  ) {
+    const apiKey = this.resolveModelRuntimeApiKey(
+      providerPreset.apiKeyEnvName,
+      model.apiKeyEncrypted ?? null,
+      providerInstance.credential?.apiKeyEncrypted ?? null
+    );
+
+    return {
+      baseUrl: normalizeBaseUrl(model.baseUrl || providerInstance.baseUrl),
+      webSocketUrl: model.webSocketUrl ?? providerInstance.webSocketUrl,
+      region: model.region ?? providerInstance.region ?? providerPreset.region,
+      apiKeyEncrypted: apiKey.apiKeyEncrypted,
+      apiKeyMessage: apiKey.message
+    };
+  }
+
+  private hasModelRuntimeApiKey(model: {
+    apiKeyEncrypted?: string | null;
+    providerInstance: {
+      credential?: {
+        apiKeyEncrypted: string;
+      } | null;
+      providerPreset: {
+        apiKeyEnvName: string;
+      };
+    };
+  }) {
+    return Boolean(
+      model.apiKeyEncrypted ||
+        model.providerInstance.credential?.apiKeyEncrypted ||
+        process.env[model.providerInstance.providerPreset.apiKeyEnvName]?.trim()
+    );
   }
 
   private async getModelForScenario(
@@ -3528,20 +4263,30 @@ export class AiService {
       id: string;
       displayName: string;
       providerModelName: string;
+      baseUrl?: string | null;
+      webSocketUrl?: string | null;
+      region?: string | null;
+      apiKeyEncrypted?: string | null;
       capabilityTags: Prisma.JsonValue;
       inputPrice: { toString(): string };
       outputPrice: { toString(): string };
+      pricingUnit: string;
+      pricingConfig: Prisma.JsonValue | null;
       isEnabled: boolean;
       providerInstance: {
         id: string;
         name: string;
         baseUrl: string;
+        webSocketUrl: string | null;
+        region: string | null;
         status: string;
         credential: {
           apiKeyEncrypted: string;
         } | null;
         providerPreset: {
           adapterType: ProviderAdapterType;
+          apiKeyEnvName: string;
+          region: string | null;
         };
       };
     },
@@ -3554,8 +4299,14 @@ export class AiService {
       throw new AppException(40001, "当前模型或 Provider 未启用，请在后台 AI 模型设置中检查配置。", HttpStatus.BAD_REQUEST);
     }
 
-    if (!providerInstance.credential) {
-      throw new AppException(40001, "当前 Provider 尚未配置 API Key，请在后台填写后再试。", HttpStatus.BAD_REQUEST);
+    const runtime = this.resolveModelRuntimeConfig(model, providerInstance, providerInstance.providerPreset);
+
+    if (!runtime.apiKeyEncrypted) {
+      throw new AppException(
+        40001,
+        runtime.apiKeyMessage ?? "当前模型尚未配置 API Key，请在后台填写后再试。",
+        HttpStatus.BAD_REQUEST
+      );
     }
 
     const missing = missingCapabilities(
@@ -3585,12 +4336,14 @@ export class AiService {
       capabilityTags: jsonStringArray(model.capabilityTags),
       inputPrice: model.inputPrice,
       outputPrice: model.outputPrice,
+      pricingUnit: model.pricingUnit,
+      pricingConfig: normalizeModelPricingConfig(model.pricingConfig),
       provider: {
         id: null,
         instanceId: providerInstance.id,
         name: providerInstance.name,
-        baseUrl: providerInstance.baseUrl,
-        apiKeyEncrypted: providerInstance.credential.apiKeyEncrypted
+        baseUrl: runtime.baseUrl,
+        apiKeyEncrypted: runtime.apiKeyEncrypted
       }
     };
   }
@@ -3895,6 +4648,43 @@ export class AiService {
     return this.safeEncryptedEnvApiKey(envName);
   }
 
+  private resolveModelRuntimeApiKey(
+    envName: string,
+    modelApiKeyEncrypted: string | null,
+    providerApiKeyEncrypted: string | null
+  ) {
+    let decryptFailed = false;
+
+    for (const encrypted of [modelApiKeyEncrypted, providerApiKeyEncrypted]) {
+      if (!encrypted) {
+        continue;
+      }
+
+      try {
+        decryptSecret(encrypted);
+        return {
+          apiKeyEncrypted: encrypted,
+          message: null
+        };
+      } catch {
+        decryptFailed = true;
+      }
+    }
+
+    const fallback = this.safeEncryptedEnvApiKey(envName);
+
+    if (fallback.apiKeyEncrypted) {
+      return fallback;
+    }
+
+    return {
+      apiKeyEncrypted: null,
+      message: decryptFailed
+        ? `已保存的模型或 Provider API Key 无法解密，请重新填写 API Key 或确认 SECRET_ENCRYPTION_KEY`
+        : fallback.message
+    };
+  }
+
   private safeEncryptedEnvApiKey(envName: string) {
     const apiKey = process.env[envName]?.trim();
 
@@ -4145,6 +4935,7 @@ export class AiService {
       deprecatedMessage: string | null;
       replacementModelKey: string | null;
       recommendedAlias: string | null;
+      pricingConfig: Prisma.JsonValue | null;
       createdAt: Date;
       updatedAt: Date;
     }>;
@@ -4170,9 +4961,17 @@ export class AiService {
         modelPresetId: string | null;
         displayName: string;
         providerModelName: string;
+        baseUrl: string | null;
+        webSocketUrl: string | null;
+        region: string | null;
+        apiKeyEncrypted: string | null;
+        apiKeyPreview: string | null;
         capabilityTags: Prisma.JsonValue;
         inputPrice: { toString(): string };
         outputPrice: { toString(): string };
+        pricingMode: string;
+        pricingUnit: string;
+        pricingConfig: Prisma.JsonValue | null;
         isEnabled: boolean;
         createdAt: Date;
         updatedAt: Date;
@@ -4210,7 +5009,8 @@ export class AiService {
       updatedAt: preset.updatedAt,
       modelPresets: preset.modelPresets.map((model) => ({
         ...model,
-        capabilityTags: jsonStringArray(model.capabilityTags)
+        capabilityTags: jsonStringArray(model.capabilityTags),
+        pricingConfig: normalizeModelPricingConfig(model.pricingConfig)
       })),
       instance: preset.instances[0] ? this.toProviderInstance(preset.instances[0]) : null
     };
@@ -4238,9 +5038,17 @@ export class AiService {
       modelPresetId: string | null;
       displayName: string;
       providerModelName: string;
+      baseUrl: string | null;
+      webSocketUrl: string | null;
+      region: string | null;
+      apiKeyEncrypted: string | null;
+      apiKeyPreview: string | null;
       capabilityTags: Prisma.JsonValue;
       inputPrice: { toString(): string };
       outputPrice: { toString(): string };
+      pricingMode: string;
+      pricingUnit: string;
+      pricingConfig: Prisma.JsonValue | null;
       isEnabled: boolean;
       createdAt: Date;
       updatedAt: Date;
@@ -4283,10 +5091,18 @@ export class AiService {
     modelPresetId: string | null;
     displayName: string;
     providerModelName: string;
+    baseUrl: string | null;
+    webSocketUrl: string | null;
+    region: string | null;
+    apiKeyEncrypted: string | null;
+    apiKeyPreview: string | null;
     capabilityTags: Prisma.JsonValue;
-    inputPrice: { toString(): string };
-    outputPrice: { toString(): string };
-    isEnabled: boolean;
+      inputPrice: { toString(): string };
+      outputPrice: { toString(): string };
+      pricingMode: string;
+      pricingUnit: string;
+      pricingConfig: Prisma.JsonValue | null;
+      isEnabled: boolean;
     createdAt: Date;
     updatedAt: Date;
     providerInstance?: {
@@ -4317,9 +5133,17 @@ export class AiService {
       modelPresetId: model.modelPresetId,
       displayName: model.displayName,
       providerModelName: model.providerModelName,
+      baseUrl: model.baseUrl,
+      webSocketUrl: model.webSocketUrl,
+      region: model.region,
+      hasCustomApiKey: Boolean(model.apiKeyEncrypted),
+      apiKeyPreview: model.apiKeyEncrypted ? model.apiKeyPreview ?? credentialPreview(model.apiKeyEncrypted) : "使用 Provider 默认",
       capabilityTags: jsonStringArray(model.capabilityTags),
       inputPrice: model.inputPrice.toString(),
       outputPrice: model.outputPrice.toString(),
+      pricingMode: model.pricingMode,
+      pricingUnit: model.pricingUnit,
+      pricingConfig: normalizeModelPricingConfig(model.pricingConfig),
       isEnabled: model.isEnabled,
       createdAt: model.createdAt,
       updatedAt: model.updatedAt,
@@ -4453,6 +5277,16 @@ function normalizeBaseUrl(value: string) {
   return value.trim().replace(/\/+$/, "");
 }
 
+function normalizeOptionalBaseUrl(value: string | undefined) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const normalized = emptyToNull(value);
+
+  return normalized ? normalizeBaseUrl(normalized) : null;
+}
+
 function emptyToNull(value: string | undefined) {
   const normalized = value?.trim();
 
@@ -4465,6 +5299,101 @@ function jsonStringArray(value: Prisma.JsonValue | null | undefined) {
   }
 
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+function isAiTaskStatus(value: string | undefined): value is AiTaskStatus {
+  return (
+    value === "CREATED" ||
+    value === "RESERVED" ||
+    value === "RUNNING" ||
+    value === "SUCCEEDED" ||
+    value === "FAILED" ||
+    value === "CANCELLED" ||
+    value === "COMPENSATED"
+  );
+}
+
+function normalizeAdminAiTaskType(value: string | undefined): AdminAiTaskType | null {
+  if (value === "TEXT" || value === "IMAGE" || value === "VIDEO") {
+    return value;
+  }
+
+  return null;
+}
+
+function adminAiTaskMatchesTaskType(capabilities: string[], taskType: AdminAiTaskType) {
+  const normalized = new Set(capabilities.map((item) => item.toUpperCase()));
+  const hasImageCapability = [
+    "IMAGE",
+    "IMAGE_INPUT",
+    "IMAGE_GENERATION",
+    "IMAGE_EDIT",
+    "REFERENCE_IMAGE",
+    "BATCH_IMAGE"
+  ].some((capability) => normalized.has(capability));
+  const hasVideoCapability = [
+    "VIDEO",
+    "VIDEO_GENERATION",
+    "TEXT_TO_VIDEO",
+    "IMAGE_TO_VIDEO",
+    "REFERENCE_TO_VIDEO",
+    "REFERENCE_VIDEO",
+    "VIDEO_EDIT"
+  ].some((capability) => normalized.has(capability));
+
+  if (taskType === "IMAGE") {
+    return hasImageCapability && !hasVideoCapability;
+  }
+
+  if (taskType === "VIDEO") {
+    return hasVideoCapability;
+  }
+
+  return !hasImageCapability && !hasVideoCapability;
+}
+
+function adminTaskDateFilter(startTime: string | undefined, endTime: string | undefined) {
+  const range: Prisma.DateTimeFilter = {};
+  const startAt = parseAdminListDate(startTime);
+  const endAt = parseAdminListDate(endTime);
+
+  if (startAt) {
+    range.gte = startAt;
+  }
+
+  if (endAt) {
+    range.lte = endAt;
+  }
+
+  return Object.keys(range).length > 0 ? range : null;
+}
+
+function parseAdminListDate(value: string | undefined) {
+  const normalized = emptyToNull(value);
+
+  if (!normalized) {
+    return null;
+  }
+
+  const date = new Date(normalized);
+
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function parseAdminListPage(value: string | undefined) {
+  const parsed = Number(value);
+
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+}
+
+function parseAdminListPageSize(value: string | undefined, fallback: number) {
+  const parsed = Number(value);
+
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return Math.min(parsed, 200);
 }
 
 function isAudioRecommendedAliasKey(value: string): value is (typeof audioRecommendedAliasKeys)[number] {
@@ -4495,28 +5424,37 @@ function audioRecommendedAliasName(aliasKey: (typeof audioRecommendedAliasKeys)[
   return names[aliasKey];
 }
 
-function selectProviderTestModelName(
+function selectProviderTestModel(
   adapterType: string,
   modelInstances: Array<{
     providerModelName: string;
     capabilityTags: Prisma.JsonValue;
+    baseUrl?: string | null;
+    webSocketUrl?: string | null;
+    region?: string | null;
+    apiKeyEncrypted?: string | null;
   }>
 ) {
   if (adapterType !== "DASHSCOPE_AUDIO") {
-    return modelInstances[0]?.providerModelName;
+    return (
+      modelInstances.find((model) => jsonStringArray(model.capabilityTags).includes("TEXT")) ??
+      modelInstances[0] ??
+      null
+    );
   }
 
   const systemVoicePriority = ["cosyvoice-v3-flash", "cosyvoice-v3-plus", "cosyvoice-v2", "cosyvoice-v1", "sambert"];
   for (const modelName of systemVoicePriority) {
     const matched = modelInstances.find((model) => model.providerModelName === modelName);
     if (matched) {
-      return matched.providerModelName;
+      return matched;
     }
   }
 
   return (
-    modelInstances.find((model) => jsonStringArray(model.capabilityTags).includes("TTS"))?.providerModelName ??
-    modelInstances[0]?.providerModelName
+    modelInstances.find((model) => jsonStringArray(model.capabilityTags).includes("TTS")) ??
+    modelInstances[0] ??
+    null
   );
 }
 
@@ -4834,6 +5772,38 @@ function isDashScopeImageGenerationModel(modelName: string) {
   return modelName.startsWith("qwen-image-") || modelName.startsWith("wan2.7-image") || modelName === "z-image-turbo";
 }
 
+function imageGenerationCreditsFromModel(
+  model: {
+    inputPrice: { toString(): string };
+    pricingMode: string;
+    pricingUnit: string;
+  },
+  imageCount: number
+) {
+  const pricingMode = normalizePricingMode(model.pricingMode);
+  const pricingUnit = normalizePricingUnit(model.pricingUnit, pricingMode);
+  const parsedPrice = Number(model.inputPrice.toString());
+  const price = Number.isFinite(parsedPrice) ? Math.max(0, parsedPrice) : 0;
+  const count = Math.max(1, Math.ceil(imageCount || 1));
+  let costCny = 0;
+
+  if (pricingMode === "IMAGES" && pricingUnit === "IMAGE") {
+    costCny = price * count;
+  } else if (pricingMode === "REQUEST") {
+    costCny = price;
+  }
+
+  return costCny > 0 ? Math.ceil(costCny * 100) : 0;
+}
+
+function imageGenerationOutputText(prompt: string, images: Array<{ url: string }>) {
+  return [
+    `图片生成提示词：${prompt}`,
+    "",
+    ...images.map((image, index) => `![生成图片 ${index + 1}](${image.url})`)
+  ].join("\n");
+}
+
 function normalizeImageReferences(value: unknown, maxReferenceImages: number) {
   if (maxReferenceImages <= 0) {
     return [];
@@ -5010,6 +5980,131 @@ function videoGenerationModelPriority(modelName: string) {
 
 function isDashScopeVideoGenerationModel(modelName: string) {
   return modelName.startsWith("wan2.7-") || modelName.startsWith("happyhorse-1.0-");
+}
+
+function videoGenerationCreditsFromModel(
+  model: {
+    inputPrice: { toString(): string };
+    pricingMode: string;
+    pricingUnit: string;
+    pricingConfig: Prisma.JsonValue | null;
+  },
+  input: {
+    duration: number;
+    resolution: string;
+    modelName: string;
+  }
+) {
+  const duration = Math.max(1, Math.ceil(input.duration || 1));
+  const pricingConfig = normalizeModelPricingConfig(model.pricingConfig);
+  let costCny = 0;
+
+  if (pricingConfig?.mode === "VIDEO_SECONDS") {
+    const variant = selectVideoPricingVariant(pricingConfig, input.resolution, input.modelName);
+    costCny = Math.max(0, variant?.output ?? 0) * duration;
+  } else {
+    const pricingMode = normalizePricingMode(model.pricingMode);
+    const pricingUnit = normalizePricingUnit(model.pricingUnit, pricingMode);
+    const parsedPrice = Number(model.inputPrice.toString());
+    const price = Number.isFinite(parsedPrice) ? Math.max(0, parsedPrice) : 0;
+
+    if ((pricingMode === "VIDEO_SECONDS" || pricingMode === "SECONDS") && pricingUnit === "SECOND") {
+      costCny = price * duration;
+    } else if (pricingMode === "REQUEST") {
+      costCny = price;
+    }
+  }
+
+  return costCny > 0 ? Math.ceil(costCny * 100) : 0;
+}
+
+function selectVideoPricingVariant(
+  pricingConfig: NonNullable<Extract<AiModelPricingConfig, { mode: "VIDEO_SECONDS" }>>,
+  resolution: string,
+  modelName: string
+) {
+  const expectedResolution = resolution.includes("1080") ? "1080" : resolution.includes("720") ? "720" : "";
+  const expectedTaskType = videoPricingTaskTypeFromModel(modelName);
+
+  return (
+    pricingConfig.variants.find((variant) => {
+      return (
+        variant.taskType === expectedTaskType &&
+        (!expectedResolution || variant.resolution.toUpperCase().includes(expectedResolution))
+      );
+    }) ??
+    pricingConfig.variants.find((variant) => variant.taskType === expectedTaskType) ??
+    pricingConfig.variants[0] ??
+    null
+  );
+}
+
+function videoPricingTaskTypeFromModel(modelName: string) {
+  if (modelName.includes("-t2v")) {
+    return "TEXT_TO_VIDEO";
+  }
+
+  if (modelName.includes("-i2v")) {
+    return "IMAGE_TO_VIDEO";
+  }
+
+  if (modelName.includes("-r2v")) {
+    return "REFERENCE_TO_VIDEO";
+  }
+
+  if (modelName.endsWith("videoedit") || modelName.endsWith("video-edit")) {
+    return "VIDEO_EDIT";
+  }
+
+  return "OTHER";
+}
+
+function videoGenerationOutputText(
+  prompt: string,
+  input: {
+    providerTaskId: string | null;
+    status: string;
+    statusName: string;
+    videoUrl: string | null;
+    ratio: string | null;
+    resolution: string | null;
+    duration: number | null;
+  }
+) {
+  const lines = [
+    `视频生成提示词：${prompt}`,
+    "",
+    `任务状态：${input.statusName}`,
+    `Provider 任务编号：${input.providerTaskId ?? "无"}`
+  ];
+
+  if (input.ratio) {
+    lines.push(`画面比例：${input.ratio}`);
+  }
+
+  if (input.resolution) {
+    lines.push(`清晰度：${input.resolution}`);
+  }
+
+  if (input.duration) {
+    lines.push(`时长：${input.duration} 秒`);
+  }
+
+  if (input.videoUrl) {
+    lines.push("", `生成视频：${input.videoUrl}`);
+  }
+
+  return lines.join("\n");
+}
+
+function aiTaskInputText(value: Prisma.JsonValue) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return "";
+  }
+
+  const text = (value as Record<string, unknown>).text;
+
+  return typeof text === "string" ? text : "";
 }
 
 function normalizeVideoReferences(value: unknown, maxReferenceFiles: number, modelName: string, capabilityTags: string[]) {

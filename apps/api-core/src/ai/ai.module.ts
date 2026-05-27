@@ -1,7 +1,6 @@
 import { Module } from "@nestjs/common";
 import { AdminAuthModule } from "../admin-auth/admin-auth.module.js";
 import { AuthModule } from "../auth/auth.module.js";
-import { AdminAiWorkflowController } from "./admin-ai-workflow.controller.js";
 import { AdvancedAiController } from "./advanced-ai.controller.js";
 import { AdvancedAiService } from "./advanced-ai.service.js";
 import { AdminAiModelAliasController } from "./admin-ai-model-alias.controller.js";
@@ -30,8 +29,7 @@ import { KnowledgeController } from "./knowledge.controller.js";
     AdminAiToolCategoryController,
     AdminAiToolTemplateController,
     AdminAiTaskController,
-    AdminAiUsageController,
-    AdminAiWorkflowController
+    AdminAiUsageController
   ],
   providers: [AiService, AdvancedAiService, AiUsageService]
 })

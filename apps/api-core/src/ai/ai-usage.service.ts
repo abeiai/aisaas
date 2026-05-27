@@ -1,6 +1,7 @@
 import { HttpStatus, Injectable } from "@nestjs/common";
 import { getPrismaClient, type Prisma } from "@aisaas/database";
 import { AppException } from "../common/app-exception.js";
+import { estimateTokenCost, normalizeModelPricingConfig } from "./model-pricing.js";
 
 const shanghaiOffsetMs = 8 * 60 * 60 * 1000;
 
@@ -132,12 +133,16 @@ export class AiUsageService {
       }
 
       bucket.estimatedCost += estimateTokenCost({
-        inputTokens: positiveInt(log.inputTokens),
-        outputTokens: positiveInt(log.outputTokens),
-        totalTokens: positiveInt(log.totalTokens),
+        usage: {
+          inputTokens: positiveInt(log.inputTokens),
+          outputTokens: positiveInt(log.outputTokens),
+          totalTokens: positiveInt(log.totalTokens)
+        },
+        pricingConfig: normalizeModelPricingConfig(log.modelInstance?.pricingConfig),
+        pricingUnit: log.modelInstance?.pricingUnit,
         inputPrice: decimalNumber(log.modelInstance?.inputPrice ?? log.aiModel?.inputPrice),
         outputPrice: decimalNumber(log.modelInstance?.outputPrice ?? log.aiModel?.outputPrice)
-      });
+      }) ?? 0;
       buckets.set(dimensionKey, bucket);
     }
 
@@ -250,6 +255,9 @@ export class AiUsageService {
         mostCostlyModel: topMetric(rows, "model", "estimatedCost"),
         mostUsedTool: topMetric(rows, "tool", "requestCount")
       },
+      byProvider: groupUsageRows(rows, "provider"),
+      byModel: groupUsageRows(rows, "model"),
+      byTool: groupUsageRows(rows, "tool"),
       trend: range.keys.map((date) => ({
         date,
         ...summarizeRows(rows.filter((row) => dateKeyFromDateOnly(row.date) === date))
@@ -583,21 +591,6 @@ function createBucket(input: Omit<UsageBucket, "requestCount" | "successCount" |
   };
 }
 
-function estimateTokenCost(input: {
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  inputPrice: number;
-  outputPrice: number;
-}) {
-  const effectiveInputTokens = input.inputTokens || Math.max(0, input.totalTokens - input.outputTokens);
-
-  return (
-    (effectiveInputTokens * Math.max(0, input.inputPrice)) / 1000 +
-    (input.outputTokens * Math.max(0, input.outputPrice)) / 1000
-  );
-}
-
 function summarizeRows(rows: Array<{
   requestCount: number;
   successCount: number;
@@ -768,6 +761,57 @@ function groupStatRows(
   }
 
   return Array.from(groups.values());
+}
+
+function groupUsageRows(
+  rows: Array<{
+    providerId: string | null;
+    providerInstanceId: string | null;
+    providerName: string | null;
+    modelId: string | null;
+    modelInstanceId: string | null;
+    modelName: string | null;
+    toolId: string | null;
+    toolName: string | null;
+  } & Parameters<typeof summarizeRows>[0][number]>,
+  dimension: "provider" | "model" | "tool"
+) {
+  const groups = new Map<string, { id: string; name: string; rows: typeof rows }>();
+
+  for (const row of rows) {
+    const id =
+      dimension === "provider"
+        ? row.providerInstanceId ?? row.providerId ?? row.providerName
+        : dimension === "model"
+          ? row.modelInstanceId ?? row.modelId ?? row.modelName
+          : row.toolId ?? row.toolName;
+    const name =
+      dimension === "provider"
+        ? row.providerName ?? "未知 Provider"
+        : dimension === "model"
+          ? row.modelName ?? "未知模型"
+          : row.toolName ?? "未知工具";
+
+    if (!id) {
+      continue;
+    }
+
+    const current = groups.get(id) ?? {
+      id,
+      name,
+      rows: []
+    };
+    current.rows.push(row);
+    groups.set(id, current);
+  }
+
+  return Array.from(groups.values())
+    .map((group) => ({
+      id: group.id,
+      name: group.name,
+      ...summarizeRows(group.rows)
+    }))
+    .sort((first, second) => second.requestCount - first.requestCount);
 }
 
 function dateKeyInShanghai(date: Date) {

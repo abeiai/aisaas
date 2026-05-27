@@ -62,7 +62,8 @@ export async function seedAiPresets(prisma: PrismaLike) {
     });
 
     for (const modelPreset of preset.models) {
-      await prisma.aiModelPreset.upsert({
+      const pricingConfig = modelPresetPricingConfig(modelPreset);
+      const savedModelPreset = await prisma.aiModelPreset.upsert({
         where: {
           providerPresetId_modelKey: {
             providerPresetId: provider.id,
@@ -80,7 +81,8 @@ export async function seedAiPresets(prisma: PrismaLike) {
           supportsEmbedding: modelPreset.supportsEmbedding ?? false,
           supportsImageGeneration: modelPreset.supportsImageGeneration ?? false,
           supportsAudio: modelPreset.supportsAudio ?? false,
-          recommendedAlias: modelPreset.recommendedAlias ?? null
+          recommendedAlias: modelPreset.recommendedAlias ?? null,
+          pricingConfig
         },
         create: {
           providerPresetId: provider.id,
@@ -95,9 +97,26 @@ export async function seedAiPresets(prisma: PrismaLike) {
           supportsEmbedding: modelPreset.supportsEmbedding ?? false,
           supportsImageGeneration: modelPreset.supportsImageGeneration ?? false,
           supportsAudio: modelPreset.supportsAudio ?? false,
-          recommendedAlias: modelPreset.recommendedAlias ?? null
+          recommendedAlias: modelPreset.recommendedAlias ?? null,
+          pricingConfig
         }
       });
+      if (pricingConfig) {
+        const summary = pricingSummaryFromPresetConfig(pricingConfig);
+
+        await prisma.aiModelInstance.updateMany({
+          where: {
+            modelPresetId: savedModelPreset.id
+          },
+          data: {
+            pricingConfig,
+            inputPrice: summary.inputPrice,
+            outputPrice: summary.outputPrice,
+            pricingMode: summary.pricingMode,
+            pricingUnit: summary.pricingUnit
+          }
+        });
+      }
       modelCount += 1;
     }
 
@@ -195,6 +214,16 @@ const imageRecommendedAliasKeys = ["image-generation"] as const;
 const videoRecommendedAliasKeys = ["video-generation"] as const;
 
 async function seedDashScopeAudioDefaults(prisma: PrismaLike, providerPresetId: string, providerInstanceId: string) {
+  const providerInstance = await prisma.aiProviderInstance.findUnique({
+    where: {
+      id: providerInstanceId
+    },
+    select: {
+      baseUrl: true,
+      webSocketUrl: true,
+      region: true
+    }
+  });
   const modelPresets = await prisma.aiModelPreset.findMany({
     where: {
       providerPresetId,
@@ -235,9 +264,14 @@ async function seedDashScopeAudioDefaults(prisma: PrismaLike, providerPresetId: 
         modelPresetId: modelPreset.id,
         displayName: modelPreset.displayName,
         providerModelName: modelPreset.providerModelName,
+        baseUrl: providerInstance?.baseUrl,
+        webSocketUrl: providerInstance?.webSocketUrl,
+        region: providerInstance?.region,
         capabilityTags,
-        inputPrice: "0",
+        inputPrice: capabilityTags.includes("TTS") ? "1" : "0",
         outputPrice: "0",
+        pricingMode: "CHARACTERS",
+        pricingUnit: "TEN_K_CHARACTERS",
         isEnabled: true
       }
     });
@@ -320,6 +354,16 @@ function audioRecommendedAliasName(aliasKey: (typeof audioRecommendedAliasKeys)[
 }
 
 async function seedDashScopeImageDefaults(prisma: PrismaLike, providerPresetId: string, providerInstanceId: string) {
+  const providerInstance = await prisma.aiProviderInstance.findUnique({
+    where: {
+      id: providerInstanceId
+    },
+    select: {
+      baseUrl: true,
+      webSocketUrl: true,
+      region: true
+    }
+  });
   const modelPresets = await prisma.aiModelPreset.findMany({
     where: {
       providerPresetId,
@@ -361,6 +405,9 @@ async function seedDashScopeImageDefaults(prisma: PrismaLike, providerPresetId: 
         modelPresetId: modelPreset.id,
         displayName: modelPreset.displayName,
         providerModelName: modelPreset.providerModelName,
+        baseUrl: providerInstance?.baseUrl,
+        webSocketUrl: providerInstance?.webSocketUrl,
+        region: providerInstance?.region,
         capabilityTags,
         inputPrice: "0",
         outputPrice: "0",
@@ -441,6 +488,16 @@ function imageModelPriority(modelName: string) {
 }
 
 async function seedDashScopeVideoDefaults(prisma: PrismaLike, providerPresetId: string, providerInstanceId: string) {
+  const providerInstance = await prisma.aiProviderInstance.findUnique({
+    where: {
+      id: providerInstanceId
+    },
+    select: {
+      baseUrl: true,
+      webSocketUrl: true,
+      region: true
+    }
+  });
   const modelPresets = await prisma.aiModelPreset.findMany({
     where: {
       providerPresetId,
@@ -482,9 +539,14 @@ async function seedDashScopeVideoDefaults(prisma: PrismaLike, providerPresetId: 
         modelPresetId: modelPreset.id,
         displayName: modelPreset.displayName,
         providerModelName: modelPreset.providerModelName,
+        baseUrl: providerInstance?.baseUrl,
+        webSocketUrl: providerInstance?.webSocketUrl,
+        region: providerInstance?.region,
         capabilityTags,
         inputPrice: "0",
         outputPrice: "0",
+        pricingMode: "VIDEO_SECONDS",
+        pricingUnit: "SECOND",
         isEnabled: true
       }
     });
@@ -587,4 +649,37 @@ function jsonStringArray(value: unknown) {
   }
 
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+function modelPresetPricingConfig(modelPreset: (typeof providerPresets)[number]["models"][number]) {
+  return "pricingConfig" in modelPreset ? modelPreset.pricingConfig : null;
+}
+
+function pricingSummaryFromPresetConfig(config: NonNullable<ReturnType<typeof modelPresetPricingConfig>>) {
+  if (config.mode === "TOKEN_CACHE") {
+    return {
+      inputPrice: String(config.inputCacheMiss),
+      outputPrice: String(config.output),
+      pricingMode: "TOKEN_CACHE",
+      pricingUnit: "M_TOKENS"
+    };
+  }
+
+  if (config.mode === "TOKEN_TIERED") {
+    const firstTier = config.tiers[0];
+
+    return {
+      inputPrice: String(firstTier?.input ?? 0),
+      outputPrice: String(firstTier?.output ?? 0),
+      pricingMode: "TOKEN_TIERED",
+      pricingUnit: "M_TOKENS"
+    };
+  }
+
+  return {
+    inputPrice: String("input" in config ? config.input : 0),
+    outputPrice: String("output" in config ? config.output : 0),
+    pricingMode: "TOKENS",
+    pricingUnit: "unit" in config ? config.unit : "K_TOKENS"
+  };
 }

@@ -161,7 +161,7 @@ function ScenarioForm({
         </Field>
         <div className="grid gap-4 md:grid-cols-2">
           <Field>
-            <FieldLabel htmlFor={`${scenario.id}-default-alias`}>默认模型别名</FieldLabel>
+            <FieldLabel htmlFor={`${scenario.id}-default-alias`}>默认模型</FieldLabel>
             <Select id={`${scenario.id}-default-alias`} name="defaultModelAlias" defaultValue={scenario.defaultModelAlias ?? "default-chat"}>
               <option value="">不绑定别名</option>
               {aliases.map((alias) => (
@@ -173,7 +173,7 @@ function ScenarioForm({
             <FieldDescription>新任务运行时会通过别名解析实际模型。</FieldDescription>
           </Field>
           <Field>
-            <FieldLabel htmlFor={`${scenario.id}-fallback-alias`}>Fallback 模型别名</FieldLabel>
+            <FieldLabel htmlFor={`${scenario.id}-fallback-alias`}>Fallback 模型</FieldLabel>
             <Select id={`${scenario.id}-fallback-alias`} name="fallbackModelAlias" defaultValue={scenario.fallbackModelAlias ?? ""}>
               <option value="">不启用 fallback</option>
               {aliases.map((alias) => (

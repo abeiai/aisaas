@@ -36,6 +36,15 @@ export interface PublicAdmin {
   status: string;
 }
 
+interface AdminRefreshSession {
+  admin: PublicAdmin;
+  refreshToken: string;
+  refreshTokenId: string;
+}
+
+const defaultAccessSessionSeconds = 15 * 60;
+const defaultPersistentSessionSeconds = 400 * 24 * 60 * 60;
+
 @Injectable()
 export class AdminAuthService {
   private readonly prisma = getPrismaClient();
@@ -100,32 +109,39 @@ export class AdminAuthService {
   async me(request: RequestLike): Promise<PublicAdmin> {
     const token = readCookie(request, adminAccessCookie) ?? readBearerToken(request);
 
-    if (!token) {
-      throw new AppException(40101, "请先登录管理员账号", HttpStatus.UNAUTHORIZED);
-    }
+    if (token) {
+      const payload = verifyJwt(token, this.getAccessSecret());
 
-    const payload = verifyJwt(token, this.getAccessSecret());
+      if (payload?.type === "ADMIN") {
+        const admin = await this.prisma.adminUser.findUnique({
+          where: {
+            id: payload.sub
+          }
+        });
 
-    if (!payload || payload.type !== "ADMIN") {
-      throw new AppException(40101, "管理员登录状态已失效，请重新登录", HttpStatus.UNAUTHORIZED);
-    }
-
-    const admin = await this.prisma.adminUser.findUnique({
-      where: {
-        id: payload.sub
+        if (admin?.status === "ACTIVE") {
+          return this.toPublicAdmin(admin);
+        }
       }
-    });
-
-    if (!admin || admin.status !== "ACTIVE") {
-      throw new AppException(40101, "管理员登录状态已失效，请重新登录", HttpStatus.UNAUTHORIZED);
     }
 
-    return this.toPublicAdmin(admin);
+    return (
+      await this.resolveRefreshSession(
+        request,
+        token ? "管理员登录状态已失效，请重新登录" : "请先登录管理员账号"
+      )
+    ).admin;
+  }
+
+  async refresh(request: RequestLike, response: ResponseLike) {
+    const session = await this.resolveRefreshSession(request, "管理员登录状态已失效，请重新登录");
+
+    return this.renewSessionCookies(session, response);
   }
 
   private async createAdminSession(admin: PublicAdmin, response: ResponseLike) {
-    const accessMaxAge = parseExpiresIn(process.env.JWT_ACCESS_EXPIRES_IN, 15 * 60);
-    const refreshMaxAge = parseExpiresIn(process.env.JWT_REFRESH_EXPIRES_IN, 7 * 24 * 60 * 60);
+    const accessMaxAge = this.getAccessMaxAge();
+    const refreshMaxAge = this.getRefreshMaxAge();
     const accessToken = signJwt(
       {
         sub: admin.id,
@@ -160,6 +176,82 @@ export class AdminAuthService {
       admin,
       accessToken,
       refreshToken,
+      accessTokenExpiresIn: accessMaxAge,
+      refreshTokenExpiresIn: refreshMaxAge
+    };
+  }
+
+  private async resolveRefreshSession(
+    request: RequestLike,
+    errorMessage: string
+  ): Promise<AdminRefreshSession> {
+    const refreshToken = readCookie(request, adminRefreshCookie);
+
+    if (!refreshToken) {
+      throw new AppException(40101, errorMessage, HttpStatus.UNAUTHORIZED);
+    }
+
+    const refreshRecord = await this.prisma.refreshToken.findFirst({
+      where: {
+        tokenHash: this.hashToken(refreshToken),
+        type: "ADMIN",
+        revokedAt: null,
+        expiresAt: {
+          gt: new Date()
+        }
+      },
+      include: {
+        adminUser: true
+      }
+    });
+
+    if (!refreshRecord?.adminUser || refreshRecord.adminUser.status !== "ACTIVE") {
+      throw new AppException(40101, "管理员登录状态已失效，请重新登录", HttpStatus.UNAUTHORIZED);
+    }
+
+    return {
+      admin: this.toPublicAdmin(refreshRecord.adminUser),
+      refreshToken,
+      refreshTokenId: refreshRecord.id
+    };
+  }
+
+  private async renewSessionCookies(session: AdminRefreshSession, response: ResponseLike) {
+    const accessMaxAge = this.getAccessMaxAge();
+    const refreshMaxAge = this.getRefreshMaxAge();
+    const accessToken = signJwt(
+      {
+        sub: session.admin.id,
+        email: session.admin.email,
+        type: "ADMIN"
+      },
+      this.getAccessSecret(),
+      accessMaxAge
+    );
+
+    await this.prisma.refreshToken.update({
+      where: {
+        id: session.refreshTokenId
+      },
+      data: {
+        expiresAt: new Date(Date.now() + refreshMaxAge * 1000)
+      }
+    });
+
+    setAuthCookies(
+      response,
+      adminAccessCookie,
+      adminRefreshCookie,
+      accessToken,
+      session.refreshToken,
+      accessMaxAge,
+      refreshMaxAge
+    );
+
+    return {
+      admin: session.admin,
+      accessToken,
+      refreshToken: session.refreshToken,
       accessTokenExpiresIn: accessMaxAge,
       refreshTokenExpiresIn: refreshMaxAge
     };
@@ -207,5 +299,13 @@ export class AdminAuthService {
     }
 
     return secret;
+  }
+
+  private getAccessMaxAge() {
+    return parseExpiresIn(process.env.JWT_ACCESS_EXPIRES_IN, defaultAccessSessionSeconds);
+  }
+
+  private getRefreshMaxAge() {
+    return parseExpiresIn(process.env.JWT_REFRESH_EXPIRES_IN, defaultPersistentSessionSeconds);
   }
 }

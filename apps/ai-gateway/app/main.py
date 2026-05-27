@@ -46,6 +46,8 @@ class Usage(BaseModel):
     inputTokens: int | None = None
     outputTokens: int | None = None
     totalTokens: int | None = None
+    inputCacheHitTokens: int | None = None
+    inputCacheMissTokens: int | None = None
 
 
 class TextGenerateRequest(BaseModel):
@@ -142,6 +144,12 @@ def generate_text(payload: TextGenerateRequest) -> TextGenerateResponse:
             inputTokens=int_value(usage.get("prompt_tokens")),
             outputTokens=int_value(usage.get("completion_tokens")),
             totalTokens=int_value(usage.get("total_tokens")),
+            inputCacheHitTokens=int_value(
+                usage.get("prompt_cache_hit_tokens", usage.get("input_cache_hit_tokens"))
+            ),
+            inputCacheMissTokens=int_value(
+                usage.get("prompt_cache_miss_tokens", usage.get("input_cache_miss_tokens"))
+            ),
         ),
         usageCredits=None,
         provider=provider_name(payload.baseUrl),
@@ -639,6 +647,8 @@ def usage_from_provider(usage: dict[str, Any]) -> Usage:
         inputTokens=int_value(input_tokens),
         outputTokens=int_value(output_tokens),
         totalTokens=int_value(total_tokens),
+        inputCacheHitTokens=int_value(usage.get("prompt_cache_hit_tokens", usage.get("input_cache_hit_tokens"))),
+        inputCacheMissTokens=int_value(usage.get("prompt_cache_miss_tokens", usage.get("input_cache_miss_tokens"))),
     )
 
 

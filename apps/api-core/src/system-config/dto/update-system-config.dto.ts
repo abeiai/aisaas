@@ -23,6 +23,11 @@ export class UpdateSystemConfigDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(30000)
+  siteMenus?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(500)
   footerText?: string;
 

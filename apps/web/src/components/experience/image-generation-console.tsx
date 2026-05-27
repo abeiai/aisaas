@@ -23,6 +23,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
+import { UserAccountMenu } from "@/components/shell/user-account-menu";
 import { Textarea } from "@/components/ui/textarea";
 import type { PublicUser } from "@/lib/auth-actions";
 import type { ExperienceImageModel } from "@/lib/experience-api";
@@ -30,6 +31,7 @@ import { cn } from "@/lib/utils";
 
 interface ImageGenerationConsoleProps {
   currentUser: PublicUser | null;
+  availableCredits?: number | null;
   models: ExperienceImageModel[];
 }
 
@@ -101,7 +103,7 @@ const ratios = [
 const modes = ["图片生成", "参考图生成", "风格延展"];
 const resolutions = ["高清 2K", "超清 4K"];
 
-export function ImageGenerationConsole({ currentUser, models }: ImageGenerationConsoleProps) {
+export function ImageGenerationConsole({ currentUser, availableCredits, models }: ImageGenerationConsoleProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [history, setHistory] = useState<ImageJob[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -449,6 +451,11 @@ export function ImageGenerationConsole({ currentUser, models }: ImageGenerationC
                 </option>
               ))}
             </Select>
+            <UserAccountMenu
+              availableCredits={availableCredits}
+              loginHref={`/login?next=${encodeURIComponent("/experience/image")}`}
+              user={currentUser}
+            />
           </div>
         </header>
 

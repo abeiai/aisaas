@@ -5,11 +5,10 @@ import { writeAdminOperationLog } from "../security/admin-operation-log.js";
 import type { HeaderRequestLike } from "../security/request-types.js";
 import { AudioService, localAudioStream } from "./audio.service.js";
 import {
-  CreateAudioPricingRuleDto,
+  CreatePlatformVoiceAssetDto,
   DeleteVoiceAssetAdminDto,
   ReviewVoiceAssetDto,
   UpdateAudioModelDto,
-  UpdateAudioPricingRuleDto,
   UpdateSystemVoiceDto
 } from "./dto/audio.dto.js";
 
@@ -25,6 +24,13 @@ export class AdminAudioController {
     await this.adminAuthService.me(request as never);
 
     return successResponse(await this.audioService.listAdminAudioModels());
+  }
+
+  @Get("models/:id/delete-check")
+  async checkModelDelete(@Req() request: unknown, @Param("id") id: string) {
+    await this.adminAuthService.me(request as never);
+
+    return successResponse(await this.audioService.checkAdminAudioModelDelete(id));
   }
 
   @Patch("models/:id")
@@ -48,16 +54,51 @@ export class AdminAudioController {
     return successResponse(model);
   }
 
+  @Delete("models/:id")
+  async deleteModel(@Req() request: unknown, @Param("id") id: string) {
+    const admin = await this.adminAuthService.me(request as never);
+    const result = await this.audioService.deleteAdminAudioModel(id);
+
+    await writeAdminOperationLog({
+      adminUserId: admin.id,
+      action: "AUDIO_MODEL_DELETE",
+      resourceType: "AI_MODEL_INSTANCE",
+      resourceId: id,
+      description: "删除语音模型",
+      request: request as HeaderRequestLike
+    });
+
+    return successResponse(result);
+  }
+
   @Get("tasks")
   async listTasks(
     @Req() request: unknown,
     @Query("user") user?: string,
     @Query("status") status?: string,
-    @Query("type") type?: string
+    @Query("type") type?: string,
+    @Query("provider") provider?: string,
+    @Query("model") model?: string,
+    @Query("startTime") startTime?: string,
+    @Query("endTime") endTime?: string,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string
   ) {
     await this.adminAuthService.me(request as never);
 
-    return successResponse(await this.audioService.listAdminTasks({ user, status, type }));
+    return successResponse(
+      await this.audioService.listAdminTasks({
+        user,
+        status,
+        type,
+        provider,
+        model,
+        startTime,
+        endTime,
+        page,
+        pageSize
+      })
+    );
   }
 
   @Get("tasks/:id")
@@ -79,6 +120,23 @@ export class AdminAudioController {
     await this.adminAuthService.me(request as never);
 
     return successResponse(await this.audioService.listAdminVoiceAssets());
+  }
+
+  @Post("voices/platform")
+  async createPlatformVoice(@Req() request: unknown, @Body() dto: CreatePlatformVoiceAssetDto) {
+    const admin = await this.adminAuthService.me(request as never);
+    const voice = await this.audioService.createPlatformVoiceAsset(dto, admin.id);
+
+    await writeAdminOperationLog({
+      adminUserId: admin.id,
+      action: "AUDIO_PLATFORM_VOICE_CREATE",
+      resourceType: "VOICE_ASSET",
+      resourceId: voice.id,
+      description: `新增平台音色：${voice.name}`,
+      request: request as HeaderRequestLike
+    });
+
+    return successResponse(voice);
   }
 
   @Get("system-voices")
@@ -181,51 +239,6 @@ export class AdminAudioController {
     });
 
     return successResponse(result);
-  }
-
-  @Get("pricing-rules")
-  async listPricingRules(@Req() request: unknown) {
-    await this.adminAuthService.me(request as never);
-
-    return successResponse(await this.audioService.listPricingRules());
-  }
-
-  @Post("pricing-rules")
-  async createPricingRule(@Req() request: unknown, @Body() dto: CreateAudioPricingRuleDto) {
-    const admin = await this.adminAuthService.me(request as never);
-    const rule = await this.audioService.createPricingRule(dto);
-
-    await writeAdminOperationLog({
-      adminUserId: admin.id,
-      action: "AUDIO_PRICING_RULE_CREATE",
-      resourceType: "AUDIO_PRICING_RULE",
-      resourceId: rule.id,
-      description: `创建或覆盖语音计费规则：${rule.operationTypeName} / ${rule.model}`,
-      request: request as HeaderRequestLike
-    });
-
-    return successResponse(rule);
-  }
-
-  @Patch("pricing-rules/:id")
-  async updatePricingRule(
-    @Req() request: unknown,
-    @Param("id") id: string,
-    @Body() dto: UpdateAudioPricingRuleDto
-  ) {
-    const admin = await this.adminAuthService.me(request as never);
-    const rule = await this.audioService.updatePricingRule(id, dto);
-
-    await writeAdminOperationLog({
-      adminUserId: admin.id,
-      action: "AUDIO_PRICING_RULE_UPDATE",
-      resourceType: "AUDIO_PRICING_RULE",
-      resourceId: id,
-      description: `更新语音计费规则：${rule.operationTypeName} / ${rule.model}`,
-      request: request as HeaderRequestLike
-    });
-
-    return successResponse(rule);
   }
 
   @Get("usage")

@@ -2,6 +2,7 @@ import { HttpStatus } from "@nestjs/common";
 import { decryptSecret } from "@aisaas/database";
 import { AppException } from "../common/app-exception.js";
 import { calculateUsageCredits, type TokenUsage } from "./ai-cost.js";
+import type { AiModelPricingConfig, AiModelPricingUnit } from "./model-pricing.js";
 
 export type ProviderAdapterType =
   | "OPENAI_COMPATIBLE"
@@ -101,6 +102,8 @@ export interface ProviderUsageInput {
   usage?: TokenUsage | null;
   inputPrice: number;
   outputPrice: number;
+  pricingUnit?: AiModelPricingUnit | string | null;
+  pricingConfig?: AiModelPricingConfig;
   fallbackCredits: number;
   maxCredits: number;
   minCredits?: number;
@@ -115,6 +118,8 @@ interface AiGatewayResponse {
     inputTokens?: unknown;
     outputTokens?: unknown;
     totalTokens?: unknown;
+    inputCacheHitTokens?: unknown;
+    inputCacheMissTokens?: unknown;
   };
   usageCredits?: unknown;
   provider?: unknown;
@@ -152,10 +157,11 @@ class OpenAiCompatibleProviderAdapter implements ProviderAdapter {
     const timeout = setTimeout(() => controller.abort(), input.timeoutMs);
 
     try {
+      const apiKey = decryptProviderApiKey(input.apiKeyEncrypted);
       const response = await fetch(`${normalizeBaseUrl(input.baseUrl)}/chat/completions`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${decryptSecret(input.apiKeyEncrypted)}`,
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
@@ -186,7 +192,12 @@ class OpenAiCompatibleProviderAdapter implements ProviderAdapter {
     } catch (error) {
       return {
         success: false,
-        message: error instanceof Error && error.name === "AbortError" ? "连接超时" : "Base URL 无法访问"
+        message:
+          error instanceof ProviderAdapterException
+            ? error.message
+            : error instanceof Error && error.name === "AbortError"
+              ? "连接超时"
+              : "Base URL 无法访问"
       };
     } finally {
       clearTimeout(timeout);
@@ -199,6 +210,7 @@ class OpenAiCompatibleProviderAdapter implements ProviderAdapter {
     const startedAt = Date.now();
 
     try {
+      const apiKey = decryptProviderApiKey(input.apiKeyEncrypted);
       const response = await fetch(`${input.gatewayBaseUrl}/v1/text/generate`, {
         method: "POST",
         headers: {
@@ -207,7 +219,7 @@ class OpenAiCompatibleProviderAdapter implements ProviderAdapter {
         body: JSON.stringify({
           scenarioSlug: input.scenarioSlug,
           baseUrl: input.baseUrl,
-          apiKey: decryptSecret(input.apiKeyEncrypted),
+          apiKey,
           modelName: input.modelName,
           prompt: input.prompt,
           messages: [
@@ -270,6 +282,7 @@ class OpenAiCompatibleProviderAdapter implements ProviderAdapter {
   async streamText(input: ProviderStreamInput): Promise<ProviderTextResult> {
     const startedAt = Date.now();
     try {
+      const apiKey = decryptProviderApiKey(input.apiKeyEncrypted);
       const response = await fetch(`${input.gatewayBaseUrl}/v1/text/stream`, {
         method: "POST",
         headers: {
@@ -279,7 +292,7 @@ class OpenAiCompatibleProviderAdapter implements ProviderAdapter {
         body: JSON.stringify({
           scenarioSlug: input.scenarioSlug,
           baseUrl: input.baseUrl,
-          apiKey: decryptSecret(input.apiKeyEncrypted),
+          apiKey,
           modelName: input.modelName,
           prompt: input.prompt,
           messages: [
@@ -455,6 +468,7 @@ class DashScopeAudioProviderAdapter extends ReservedProviderAdapter {
     const timeout = setTimeout(() => controller.abort(), input.timeoutMs);
 
     try {
+      const apiKey = decryptProviderApiKey(input.apiKeyEncrypted);
       const response = await fetch(`${normalizeBaseUrl(input.gatewayBaseUrl ?? "http://localhost:7343")}/audio/providers/dashscope/test`, {
         method: "POST",
         headers: {
@@ -463,7 +477,7 @@ class DashScopeAudioProviderAdapter extends ReservedProviderAdapter {
         body: JSON.stringify({
           baseUrl: input.baseUrl,
           webSocketUrl: input.webSocketUrl,
-          apiKey: decryptSecret(input.apiKeyEncrypted),
+          apiKey,
           region: input.region,
           model: input.modelName,
           timeoutMs: input.timeoutMs
@@ -492,7 +506,12 @@ class DashScopeAudioProviderAdapter extends ReservedProviderAdapter {
     } catch (error) {
       return {
         success: false,
-        message: error instanceof Error && error.name === "AbortError" ? "连接超时" : "AI Gateway 语音接口无法访问"
+        message:
+          error instanceof ProviderAdapterException
+            ? error.message
+            : error instanceof Error && error.name === "AbortError"
+              ? "连接超时"
+              : "AI Gateway 语音接口无法访问"
       };
     } finally {
       clearTimeout(timeout);
@@ -506,6 +525,17 @@ export class ProviderAdapterException extends Error {
     message: string
   ) {
     super(message);
+  }
+}
+
+function decryptProviderApiKey(apiKeyEncrypted: string) {
+  try {
+    return decryptSecret(apiKeyEncrypted);
+  } catch {
+    throw new ProviderAdapterException(
+      "PROVIDER_CREDENTIAL_DECRYPT_FAILED",
+      "Provider API Key 无法解密，请恢复原 SECRET_ENCRYPTION_KEY，或在后台重新保存该 Provider 的 API Key。"
+    );
   }
 }
 
@@ -553,7 +583,9 @@ function usageFromGateway(payload: AiGatewayResponse | null): TokenUsage | undef
   return {
     inputTokens: integerValue(payload.usage.inputTokens),
     outputTokens: integerValue(payload.usage.outputTokens),
-    totalTokens: integerValue(payload.usage.totalTokens)
+    totalTokens: integerValue(payload.usage.totalTokens),
+    inputCacheHitTokens: integerValue(payload.usage.inputCacheHitTokens),
+    inputCacheMissTokens: integerValue(payload.usage.inputCacheMissTokens)
   };
 }
 

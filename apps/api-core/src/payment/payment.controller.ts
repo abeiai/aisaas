@@ -29,6 +29,11 @@ export class PaymentController {
     return successResponse(await this.paymentService.listAvailableProducts(user.id));
   }
 
+  @Get("recharge-products")
+  async listRechargeProducts() {
+    return successResponse(await this.paymentService.listRechargeProducts());
+  }
+
   @Get("orders/:id")
   async getOrder(@Req() request: unknown, @Param("id") id: string) {
     const user = await this.authService.me(request as never);

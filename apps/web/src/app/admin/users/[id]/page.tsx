@@ -159,23 +159,26 @@ export default async function AdminUserDetailPage({ params }: PageProps) {
 
         <SimpleTable
           title="充值记录"
-          description="展示最近支付订单和入账情况。"
-          headers={["订单号", "渠道", "金额", "点数", "状态", "支付时间"]}
+          description="展示支付充值和管理员充值入账流水。"
+          headers={["时间", "来源", "点数", "余额", "备注"]}
           empty="暂无充值记录。"
-          colSpan={6}
+          colSpan={5}
         >
-          {detail.paymentOrders.map((order) => (
-            <TableRow key={order.id}>
+          {detail.rechargeRecords.map((entry) => (
+            <TableRow key={entry.id}>
+              <TableCell>{formatDate(entry.createdAt)}</TableCell>
               <TableCell className="font-mono text-xs">
-                <Link className="font-medium underline-offset-4 hover:underline" href={`/admin/payments/${order.id}`}>
-                  {order.orderNo}
-                </Link>
+                {entry.relatedOrder ? (
+                  <Link className="font-medium underline-offset-4 hover:underline" href={`/admin/payments/${entry.relatedOrder.id}`}>
+                    {entry.relatedOrder.orderNo}
+                  </Link>
+                ) : (
+                  "管理员充值"
+                )}
               </TableCell>
-              <TableCell>{order.providerName}</TableCell>
-              <TableCell>¥{order.amountCny}</TableCell>
-              <TableCell>{order.credits.toLocaleString("zh-CN")} 点</TableCell>
-              <TableCell>{order.statusName}</TableCell>
-              <TableCell>{formatDate(order.paidAt)}</TableCell>
+              <TableCell>{amountText(entry.amount)}</TableCell>
+              <TableCell>{entry.balanceAfter.toLocaleString("zh-CN")} 点</TableCell>
+              <TableCell className="max-w-sm text-muted-foreground">{entry.note ?? "无"}</TableCell>
             </TableRow>
           ))}
         </SimpleTable>

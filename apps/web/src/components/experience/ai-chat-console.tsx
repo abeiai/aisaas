@@ -28,6 +28,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { MarkdownContent } from "@/components/markdown/markdown-content";
 import { Select } from "@/components/ui/select";
+import { UserAccountMenu } from "@/components/shell/user-account-menu";
 import { Textarea } from "@/components/ui/textarea";
 import type { PublicUser } from "@/lib/auth-actions";
 import type { ExperienceChatModel } from "@/lib/experience-api";
@@ -63,11 +64,13 @@ interface ChatTokenUsage {
   inputTokens: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
+  consumedCredits?: number | null;
   modelName?: string | null;
 }
 
 interface AiChatConsoleProps {
   currentUser: PublicUser | null;
+  availableCredits?: number | null;
   models: ExperienceChatModel[];
 }
 
@@ -87,6 +90,7 @@ interface StreamChatEvent {
     inputTokens?: number | null;
     outputTokens?: number | null;
     totalTokens?: number | null;
+    actualCredits?: number | null;
   };
 }
 
@@ -124,13 +128,14 @@ const attachmentCapabilityTags = ["VISION", "MULTIMODAL", "IMAGE", "IMAGE_INPUT"
 const reasoningCapabilityTags = ["REASONING"];
 const searchCapabilityTags = ["SEARCH", "WEB_SEARCH", "BROWSING", "TOOLS"];
 
-export function AiChatConsole({ currentUser, models }: AiChatConsoleProps) {
+export function AiChatConsole({ currentUser, availableCredits, models }: AiChatConsoleProps) {
   const normalizedModels = useMemo(() => (models.length > 0 ? models : []), [models]);
   const [selectedModelId, setSelectedModelId] = useState(normalizedModels[0]?.id ?? "mock");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState("选择模型后输入问题，即可开始体验。");
   const [isPending, setIsPending] = useState(false);
+  const [accountCredits, setAccountCredits] = useState(availableCredits ?? null);
   const [pendingAttachments, setPendingAttachments] = useState<PendingChatAttachment[]>([]);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const [reasoningEnabled, setReasoningEnabled] = useState(false);
@@ -170,6 +175,10 @@ export function AiChatConsole({ currentUser, models }: AiChatConsoleProps) {
   useEffect(() => {
     pendingAttachmentsRef.current = pendingAttachments;
   }, [pendingAttachments]);
+
+  useEffect(() => {
+    setAccountCredits(availableCredits ?? null);
+  }, [availableCredits]);
 
   useEffect(() => {
     resizeComposerTextarea();
@@ -661,12 +670,20 @@ export function AiChatConsole({ currentUser, models }: AiChatConsoleProps) {
           }
 
           if (eventData.type === "done") {
+            const consumedCredits = normalizedTokenCount(eventData.task?.actualCredits);
+
             setLastAssistantUsage({
               inputTokens: normalizedTokenCount(eventData.task?.inputTokens),
               outputTokens: normalizedTokenCount(eventData.task?.outputTokens),
               totalTokens: normalizedTokenCount(eventData.task?.totalTokens),
+              consumedCredits,
               modelName: eventData.task?.modelName ?? null
             });
+            if (typeof consumedCredits === "number") {
+              setAccountCredits((current) =>
+                typeof current === "number" ? Math.max(0, current - consumedCredits) : current
+              );
+            }
             setStatus(eventData.task?.statusName ?? "对话完成");
             return {
               ok: true
@@ -871,16 +888,23 @@ export function AiChatConsole({ currentUser, models }: AiChatConsoleProps) {
             </div>
             <p className="text-sm text-muted-foreground">体验区 · 基础 Chat 能力</p>
           </div>
-          <label className="flex min-w-0 flex-col gap-1 text-sm md:w-80">
-            <span className="text-xs font-medium text-muted-foreground">选择模型</span>
-            <Select value={selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)}>
-              {normalizedModels.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.displayName} · {model.providerName}
-                </option>
-              ))}
-            </Select>
-          </label>
+          <div className="flex min-w-0 items-end gap-3">
+            <label className="flex min-w-0 flex-col gap-1 text-sm md:w-80">
+              <span className="text-xs font-medium text-muted-foreground">选择模型</span>
+              <Select value={selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)}>
+                {normalizedModels.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.displayName} · {model.providerName}
+                  </option>
+                ))}
+              </Select>
+            </label>
+            <UserAccountMenu
+              availableCredits={accountCredits}
+              loginHref="/login?next=/experience/chat"
+              user={currentUser}
+            />
+          </div>
         </header>
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -974,6 +998,9 @@ export function AiChatConsole({ currentUser, models }: AiChatConsoleProps) {
                             <span>Output tokens：{formatTokenCount(message.usage.outputTokens)}</span>
                             <span>Total：{formatTokenCount(message.usage.totalTokens)}</span>
                             {message.usage.modelName ? <span>模型：{message.usage.modelName}</span> : null}
+                            {typeof message.usage.consumedCredits === "number" ? (
+                              <span>消耗点数：{formatCreditCount(message.usage.consumedCredits)}</span>
+                            ) : null}
                           </div>
                           <Button
                             aria-label="复制 Markdown 回复"
@@ -1356,6 +1383,10 @@ function formatTokenCount(value: number | null) {
   return typeof value === "number" ? value.toLocaleString("zh-CN") : "0";
 }
 
+function formatCreditCount(value: number | null | undefined) {
+  return typeof value === "number" ? value.toLocaleString("zh-CN") : "0";
+}
+
 async function copyTextToClipboard(value: string) {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(value);
@@ -1544,6 +1575,7 @@ function normalizeChatTokenUsage(value: unknown): ChatTokenUsage | null {
     inputTokens: normalizedTokenCount(record.inputTokens),
     outputTokens: normalizedTokenCount(record.outputTokens),
     totalTokens: normalizedTokenCount(record.totalTokens),
+    consumedCredits: normalizedTokenCount(record.consumedCredits),
     modelName: typeof record.modelName === "string" ? record.modelName : null
   };
 }

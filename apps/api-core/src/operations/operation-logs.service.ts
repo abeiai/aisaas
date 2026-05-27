@@ -131,10 +131,14 @@ export class OperationLogsService {
       ARCHIVE_PAGE: "归档单页",
       SYNC_PAYMENT_ORDER: "同步支付订单",
       SUPPLEMENT_PAYMENT_ORDER: "手动补单",
+      CREATE_BILLING_PRODUCT: "创建充值产品",
+      UPDATE_BILLING_PRODUCT: "更新充值产品",
+      DELETE_BILLING_PRODUCT: "删除充值产品",
       CREATE_AI_PROVIDER: "创建 AI Provider",
       UPDATE_AI_PROVIDER: "更新 AI Provider",
       UPDATE_USER_STATUS: "更新用户状态",
       ADMIN_ADJUST_CREDITS: "管理员调整点数",
+      ADMIN_RECHARGE_CREDITS: "管理员充值点数",
       UPDATE_SYSTEM_CONFIG: "更新系统设置"
     };
 

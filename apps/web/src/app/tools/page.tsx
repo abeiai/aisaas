@@ -69,12 +69,12 @@ export default async function ToolsPage({
 
   return (
     <PublicShell>
-      <section className="mx-auto flex max-w-6xl flex-col gap-10 px-5 py-16">
+      <section className="flex w-full flex-col gap-10 px-5 py-16">
         <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
-          <div className="flex max-w-3xl flex-col gap-5">
+          <div className="flex w-full flex-col gap-5">
             <Badge>AI 工具</Badge>
             <h1 className="font-display text-5xl font-light leading-tight tracking-normal md:text-6xl">
-              选择一个中文 AI 工作流
+              选择一个中文 AI 工具
             </h1>
             <p className="text-base leading-7 text-muted-foreground">
               每个工具都会展示用途、预估点数和输入要求。未登录用户可先查看详情，提交时会引导登录。

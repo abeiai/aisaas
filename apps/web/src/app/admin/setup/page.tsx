@@ -68,7 +68,7 @@ function setupMessage(searchParams: Record<string, string | undefined>) {
   }
 
   if (searchParams.alias) {
-    return "默认模型别名已更新。";
+    return "默认模型已更新。";
   }
 
   if (searchParams.tools) {

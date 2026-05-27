@@ -19,7 +19,7 @@ export default async function LoginPage({
   return (
     <AuthPanel
       title="用户登录"
-      description="使用邮箱和密码进入用户中心，继续创建 AI 任务或充值点数。"
+      description="使用邮箱密码或手机验证码进入用户中心，继续创建 AI 任务或充值点数。"
       footer={{
         label: "还没有账号？",
         href: registerHref,

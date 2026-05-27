@@ -89,14 +89,14 @@ export default async function HomePage() {
 
   return (
     <PublicShell>
-      <section className="mx-auto grid max-w-6xl gap-12 px-5 py-20 md:grid-cols-[1.05fr_0.95fr] md:py-24">
+      <section className="grid w-full gap-12 px-5 py-20 md:grid-cols-[1.05fr_0.95fr] md:py-24">
         <div className="flex flex-col justify-center gap-8">
           <Badge>{siteName} · 运营首页</Badge>
           <div className="flex flex-col gap-6">
-            <h1 className="max-w-4xl font-display text-5xl font-light leading-tight tracking-normal md:text-6xl">
+            <h1 className="font-display text-5xl font-light leading-tight tracking-normal md:text-6xl">
               {homeTitle}
             </h1>
-            <p className="max-w-2xl text-base leading-7 text-muted-foreground">
+            <p className="text-base leading-7 text-muted-foreground">
               {homeDescription}
             </p>
           </div>
@@ -149,7 +149,7 @@ export default async function HomePage() {
       </section>
 
       <section className="border-y border-border bg-card">
-        <div className="mx-auto grid max-w-6xl gap-8 px-5 py-20 md:grid-cols-[0.8fr_1.2fr]">
+        <div className="grid w-full gap-8 px-5 py-20 md:grid-cols-[0.8fr_1.2fr]">
           <div className="flex flex-col gap-4">
             <p className="text-sm font-semibold text-muted-foreground">产品介绍</p>
             <h2 className="font-display text-4xl font-light leading-tight tracking-normal">
@@ -172,7 +172,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="mx-auto grid max-w-6xl gap-8 px-5 py-20 lg:grid-cols-[0.85fr_1.15fr]">
+      <section className="grid w-full gap-8 px-5 py-20 lg:grid-cols-[0.85fr_1.15fr]">
         <div className="flex flex-col gap-4">
           <p className="text-sm font-semibold text-muted-foreground">新用户路径</p>
           <h2 className="font-display text-4xl font-light leading-tight tracking-normal">
@@ -202,9 +202,9 @@ export default async function HomePage() {
       </section>
 
       <section className="border-y border-border bg-card">
-        <div className="mx-auto flex max-w-6xl flex-col gap-8 px-5 py-20">
+        <div className="flex w-full flex-col gap-8 px-5 py-20">
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-            <div className="flex max-w-2xl flex-col gap-3">
+            <div className="flex w-full flex-col gap-3">
               <p className="text-sm font-semibold text-muted-foreground">AI 工具</p>
               <h2 className="font-display text-4xl font-light leading-tight tracking-normal">
                 把首页流量导向可用工具
@@ -242,9 +242,9 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="mx-auto flex max-w-6xl flex-col gap-8 px-5 py-20">
+      <section className="flex w-full flex-col gap-8 px-5 py-20">
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div className="flex max-w-2xl flex-col gap-3">
+          <div className="flex w-full flex-col gap-3">
             <p className="text-sm font-semibold text-muted-foreground">最新文章</p>
             <h2 className="font-display text-4xl font-light leading-tight tracking-normal">
               内容入口已经就绪
@@ -302,8 +302,8 @@ export default async function HomePage() {
       </section>
 
       <section className="border-t border-border bg-card">
-        <div className="mx-auto flex max-w-6xl flex-col gap-6 px-5 py-16 md:flex-row md:items-center md:justify-between">
-          <div className="flex max-w-2xl flex-col gap-3">
+        <div className="flex w-full flex-col gap-6 px-5 py-16 md:flex-row md:items-center md:justify-between">
+          <div className="flex w-full flex-col gap-3">
             <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
               <Newspaper />
               登录 / 注册入口
