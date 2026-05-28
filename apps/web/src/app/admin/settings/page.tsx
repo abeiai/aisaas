@@ -1,57 +1,15 @@
 import { AdminShell } from "@/components/shell/admin-shell";
-import { AdminTableSection } from "@/components/shell/admin-table-section";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { TableCell, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { getAdminSystemConfigs, updateSystemConfigAction } from "@/lib/settings-api";
 
 export const dynamic = "force-dynamic";
 
-const aiConfigKeys = new Set([
-  "defaultAiModel",
-  "aiSaveFullContent",
-  "audioVoiceCloneReviewRequired",
-  "audioVoiceDesignReviewRequired",
-  "audioUserPublicVoiceEnabled",
-  "audioCloneDefaultVisibility",
-  "audioDesignDefaultVisibility",
-  "audioSafetyNotice",
-  "audioCloneConsentText",
-  "audioDownloadNotice"
-]);
-const paymentConfigKeys = new Set([
-  "paymentAlipayEnabled",
-  "paymentAlipayAppId",
-  "paymentAlipayEnvironment",
-  "paymentAlipayPrivateKeyEncrypted",
-  "paymentAlipayPublicKeyEncrypted",
-  "paymentAlipayNotifyUrl",
-  "paymentAlipayReturnUrl",
-  "paymentAlipayPageEnabled",
-  "paymentAlipayWapEnabled",
-  "paymentWechatEnabled",
-  "paymentWechatAppId",
-  "paymentWechatMerchantId",
-  "paymentWechatApiV3KeyEncrypted",
-  "paymentWechatMerchantPrivateKeyEncrypted",
-  "paymentWechatMerchantSerialNo",
-  "paymentWechatNotifyUrl",
-  "paymentWechatPublicKeyEncrypted",
-  "paymentWechatPublicKeyId",
-  "paymentWechatAppSecretEncrypted",
-  "paymentWechatJsapiOauthCallbackUrl",
-  "paymentWechatNativeEnabled",
-  "paymentWechatH5Enabled",
-  "paymentWechatJsapiEnabled"
-]);
-
 export default async function AdminSettingsPage() {
   const settings = await getAdminSystemConfigs();
-  const systemSettings = settings.filter((setting) => !aiConfigKeys.has(setting.key) && !paymentConfigKeys.has(setting.key));
   const configByKey = new Map(settings.map((setting) => [setting.key, setting.value]));
 
   return (
@@ -97,97 +55,6 @@ export default async function AdminSettingsPage() {
                     required
                   />
                   <FieldDescription>前台按钮、链接和强调元素使用的主色。</FieldDescription>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="public-nav-items">前台导航菜单</FieldLabel>
-                  <Textarea
-                    id="public-nav-items"
-                    name="publicNavItems"
-                    defaultValue={
-                      configByKey.get("publicNavItems") ??
-                      "首页|/\n功能|/features\n场景|/use-cases\n工具|/tools\n价格|/pricing\n文章|/articles\n用户中心|/dashboard"
-                    }
-                    required
-                  />
-                  <FieldDescription>每行一个菜单，格式为 名称|站内路径。</FieldDescription>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="footer-text">Footer 文案</FieldLabel>
-                  <Textarea
-                    id="footer-text"
-                    name="footerText"
-                    defaultValue={
-                      configByKey.get("footerText") ??
-                      "面向中国市场的简体中文 AI SaaS / 内容型工具站底座。"
-                    }
-                    required
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="home-title">首页标题</FieldLabel>
-                  <Input
-                    id="home-title"
-                    name="homeTitle"
-                    defaultValue={
-                      configByKey.get("homeTitle") ?? "面向内容型 AI SaaS 的第一批可运营页面"
-                    }
-                    required
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="home-description">首页描述</FieldLabel>
-                  <Textarea
-                    id="home-description"
-                    name="homeDescription"
-                    defaultValue={
-                      configByKey.get("homeDescription") ??
-                      "首页、文章、单页、用户中心和管理后台已经连成可访问的中文界面。"
-                    }
-                    required
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="home-cta-text">首页 CTA 文案</FieldLabel>
-                  <Input
-                    id="home-cta-text"
-                    name="homeCtaText"
-                    defaultValue={configByKey.get("homeCtaText") ?? "免费注册"}
-                    required
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="home-cta-href">首页 CTA 链接</FieldLabel>
-                  <Input
-                    id="home-cta-href"
-                    name="homeCtaHref"
-                    defaultValue={configByKey.get("homeCtaHref") ?? "/register"}
-                    required
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="home-feature-highlights">首页亮点</FieldLabel>
-                  <Textarea
-                    id="home-feature-highlights"
-                    name="homeFeatureHighlights"
-                    defaultValue={
-                      configByKey.get("homeFeatureHighlights") ??
-                      "可访问路由\n中文界面\n真实 CMS\n后台管理\n登录闭环"
-                    }
-                    required
-                  />
-                  <FieldDescription>每行一个亮点，首页会展示为标签。</FieldDescription>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="home-latest-article-count">首页最新文章数量</FieldLabel>
-                  <Input
-                    id="home-latest-article-count"
-                    name="homeLatestArticleCount"
-                    type="number"
-                    min="1"
-                    max="12"
-                    defaultValue={configByKey.get("homeLatestArticleCount") ?? "3"}
-                    required
-                  />
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="site-url">前台地址</FieldLabel>
@@ -324,25 +191,6 @@ export default async function AdminSettingsPage() {
             </form>
           </CardContent>
         </Card>
-
-        <AdminTableSection
-          title="配置项列表"
-          description="配置项数据来自真实系统配置 API。"
-          headers={["配置项", "当前值", "可公开", "更新时间"]}
-        >
-          {systemSettings.map((setting) => (
-            <TableRow key={setting.key}>
-              <TableCell className="font-medium">{setting.label}</TableCell>
-              <TableCell className="font-mono text-muted-foreground">{setting.value}</TableCell>
-              <TableCell>
-                <Badge variant={setting.isPublic ? "secondary" : "muted"}>
-                  {setting.isPublic ? "公开" : "后台"}
-                </Badge>
-              </TableCell>
-              <TableCell>{new Date(setting.updatedAt).toLocaleDateString("zh-CN")}</TableCell>
-            </TableRow>
-          ))}
-        </AdminTableSection>
       </div>
     </AdminShell>
   );

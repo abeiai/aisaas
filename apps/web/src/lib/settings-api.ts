@@ -89,14 +89,6 @@ export async function updateSystemConfigAction(formData: FormData) {
       siteName: text(formData, "siteName"),
       siteLogo: text(formData, "siteLogo"),
       themePrimaryColor: text(formData, "themePrimaryColor"),
-      publicNavItems: text(formData, "publicNavItems"),
-      footerText: text(formData, "footerText"),
-      homeTitle: text(formData, "homeTitle"),
-      homeDescription: text(formData, "homeDescription"),
-      homeCtaText: text(formData, "homeCtaText"),
-      homeCtaHref: text(formData, "homeCtaHref"),
-      homeFeatureHighlights: text(formData, "homeFeatureHighlights"),
-      homeLatestArticleCount: text(formData, "homeLatestArticleCount"),
       seoTitle: text(formData, "seoTitle"),
       seoDescription: text(formData, "seoDescription"),
       beianNo: text(formData, "beianNo"),
@@ -141,7 +133,6 @@ export async function updateAiConfigAction(formData: FormData) {
   await apiFetch<SystemConfig[]>("/system-config", {
     method: "PATCH",
     body: JSON.stringify({
-      defaultAiModel: text(formData, "defaultAiModel"),
       aiSaveFullContent: text(formData, "aiSaveFullContent"),
       audioVoiceCloneReviewRequired: text(formData, "audioVoiceCloneReviewRequired"),
       audioVoiceDesignReviewRequired: text(formData, "audioVoiceDesignReviewRequired"),

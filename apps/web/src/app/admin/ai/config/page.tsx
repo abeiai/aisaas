@@ -5,7 +5,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { getAdminAiModelAliases, updateAiModelAliasAction, type AiModelAliasPayload } from "@/lib/ai-admin-api";
@@ -35,16 +34,6 @@ export default async function AdminAiConfigPage() {
           <CardContent>
             <form action={updateAiConfigAction} className="grid gap-6 xl:grid-cols-2">
               <FieldGroup>
-                <Field>
-                  <FieldLabel htmlFor="default-ai-model">默认 AI 模型</FieldLabel>
-                  <Input
-                    id="default-ai-model"
-                    name="defaultAiModel"
-                    defaultValue={configByKey.get("defaultAiModel") ?? "本地 mock"}
-                    required
-                  />
-                  <FieldDescription>后台运营识别使用的默认 AI 模型名称。</FieldDescription>
-                </Field>
                 <Field>
                   <FieldLabel htmlFor="ai-save-full-content">AI 完整内容保存</FieldLabel>
                   <Select
@@ -266,6 +255,7 @@ function DefaultModelsSection({ payload }: { payload: AiModelAliasPayload }) {
                   <FieldLabel htmlFor={`${alias.aliasKey}-model`}>选择默认模型</FieldLabel>
                   <Select
                     id={`${alias.aliasKey}-model`}
+                    key={`${alias.aliasKey}-${alias.modelInstanceId ?? "empty"}`}
                     name="modelInstanceId"
                     defaultValue={alias.modelInstanceId ?? ""}
                   >

@@ -5,6 +5,7 @@ import { writeAdminOperationLog } from "../security/admin-operation-log.js";
 import type { HeaderRequestLike } from "../security/request-types.js";
 import { AiService } from "./ai.service.js";
 import {
+  CreateAiProviderPresetDto,
   UpdateAiModelInstanceDto,
   UpdateAiProviderInstanceDto
 } from "./dto/advanced-ai.dto.js";
@@ -21,6 +22,23 @@ export class AdminAiProviderPresetController {
     await this.adminAuthService.me(request as never);
 
     return successResponse(await this.aiService.listProviderPresets());
+  }
+
+  @Post()
+  async create(@Req() request: unknown, @Body() dto: CreateAiProviderPresetDto) {
+    const admin = await this.adminAuthService.me(request as never);
+    const provider = await this.aiService.createProviderPreset(dto);
+
+    await writeAdminOperationLog({
+      adminUserId: admin.id,
+      action: "CREATE_AI_PROVIDER_PRESET",
+      resourceType: "AI_PROVIDER_PRESET",
+      resourceId: provider.id,
+      description: `新增 AI 厂商：${provider.displayName}`,
+      request: request as HeaderRequestLike
+    });
+
+    return successResponse(provider);
   }
 
   @Get(":id")
@@ -49,6 +67,23 @@ export class AdminAiProviderPresetController {
     });
 
     return successResponse(provider);
+  }
+
+  @Delete(":id")
+  async deleteProvider(@Req() request: unknown, @Param("id") id: string) {
+    const admin = await this.adminAuthService.me(request as never);
+    const result = await this.aiService.deleteProviderPreset(id);
+
+    await writeAdminOperationLog({
+      adminUserId: admin.id,
+      action: "DELETE_AI_PROVIDER_PRESET",
+      resourceType: "AI_PROVIDER_PRESET",
+      resourceId: id,
+      description: "删除 AI 厂商",
+      request: request as HeaderRequestLike
+    });
+
+    return successResponse(result);
   }
 
   @Post(":id/test")
@@ -95,6 +130,27 @@ export class AdminAiProviderPresetController {
     });
 
     return successResponse(provider);
+  }
+
+  @Post(":id/model-instances")
+  async createModelInstance(
+    @Req() request: unknown,
+    @Param("id") id: string,
+    @Body() dto: UpdateAiModelInstanceDto
+  ) {
+    const admin = await this.adminAuthService.me(request as never);
+    const model = await this.aiService.createModelInstance(id, dto);
+
+    await writeAdminOperationLog({
+      adminUserId: admin.id,
+      action: "CREATE_AI_MODEL_INSTANCE",
+      resourceType: "AI_MODEL_INSTANCE",
+      resourceId: model.id,
+      description: `新增 AI 模型实例：${model.displayName}`,
+      request: request as HeaderRequestLike
+    });
+
+    return successResponse(model);
   }
 
   @Patch("model-instances/:modelInstanceId")

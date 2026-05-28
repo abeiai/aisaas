@@ -412,6 +412,30 @@ export async function getAdminAiProviderPreset(id: string) {
   return apiFetch<AiProviderPreset>(`/admin/ai/providers/${id}`);
 }
 
+export async function createAiProviderPresetAction(formData: FormData) {
+  await apiFetch<AiProviderPreset>("/admin/ai/providers", {
+    method: "POST",
+    body: JSON.stringify({
+      providerKey: text(formData, "providerKey"),
+      displayName: text(formData, "displayName"),
+      adapterType: text(formData, "adapterType") || "CUSTOM_OPENAI_COMPATIBLE",
+      modality: text(formData, "modality") || "TEXT",
+      defaultBaseUrl: text(formData, "defaultBaseUrl"),
+      defaultWebSocketUrl: text(formData, "defaultWebSocketUrl"),
+      apiKeyEnvName: text(formData, "apiKeyEnvName"),
+      docsUrl: text(formData, "docsUrl"),
+      name: text(formData, "name") || text(formData, "displayName"),
+      baseUrl: text(formData, "baseUrl") || text(formData, "defaultBaseUrl"),
+      webSocketUrl: text(formData, "webSocketUrl") || text(formData, "defaultWebSocketUrl"),
+      region: text(formData, "region"),
+      apiKey: text(formData, "apiKey"),
+      status: checked(formData, "isEnabled") ? "ENABLED" : "DISABLED"
+    })
+  });
+
+  revalidatePath("/admin/ai/providers");
+}
+
 export async function getAdminAiModelAliases() {
   return apiFetch<AiModelAliasPayload>("/admin/ai/model-aliases");
 }
@@ -538,6 +562,17 @@ export async function updateAiProviderPresetAction(formData: FormData) {
   revalidatePath("/admin/audio/models");
 }
 
+export async function deleteAiProviderPresetAction(providerId: string) {
+  await apiFetch<{ deleted: boolean; providerPresetId: string }>(`/admin/ai/providers/${providerId}`, {
+    method: "DELETE",
+    body: JSON.stringify({})
+  });
+
+  revalidatePath("/admin/ai/providers");
+  revalidatePath("/admin/ai/config");
+  revalidatePath("/admin/audio/models");
+}
+
 export async function testAiProviderPresetAction(formData: FormData) {
   const id = text(formData, "id");
   await apiFetch<AiProviderPreset>(`/admin/ai/providers/${id}`, {
@@ -578,6 +613,32 @@ export async function enableAiModelPresetAction(formData: FormData) {
       region: text(formData, "region"),
       apiKey: text(formData, "apiKey"),
       clearApiKey: checked(formData, "clearApiKey"),
+      capabilityTags: text(formData, "capabilityTags").split(",").map((item) => item.trim()).filter(Boolean),
+      inputPrice: numberText(formData, "inputPrice"),
+      outputPrice: numberText(formData, "outputPrice"),
+      pricingMode: text(formData, "pricingMode"),
+      pricingUnit: text(formData, "pricingUnit"),
+      pricingConfig: jsonText(formData, "pricingConfig"),
+      isEnabled: checked(formData, "isEnabled")
+    })
+  });
+
+  revalidatePath("/admin/ai/providers");
+  revalidatePath(`/admin/ai/providers/${providerId}`);
+  revalidatePath("/admin/ai/model-aliases");
+}
+
+export async function createAiModelInstanceAction(formData: FormData) {
+  const providerId = text(formData, "providerId");
+  await apiFetch<AiModelInstance>(`/admin/ai/providers/${providerId}/model-instances`, {
+    method: "POST",
+    body: JSON.stringify({
+      displayName: text(formData, "displayName"),
+      providerModelName: text(formData, "providerModelName"),
+      baseUrl: text(formData, "baseUrl"),
+      webSocketUrl: text(formData, "webSocketUrl"),
+      region: text(formData, "region"),
+      apiKey: text(formData, "apiKey"),
       capabilityTags: text(formData, "capabilityTags").split(",").map((item) => item.trim()).filter(Boolean),
       inputPrice: numberText(formData, "inputPrice"),
       outputPrice: numberText(formData, "outputPrice"),

@@ -11,6 +11,7 @@ import { AppException } from "../common/app-exception.js";
 import { assertValidSlug } from "../cms/slug.js";
 import { estimateMockUsageCredits, type TokenUsage } from "./ai-cost.js";
 import {
+  CreateAiProviderPresetDto,
   CreateAiProviderModelDto,
   ImportAiToolTemplateDto,
   UpdateAiModelDto,
@@ -2225,6 +2226,45 @@ export class AiService {
     return presets.map((preset) => this.toProviderPreset(preset));
   }
 
+  async createProviderPreset(dto: CreateAiProviderPresetDto) {
+    const displayName = dto.displayName.trim();
+
+    if (!displayName) {
+      throw new AppException(40001, "厂商名称不能为空", HttpStatus.BAD_REQUEST);
+    }
+
+    const providerKey = await this.uniqueProviderPresetKey(dto.providerKey ?? displayName);
+    const defaultBaseUrl = normalizeBaseUrl(dto.defaultBaseUrl);
+    const preset = await this.prisma.aiProviderPreset.create({
+      data: {
+        providerKey,
+        displayName,
+        adapterType: dto.adapterType ?? "CUSTOM_OPENAI_COMPATIBLE",
+        modality: dto.modality ?? "TEXT",
+        defaultBaseUrl,
+        defaultWebSocketUrl: emptyToNull(dto.defaultWebSocketUrl),
+        apiKeyEnvName: emptyToNull(dto.apiKeyEnvName) ?? `${providerKey.toUpperCase().replace(/-/g, "_")}_API_KEY`,
+        docsUrl: emptyToNull(dto.docsUrl),
+        region: emptyToNull(dto.region),
+        isBuiltIn: false,
+        isEnabledByDefault: dto.status === "ENABLED",
+        presetVersion: "custom",
+        lastUpdatedAt: new Date()
+      }
+    });
+
+    await this.updateProviderInstance(preset.id, {
+      name: dto.name ?? displayName,
+      baseUrl: dto.baseUrl ?? defaultBaseUrl,
+      webSocketUrl: dto.webSocketUrl ?? dto.defaultWebSocketUrl,
+      region: dto.region,
+      apiKey: dto.apiKey,
+      status: dto.status ?? "DISABLED"
+    });
+
+    return this.getProviderPreset(preset.id);
+  }
+
   async getProviderPreset(id: string) {
     const preset = await this.prisma.aiProviderPreset.findUnique({
       where: {
@@ -2353,6 +2393,81 @@ export class AiService {
     return this.getProviderPreset(providerPresetId);
   }
 
+  async deleteProviderPreset(providerPresetId: string) {
+    const preset = await this.prisma.aiProviderPreset.findUnique({
+      where: {
+        id: providerPresetId
+      },
+      include: {
+        instances: {
+          include: {
+            modelInstances: true
+          }
+        }
+      }
+    });
+
+    if (!preset) {
+      throw new AppException(40401, "AI Provider Preset 不存在", HttpStatus.NOT_FOUND);
+    }
+
+    if (preset.isBuiltIn) {
+      throw new AppException(40001, "内置厂商不能删除，可在编辑中停用 Provider", HttpStatus.BAD_REQUEST);
+    }
+
+    const modelInstanceCount = preset.instances.reduce((count, instance) => count + instance.modelInstances.length, 0);
+
+    if (modelInstanceCount > 0) {
+      throw new AppException(40001, "该厂商下仍有可用模型，请先删除模型后再删除厂商", HttpStatus.BAD_REQUEST);
+    }
+
+    const providerInstanceIds = preset.instances.map((instance) => instance.id);
+    const relatedTaskCount =
+      providerInstanceIds.length > 0
+        ? await this.prisma.aiTask.count({
+            where: {
+              aiProviderInstanceId: {
+                in: providerInstanceIds
+              }
+            }
+          })
+        : 0;
+
+    if (relatedTaskCount > 0) {
+      throw new AppException(40001, "该厂商已有任务记录，不能删除", HttpStatus.BAD_REQUEST);
+    }
+
+    await this.prisma.$transaction(async (transaction) => {
+      if (providerInstanceIds.length > 0) {
+        await transaction.aiProviderCredential.deleteMany({
+          where: {
+            providerInstanceId: {
+              in: providerInstanceIds
+            }
+          }
+        });
+        await transaction.aiProviderInstance.deleteMany({
+          where: {
+            id: {
+              in: providerInstanceIds
+            }
+          }
+        });
+      }
+
+      await transaction.aiProviderPreset.delete({
+        where: {
+          id: providerPresetId
+        }
+      });
+    });
+
+    return {
+      deleted: true,
+      providerPresetId
+    };
+  }
+
   async enableModelPreset(providerPresetId: string, modelPresetId: string, dto: UpdateAiModelInstanceDto) {
     const preset = await this.prisma.aiProviderPreset.findUnique({
       where: {
@@ -2459,6 +2574,96 @@ export class AiService {
     await this.bindRecommendedAudioAlias(modelPreset.recommendedAlias, modelInstance.id, capabilityTags);
 
     return this.getProviderPreset(providerPresetId);
+  }
+
+  async createModelInstance(providerPresetId: string, dto: UpdateAiModelInstanceDto) {
+    const preset = await this.prisma.aiProviderPreset.findUnique({
+      where: {
+        id: providerPresetId
+      },
+      include: {
+        instances: {
+          take: 1,
+          orderBy: {
+            createdAt: "asc"
+          }
+        }
+      }
+    });
+
+    if (!preset) {
+      throw new AppException(40401, "AI Provider Preset 不存在", HttpStatus.NOT_FOUND);
+    }
+
+    const displayName = dto.displayName?.trim();
+    const providerModelName = dto.providerModelName?.trim();
+
+    if (!displayName || !providerModelName) {
+      throw new AppException(40001, "模型展示名和模型名不能为空", HttpStatus.BAD_REQUEST);
+    }
+
+    const instance =
+      preset.instances[0] ??
+      (await this.prisma.aiProviderInstance.create({
+        data: {
+          providerPresetId: preset.id,
+          name: preset.displayName,
+          baseUrl: preset.defaultBaseUrl,
+          webSocketUrl: preset.defaultWebSocketUrl,
+          region: preset.region?.split(",")[0] ?? null,
+          status: "DISABLED"
+        }
+      }));
+    const existing = await this.prisma.aiModelInstance.findUnique({
+      where: {
+        providerInstanceId_providerModelName: {
+          providerInstanceId: instance.id,
+          providerModelName
+        }
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (existing) {
+      throw new AppException(40001, "该厂商下已存在同名模型", HttpStatus.BAD_REQUEST);
+    }
+
+    const capabilityTags = normalizeCapabilityTags(dto.capabilityTags ?? []);
+    const pricingConfig = normalizeModelPricingConfig(dto.pricingConfig);
+    const pricingSummary = pricingSummaryFromConfig(pricingConfig, {
+      inputPrice: String(dto.inputPrice ?? 0),
+      outputPrice: String(dto.outputPrice ?? 0),
+      pricingMode: normalizePricingMode(dto.pricingMode),
+      pricingUnit: normalizePricingUnit(dto.pricingUnit, dto.pricingMode)
+    });
+    const modelApiKey = dto.apiKey?.trim();
+
+    return this.prisma.aiModelInstance.create({
+      data: {
+        providerInstanceId: instance.id,
+        modelPresetId: null,
+        displayName,
+        providerModelName,
+        baseUrl: normalizeOptionalBaseUrl(dto.baseUrl) ?? null,
+        webSocketUrl: dto.webSocketUrl === undefined ? null : emptyToNull(dto.webSocketUrl),
+        region: dto.region === undefined ? null : emptyToNull(dto.region),
+        ...(modelApiKey
+          ? {
+              apiKeyEncrypted: this.encryptApiKey(modelApiKey),
+              apiKeyPreview: maskSecret(modelApiKey)
+            }
+          : {}),
+        capabilityTags: capabilityTags as Prisma.InputJsonValue,
+        inputPrice: pricingSummary.inputPrice,
+        outputPrice: pricingSummary.outputPrice,
+        pricingMode: pricingSummary.pricingMode,
+        pricingUnit: pricingSummary.pricingUnit,
+        pricingConfig: pricingConfigToJson(pricingConfig),
+        isEnabled: dto.isEnabled ?? true
+      }
+    });
   }
 
   async updateModelInstance(id: string, dto: UpdateAiModelInstanceDto) {
@@ -4714,6 +4919,19 @@ export class AiService {
     return normalized.includes("fail") || input.includes("触发失败");
   }
 
+  private async uniqueProviderPresetKey(value: string) {
+    const baseKey = providerPresetKey(value);
+    let candidate = baseKey;
+    let suffix = 2;
+
+    while (await this.prisma.aiProviderPreset.findUnique({ where: { providerKey: candidate }, select: { id: true } })) {
+      candidate = `${baseKey}-${suffix}`;
+      suffix += 1;
+    }
+
+    return candidate;
+  }
+
   private providerErrorMessage(error: unknown) {
     if (error instanceof AppException) {
       return error.message;
@@ -5291,6 +5509,16 @@ function emptyToNull(value: string | undefined) {
   const normalized = value?.trim();
 
   return normalized ? normalized : null;
+}
+
+function providerPresetKey(value: string) {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return normalized || `custom-provider-${Date.now().toString(36)}`;
 }
 
 function jsonStringArray(value: Prisma.JsonValue | null | undefined) {

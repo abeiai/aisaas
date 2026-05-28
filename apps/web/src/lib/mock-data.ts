@@ -282,11 +282,6 @@ export const adminNavGroups: AdminNavGroup[] = [
     icon: Settings,
     items: [
       {
-        href: "/admin/operation-logs",
-        label: "操作日志",
-        icon: ScrollText
-      },
-      {
         href: "/admin/settings",
         label: "系统设置",
         icon: Settings
@@ -300,6 +295,11 @@ export const adminNavGroups: AdminNavGroup[] = [
         href: "/admin/system/env-check",
         label: "环境检查",
         icon: Settings
+      },
+      {
+        href: "/admin/operation-logs",
+        label: "操作日志",
+        icon: ScrollText
       }
     ]
   }

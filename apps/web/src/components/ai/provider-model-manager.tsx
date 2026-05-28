@@ -3,7 +3,7 @@
 import type { FormEvent, ReactNode } from "react";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, Edit3, Loader2, Trash2, X } from "lucide-react";
+import { CheckCircle2, Edit3, Loader2, Plus, Trash2, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   checkAiModelInstanceDeleteAction,
+  createAiModelInstanceAction,
   deleteAiModelInstanceAction,
   enableAiModelPresetAction,
   updateAiModelInstanceAction,
@@ -111,6 +112,7 @@ export function ProviderModelManager({ provider }: { provider: AiProviderPreset 
   const router = useRouter();
   const [tokenViewUnit, setTokenViewUnit] = useState<TokenPriceViewUnit>("K_TOKENS");
   const [editingRow, setEditingRow] = useState<ModelRow | null>(null);
+  const [creatingRow, setCreatingRow] = useState<ModelRow | null>(null);
   const [deleteState, setDeleteState] = useState<{
     row: ModelRow;
     check: AiModelInstanceDeleteCheck;
@@ -141,6 +143,8 @@ export function ProviderModelManager({ provider }: { provider: AiProviderPreset 
       try {
         if (row.modelInstanceId) {
           await updateAiModelInstanceAction(formData);
+        } else if (!row.modelPresetId) {
+          await createAiModelInstanceAction(formData);
         } else {
           await enableAiModelPresetAction(formData);
         }
@@ -182,20 +186,26 @@ export function ProviderModelManager({ provider }: { provider: AiProviderPreset 
           <CardTitle>可用模型</CardTitle>
           <CardDescription>按列表维护模型启用状态、能力标签和定价，可在 AI 配置的默认模型区域绑定到业务场景。</CardDescription>
         </div>
-        <div className="flex items-center gap-2 rounded-full border border-border bg-background p-1">
-          {tokenUnitOptions.map((option) => (
-            <button
-              className={cn(
-                "rounded-full px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground",
-                tokenViewUnit === option.value ? "bg-primary text-primary-foreground hover:text-primary-foreground" : null
-              )}
-              key={option.value}
-              onClick={() => setTokenViewUnit(option.value)}
-              type="button"
-            >
-              {option.label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 rounded-full border border-border bg-background p-1">
+            {tokenUnitOptions.map((option) => (
+              <button
+                className={cn(
+                  "rounded-full px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground",
+                  tokenViewUnit === option.value ? "bg-primary text-primary-foreground hover:text-primary-foreground" : null
+                )}
+                key={option.value}
+                onClick={() => setTokenViewUnit(option.value)}
+                type="button"
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <Button onClick={() => setCreatingRow(blankModelRow(provider))} type="button">
+            <Plus data-icon="inline-start" />
+            新增模型
+          </Button>
         </div>
       </CardHeader>
       <CardContent>
@@ -318,6 +328,17 @@ export function ProviderModelManager({ provider }: { provider: AiProviderPreset 
           row={editingRow}
         />
       ) : null}
+      {creatingRow ? (
+        <ModelEditModal
+          onClose={() => setCreatingRow(null)}
+          onSaved={() => {
+            setCreatingRow(null);
+            refreshAfterChange("模型已新增。");
+          }}
+          providerId={provider.id}
+          row={creatingRow}
+        />
+      ) : null}
       {deleteState ? (
         <DeleteModelModal
           onClose={() => setDeleteState(null)}
@@ -395,7 +416,7 @@ function ModelEditModal({
   }
 
   return (
-    <ModalShell title={row.modelInstanceId ? "编辑模型" : "启用模型"} onClose={onClose}>
+    <ModalShell title={row.modelInstanceId || row.modelPresetId ? "编辑模型" : "新增模型"} onClose={onClose}>
       <form className="flex flex-col gap-5" onSubmit={handleSubmit}>
         <input name="providerId" type="hidden" value={providerId} />
         <input name="modelPresetId" type="hidden" value={row.modelPresetId ?? ""} />
@@ -999,6 +1020,31 @@ function buildRows(provider: AiProviderPreset): ModelRow[] {
     });
 
   return [...presetRows, ...orphanRows];
+}
+
+function blankModelRow(provider: AiProviderPreset): ModelRow {
+  return {
+    rowKey: `new-${provider.id}`,
+    modelPresetId: null,
+    modelInstanceId: null,
+    displayName: "",
+    providerModelName: "",
+    baseUrl: provider.instance?.baseUrl ?? provider.defaultBaseUrl,
+    webSocketUrl: provider.instance?.webSocketUrl ?? provider.defaultWebSocketUrl ?? "",
+    region: provider.instance?.region ?? provider.region?.split(",")[0] ?? "",
+    hasCustomApiKey: false,
+    apiKeyPreview: "使用 Provider 默认",
+    capabilityTags: [],
+    inputPrice: "0",
+    outputPrice: "0",
+    pricingMode: "TOKENS",
+    pricingUnit: "K_TOKENS",
+    pricingConfig: null,
+    isEnabled: true,
+    isDeprecated: false,
+    deprecatedMessage: null,
+    isConfigured: false
+  };
 }
 
 function inferPricingMode(

@@ -12,6 +12,7 @@ import { toInputJson } from "./payment-crypto.js";
 import { getClientIp, getHeaderValue, getUserAgent, type HeaderRequestLike } from "../security/request-types.js";
 import type {
   ChannelQueryResult,
+  PaymentChannelOrder,
   PaymentProduct,
   PaymentProvider,
   PaymentScene,
@@ -119,12 +120,14 @@ export class PaymentService {
         status: "CREATED"
       }
     });
-    const channelOrder = await this.createChannelOrder(product, userId, {
-      orderNo: order.orderNo,
-      amountCny: order.amountCny.toString(),
-      credits: order.credits,
-      clientIp
-    });
+    const channelOrder = productAvailable
+      ? await this.createChannelOrder(product, userId, {
+          orderNo: order.orderNo,
+          amountCny: order.amountCny.toString(),
+          credits: order.credits,
+          clientIp
+        })
+      : this.createUnconfiguredChannelOrder(product);
     const updatedOrder = await this.prisma.paymentOrder.update({
       where: {
         id: order.id
@@ -624,6 +627,18 @@ export class PaymentService {
       ...order,
       openId: user.wechatOpenId
     });
+  }
+
+  private createUnconfiguredChannelOrder(product: PaymentProduct): PaymentChannelOrder {
+    return {
+      product,
+      action: this.paymentAction(product),
+      paymentUrl: null,
+      qrCodeUrl: null,
+      launchParams: null,
+      providerPayload: null,
+      paymentMode: "UNCONFIGURED"
+    };
   }
 
   private async queryChannelOrder(provider: PaymentProvider, orderNo: string) {

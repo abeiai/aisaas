@@ -50,21 +50,12 @@ export class WechatPayClient {
       }
     };
     const payload = JSON.stringify(body);
-    const response = await fetch(`${this.gatewayUrl()}/v3/pay/transactions/native`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json",
-        authorization: this.authorization("POST", "/v3/pay/transactions/native", payload, config)
-      },
-      body: payload
-    });
-    const result = await response.json() as {
+    const result = await this.postJson<{
       code_url?: string;
       message?: string;
-    };
+    }>("/v3/pay/transactions/native", payload, config, "微信支付下单失败");
 
-    if (!response.ok || !result.code_url) {
+    if (!result.code_url) {
       throw new AppException(40004, result.message || "微信支付下单失败", HttpStatus.BAD_REQUEST);
     }
 
@@ -112,21 +103,12 @@ export class WechatPayClient {
       }
     };
     const payload = JSON.stringify(body);
-    const response = await fetch(`${this.gatewayUrl()}/v3/pay/transactions/h5`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json",
-        authorization: this.authorization("POST", "/v3/pay/transactions/h5", payload, config)
-      },
-      body: payload
-    });
-    const result = await response.json() as {
+    const result = await this.postJson<{
       h5_url?: string;
       message?: string;
-    };
+    }>("/v3/pay/transactions/h5", payload, config, "微信 H5 支付下单失败");
 
-    if (!response.ok || !result.h5_url) {
+    if (!result.h5_url) {
       throw new AppException(40004, result.message || "微信 H5 支付下单失败", HttpStatus.BAD_REQUEST);
     }
 
@@ -171,21 +153,12 @@ export class WechatPayClient {
       }
     };
     const payload = JSON.stringify(body);
-    const response = await fetch(`${this.gatewayUrl()}/v3/pay/transactions/jsapi`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json",
-        authorization: this.authorization("POST", "/v3/pay/transactions/jsapi", payload, config)
-      },
-      body: payload
-    });
-    const result = await response.json() as {
+    const result = await this.postJson<{
       prepay_id?: string;
       message?: string;
-    };
+    }>("/v3/pay/transactions/jsapi", payload, config, "微信 JSAPI 支付下单失败");
 
-    if (!response.ok || !result.prepay_id) {
+    if (!result.prepay_id) {
       throw new AppException(40004, result.message || "微信 JSAPI 支付下单失败", HttpStatus.BAD_REQUEST);
     }
 
@@ -255,13 +228,7 @@ export class WechatPayClient {
     }
 
     const path = `/v3/pay/transactions/out-trade-no/${encodeURIComponent(orderNo)}?mchid=${encodeURIComponent(config.merchantId)}`;
-    const response = await fetch(`${this.gatewayUrl()}${path}`, {
-      headers: {
-        accept: "application/json",
-        authorization: this.authorization("GET", path, "", config)
-      }
-    });
-    const payload = await response.json() as {
+    const payload = await this.getJson<{
       out_trade_no?: string;
       transaction_id?: string;
       trade_state?: string;
@@ -270,11 +237,7 @@ export class WechatPayClient {
         total?: number;
       };
       message?: string;
-    };
-
-    if (!response.ok) {
-      throw new AppException(40004, payload.message || "微信支付订单查询失败", HttpStatus.BAD_REQUEST);
-    }
+    }>(path, config, "微信支付订单查询失败");
 
     const paid = payload.trade_state === "SUCCESS";
 
@@ -373,6 +336,83 @@ export class WechatPayClient {
       signType: "RSA",
       paySign: signRsaSha256(message, config.merchantPrivateKey)
     };
+  }
+
+  private async postJson<T>(
+    path: string,
+    payload: string,
+    config: WechatRuntimeConfig,
+    fallbackMessage: string
+  ) {
+    return this.requestJson<T>("POST", path, payload, config, fallbackMessage);
+  }
+
+  private async getJson<T>(path: string, config: WechatRuntimeConfig, fallbackMessage: string) {
+    return this.requestJson<T>("GET", path, "", config, fallbackMessage);
+  }
+
+  private async requestJson<T>(
+    method: "GET" | "POST",
+    path: string,
+    body: string,
+    config: WechatRuntimeConfig,
+    fallbackMessage: string
+  ) {
+    let response: Awaited<ReturnType<typeof fetch>>;
+
+    try {
+      const headers: Record<string, string> = {
+        accept: "application/json",
+        authorization: this.authorization(method, path, body, config)
+      };
+
+      if (body) {
+        headers["content-type"] = "application/json";
+      }
+
+      response = await fetch(`${this.gatewayUrl()}${path}`, {
+        method,
+        headers,
+        ...(body ? { body } : {})
+      });
+    } catch (error) {
+      throw this.toWechatRequestException(error, fallbackMessage);
+    }
+
+    const text = await response.text();
+    let payload: Record<string, unknown> = {};
+
+    if (text) {
+      try {
+        payload = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        throw new AppException(40004, `${fallbackMessage}：微信网关响应格式异常`, HttpStatus.BAD_REQUEST);
+      }
+    }
+
+    if (!response.ok) {
+      throw new AppException(40004, this.wechatGatewayMessage(payload, fallbackMessage), HttpStatus.BAD_REQUEST);
+    }
+
+    return payload as T;
+  }
+
+  private toWechatRequestException(error: unknown, fallbackMessage: string) {
+    if (error instanceof AppException) {
+      return error;
+    }
+
+    return new AppException(
+      40004,
+      `${fallbackMessage}，请检查微信支付商户号、证书序列号、商户私钥和通知地址配置`,
+      HttpStatus.BAD_REQUEST
+    );
+  }
+
+  private wechatGatewayMessage(payload: Record<string, unknown>, fallbackMessage: string) {
+    const message = stringValue(payload.message ?? payload.msg ?? payload.code);
+
+    return message ? `${fallbackMessage}：${message}` : fallbackMessage;
   }
 
   private gatewayUrl() {

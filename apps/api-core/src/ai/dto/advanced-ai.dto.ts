@@ -224,6 +224,44 @@ export class UpdateAiProviderInstanceDto {
   status?: "DISABLED" | "ENABLED" | "TEST_FAILED";
 }
 
+export class CreateAiProviderPresetDto extends UpdateAiProviderInstanceDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  providerKey?: string;
+
+  @IsString()
+  @MaxLength(80)
+  displayName!: string;
+
+  @IsOptional()
+  @IsIn(["OPENAI_COMPATIBLE", "ANTHROPIC", "GEMINI", "CUSTOM_OPENAI_COMPATIBLE", "DASHSCOPE_AUDIO"])
+  adapterType?: "OPENAI_COMPATIBLE" | "ANTHROPIC" | "GEMINI" | "CUSTOM_OPENAI_COMPATIBLE" | "DASHSCOPE_AUDIO";
+
+  @IsOptional()
+  @IsIn(["TEXT", "AUDIO", "MULTIMODAL"])
+  modality?: "TEXT" | "AUDIO" | "MULTIMODAL";
+
+  @IsString()
+  @MaxLength(400)
+  defaultBaseUrl!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(400)
+  defaultWebSocketUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  apiKeyEnvName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(400)
+  docsUrl?: string;
+}
+
 export class UpdateAiModelInstanceDto {
   @IsOptional()
   @IsString()
