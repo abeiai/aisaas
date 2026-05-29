@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { ArrowRight, Mail, Smartphone } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ const initialState: AuthActionState = {};
 export function UserLoginForm({ next }: { next?: string }) {
   const [mode, setMode] = useState<"email" | "phone">("email");
   const [phone, setPhone] = useState("");
+  const [codeCountdown, setCodeCountdown] = useState(0);
   const [state, formAction, isPending] = useActionState(userLoginAction, initialState);
   const [phoneState, phoneFormAction, isPhonePending] = useActionState(
     phoneLoginAction,
@@ -28,6 +29,24 @@ export function UserLoginForm({ next }: { next?: string }) {
     sendLoginPhoneCodeAction,
     initialState
   );
+
+  useEffect(() => {
+    if (codeState.success) {
+      setCodeCountdown(60);
+    }
+  }, [codeState]);
+
+  useEffect(() => {
+    if (codeCountdown <= 0) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setCodeCountdown((value) => Math.max(value - 1, 0));
+    }, 1000);
+
+    return () => window.clearTimeout(timer);
+  }, [codeCountdown]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -72,8 +91,13 @@ export function UserLoginForm({ next }: { next?: string }) {
         </form>
       ) : (
         <div className="flex flex-col gap-6">
-          <form action={codeFormAction} className="flex flex-col gap-4">
+          <p className="-mt-2 text-sm text-muted-foreground">未注册手机号会验证后自动创建账号。</p>
+          <form action={codeFormAction} className="hidden" id="login-phone-code-request">
             <input name="purpose" type="hidden" value="LOGIN" />
+            <input name="phone" type="hidden" value={phone} />
+          </form>
+
+          <div className="flex flex-col gap-4">
             <Field>
               <FieldLabel htmlFor="login-phone">手机号</FieldLabel>
               <Input
@@ -84,30 +108,35 @@ export function UserLoginForm({ next }: { next?: string }) {
                 inputMode="tel"
                 placeholder="请输入手机号"
               />
-              <FieldDescription>未注册手机号会在验证后自动创建账号。</FieldDescription>
             </Field>
             {codeState.error ? <p className="text-sm text-destructive">{codeState.error}</p> : null}
             {codeState.success ? (
               <p className="text-sm text-muted-foreground">{codeState.success}</p>
             ) : null}
-            <Button disabled={isCodePending || !phone} type="submit" variant="outline">
-              {isCodePending ? "发送中..." : "获取验证码"}
-            </Button>
-          </form>
+          </div>
 
           <form action={phoneFormAction} className="flex flex-col gap-6">
             {next ? <input name="next" type="hidden" value={next} /> : null}
             <input name="phone" type="hidden" value={phone} />
             <Field>
               <FieldLabel htmlFor="login-phone-code">验证码</FieldLabel>
-              <Input
-                id="login-phone-code"
-                name="code"
-                inputMode="numeric"
-                maxLength={8}
-                placeholder="请输入短信验证码"
-              />
-              <FieldDescription>本地默认验证码为 199599。</FieldDescription>
+              <div className="grid grid-cols-[minmax(0,1fr)_112px] gap-2">
+                <Input
+                  id="login-phone-code"
+                  name="code"
+                  inputMode="numeric"
+                  maxLength={8}
+                  placeholder="请输入短信验证码"
+                />
+                <Button
+                  disabled={isCodePending || !phone || codeCountdown > 0}
+                  form="login-phone-code-request"
+                  type="submit"
+                  variant="outline"
+                >
+                  {isCodePending ? "发送中..." : codeCountdown > 0 ? `${codeCountdown}秒` : "获取验证码"}
+                </Button>
+              </div>
             </Field>
             {phoneState.error ? <p className="text-sm text-destructive">{phoneState.error}</p> : null}
             <Button disabled={isPhonePending || !phone} type="submit">

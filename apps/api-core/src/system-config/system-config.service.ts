@@ -1,5 +1,5 @@
 import { HttpStatus, Injectable } from "@nestjs/common";
-import { getPrismaClient } from "@aisaas/database";
+import { decryptSecret, encryptSecret, getPrismaClient, maskSecret } from "@aisaas/database";
 import { AppException } from "../common/app-exception.js";
 import { UpdateSystemConfigDto } from "./dto/update-system-config.dto.js";
 
@@ -229,6 +229,182 @@ const configDefinitions = [
     sortOrder: 92
   },
   {
+    key: "emailVerificationEnabled",
+    label: "邮件验证启用",
+    value: "false",
+    description: "启用后，邮件验证码相关流程使用阿里云邮件推送配置。",
+    isPublic: false,
+    sortOrder: 120
+  },
+  {
+    key: "emailVerificationProvider",
+    label: "邮件验证方案",
+    value: "ALIYUN_DIRECT_MAIL",
+    description: "当前支持阿里云邮件推送 DirectMail。",
+    isPublic: false,
+    sortOrder: 121
+  },
+  {
+    key: "aliyunMailAccessKeyId",
+    label: "阿里云邮件 AccessKey ID",
+    value: "",
+    description: "用于调用阿里云邮件推送 API 的 AccessKey ID。",
+    isPublic: false,
+    sortOrder: 122
+  },
+  {
+    key: "aliyunMailAccessKeySecretEncrypted",
+    label: "阿里云邮件 AccessKey Secret",
+    value: "",
+    description: "用于调用阿里云邮件推送 API 的 AccessKey Secret，保存前会加密。",
+    isPublic: false,
+    sortOrder: 123
+  },
+  {
+    key: "aliyunMailEndpoint",
+    label: "阿里云邮件 Endpoint",
+    value: "https://dm.aliyuncs.com/",
+    description: "阿里云邮件推送 API Endpoint。",
+    isPublic: false,
+    sortOrder: 124
+  },
+  {
+    key: "aliyunMailRegionId",
+    label: "阿里云邮件区域",
+    value: "cn-hangzhou",
+    description: "阿里云邮件推送 RegionId。",
+    isPublic: false,
+    sortOrder: 125
+  },
+  {
+    key: "aliyunMailAccountName",
+    label: "发信地址",
+    value: "",
+    description: "阿里云邮件推送控制台配置的发信地址 AccountName。",
+    isPublic: false,
+    sortOrder: 126
+  },
+  {
+    key: "aliyunMailFromAlias",
+    label: "发信人昵称",
+    value: "",
+    description: "邮件中展示的发信人昵称 FromAlias。",
+    isPublic: false,
+    sortOrder: 127
+  },
+  {
+    key: "aliyunMailAddressType",
+    label: "发信地址类型",
+    value: "1",
+    description: "阿里云邮件推送 AddressType，1 表示发信地址。",
+    isPublic: false,
+    sortOrder: 128
+  },
+  {
+    key: "aliyunMailReplyToAddress",
+    label: "使用回信地址",
+    value: "true",
+    description: "阿里云邮件推送 ReplyToAddress。",
+    isPublic: false,
+    sortOrder: 129
+  },
+  {
+    key: "aliyunMailSubject",
+    label: "邮件验证码标题",
+    value: "邮箱验证码",
+    description: "邮件验证码默认标题。",
+    isPublic: false,
+    sortOrder: 130
+  },
+  {
+    key: "aliyunMailBodyTemplate",
+    label: "邮件验证码模板",
+    value: "您的验证码是 ${code}，5 分钟内有效。如非本人操作，请忽略本邮件。",
+    description: "邮件验证码正文模板，使用 ${code} 作为验证码变量。",
+    isPublic: false,
+    sortOrder: 131
+  },
+  {
+    key: "smsVerificationEnabled",
+    label: "短信验证启用",
+    value: "false",
+    description: "启用后，手机验证码使用阿里云短信服务发送。",
+    isPublic: false,
+    sortOrder: 140
+  },
+  {
+    key: "smsVerificationProvider",
+    label: "短信验证方案",
+    value: "ALIYUN_SMS",
+    description: "当前支持阿里云短信服务 SendSms。",
+    isPublic: false,
+    sortOrder: 141
+  },
+  {
+    key: "aliyunSmsAccessKeyId",
+    label: "阿里云短信 AccessKey ID",
+    value: "",
+    description: "用于调用阿里云短信 API 的 AccessKey ID。",
+    isPublic: false,
+    sortOrder: 142
+  },
+  {
+    key: "aliyunSmsAccessKeySecretEncrypted",
+    label: "阿里云短信 AccessKey Secret",
+    value: "",
+    description: "用于调用阿里云短信 API 的 AccessKey Secret，保存前会加密。",
+    isPublic: false,
+    sortOrder: 143
+  },
+  {
+    key: "aliyunSmsEndpoint",
+    label: "阿里云短信 Endpoint",
+    value: "https://dysmsapi.aliyuncs.com/",
+    description: "阿里云短信 SendSms API Endpoint。",
+    isPublic: false,
+    sortOrder: 144
+  },
+  {
+    key: "aliyunSmsRegionId",
+    label: "阿里云短信区域",
+    value: "cn-hangzhou",
+    description: "阿里云短信 SendSms RegionId。",
+    isPublic: false,
+    sortOrder: 145
+  },
+  {
+    key: "aliyunSmsSignName",
+    label: "短信签名",
+    value: "",
+    description: "阿里云短信服务审核通过的 SignName。",
+    isPublic: false,
+    sortOrder: 146
+  },
+  {
+    key: "aliyunSmsTemplateCode",
+    label: "短信模板 Code",
+    value: "",
+    description: "阿里云短信服务审核通过的 TemplateCode。",
+    isPublic: false,
+    sortOrder: 147
+  },
+  {
+    key: "aliyunSmsTemplateParamCodeKey",
+    label: "验证码变量名",
+    value: "code",
+    description: "短信模板中接收验证码的变量名，默认 code。",
+    isPublic: false,
+    sortOrder: 148
+  },
+  {
+    key: "smsCodeTtlSeconds",
+    label: "验证码有效期",
+    value: "300",
+    description: "手机验证码有效期，单位秒。",
+    isPublic: false,
+    sortOrder: 149
+  },
+  {
     key: "audioVoiceCloneReviewRequired",
     label: "声音复刻审核",
     value: "true",
@@ -303,9 +479,18 @@ export class SystemConfigService {
   async listConfigs() {
     await this.ensureDefaults();
 
-    return this.prisma.systemConfig.findMany({
+    const configs = await this.prisma.systemConfig.findMany({
       orderBy: [{ sortOrder: "asc" }, { updatedAt: "desc" }]
     });
+
+    return configs.map((config) =>
+      this.isEncryptedConfigKey(config.key)
+        ? {
+            ...config,
+            value: this.secretPreview(config.value)
+          }
+        : config
+    );
   }
 
   async listPublicConfigs() {
@@ -332,16 +517,31 @@ export class SystemConfigService {
   async updateConfigs(dto: UpdateSystemConfigDto) {
     await this.ensureDefaults();
 
+    const currentConfigs = await this.prisma.systemConfig.findMany();
+    const currentValues = configDefinitions.reduce(
+      (values, definition) => ({
+        ...values,
+        [definition.key]: currentConfigs.find((config) => config.key === definition.key)?.value ?? definition.value
+      }),
+      {} as Record<ConfigKey, string>
+    );
     const updates = Object.entries(dto)
       .filter(([key, value]) => this.isConfigKey(key) && value !== undefined)
       .map(([key, value]) => ({
         key: key as ConfigKey,
-        value: this.normalizeConfigValue(key as ConfigKey, String(value).trim())
+        value: this.normalizeConfigValue(key as ConfigKey, String(value).trim(), currentValues)
       }));
 
     if (updates.length === 0) {
       throw new AppException(40001, "请求参数错误", HttpStatus.BAD_REQUEST);
     }
+
+    const nextValues = {
+      ...currentValues,
+      ...Object.fromEntries(updates.map((update) => [update.key, update.value]))
+    } as Record<ConfigKey, string>;
+
+    this.validateSendConfigs(nextValues);
 
     for (const update of updates) {
       if (!update.value && !this.isEmptyAllowed(update.key)) {
@@ -397,10 +597,22 @@ export class SystemConfigService {
   }
 
   private isEmptyAllowed(key: ConfigKey) {
-    return key === "siteLogo" || key === "siteFavicon" || key === "copyrightText" || key === "serviceQrCode" || key === "siteMenus";
+    return (
+      key === "siteLogo" ||
+      key === "siteFavicon" ||
+      key === "copyrightText" ||
+      key === "serviceQrCode" ||
+      key === "siteMenus" ||
+      key.startsWith("aliyunMail") ||
+      key.startsWith("aliyunSms")
+    );
   }
 
-  private normalizeConfigValue(key: ConfigKey, value: string) {
+  private normalizeConfigValue(key: ConfigKey, value: string, currentValues: Record<ConfigKey, string>) {
+    if (this.isEncryptedConfigKey(key)) {
+      return value ? encryptSecret(value) : currentValues[key];
+    }
+
     if (key === "themePrimaryColor") {
       if (!/^#[0-9a-fA-F]{6}$/.test(value)) {
         throw new AppException(40001, "主题主色必须是 6 位十六进制颜色", HttpStatus.BAD_REQUEST);
@@ -433,12 +645,96 @@ export class SystemConfigService {
       }
     }
 
+    if (
+      key === "emailVerificationEnabled" ||
+      key === "smsVerificationEnabled" ||
+      key === "aliyunMailReplyToAddress"
+    ) {
+      if (value !== "true" && value !== "false") {
+        throw new AppException(40001, "启用状态只能选择开启或关闭", HttpStatus.BAD_REQUEST);
+      }
+    }
+
+    if (key === "emailVerificationProvider" && value !== "ALIYUN_DIRECT_MAIL") {
+      throw new AppException(40001, "邮件验证方案暂只支持阿里云邮件推送", HttpStatus.BAD_REQUEST);
+    }
+
+    if (key === "smsVerificationProvider" && value !== "ALIYUN_SMS") {
+      throw new AppException(40001, "短信验证方案暂只支持阿里云短信服务", HttpStatus.BAD_REQUEST);
+    }
+
+    if (key === "aliyunMailAddressType" && value !== "0" && value !== "1") {
+      throw new AppException(40001, "发信地址类型只能是 0 或 1", HttpStatus.BAD_REQUEST);
+    }
+
+    if (key === "smsCodeTtlSeconds") {
+      return normalizeSmsCodeTtlSeconds(value);
+    }
+
     if (key === "mediaImageMaxSizeMb" || key === "mediaAudioMaxSizeMb" || key === "mediaVideoMaxSizeMb") {
       return normalizeMediaUploadSizeMb(value);
     }
 
     return value;
   }
+
+  private isEncryptedConfigKey(key: string): key is ConfigKey {
+    return key === "aliyunMailAccessKeySecretEncrypted" || key === "aliyunSmsAccessKeySecretEncrypted";
+  }
+
+  private secretPreview(value: string) {
+    if (!value) {
+      return "尚未配置";
+    }
+
+    try {
+      return maskSecret(decryptSecret(value));
+    } catch {
+      return "密钥无法解密，请重新保存";
+    }
+  }
+
+  private validateSendConfigs(values: Record<ConfigKey, string>) {
+    if (values.emailVerificationEnabled === "true") {
+      assertRequiredConfig(values.aliyunMailAccessKeyId, "请填写阿里云邮件 AccessKey ID");
+      assertRequiredConfig(values.aliyunMailAccessKeySecretEncrypted, "请填写阿里云邮件 AccessKey Secret");
+      assertRequiredConfig(values.aliyunMailEndpoint, "请填写阿里云邮件 Endpoint");
+      assertRequiredConfig(values.aliyunMailRegionId, "请填写阿里云邮件区域");
+      assertRequiredConfig(values.aliyunMailAccountName, "请填写阿里云邮件发信地址");
+      assertRequiredConfig(values.aliyunMailSubject, "请填写邮件验证码标题");
+      assertRequiredConfig(values.aliyunMailBodyTemplate, "请填写邮件验证码模板");
+    }
+
+    if (values.smsVerificationEnabled === "true") {
+      assertRequiredConfig(values.aliyunSmsAccessKeyId, "请填写阿里云短信 AccessKey ID");
+      assertRequiredConfig(values.aliyunSmsAccessKeySecretEncrypted, "请填写阿里云短信 AccessKey Secret");
+      assertRequiredConfig(values.aliyunSmsEndpoint, "请填写阿里云短信 Endpoint");
+      assertRequiredConfig(values.aliyunSmsRegionId, "请填写阿里云短信区域");
+      assertRequiredConfig(values.aliyunSmsSignName, "请填写阿里云短信签名");
+      assertRequiredConfig(values.aliyunSmsTemplateCode, "请填写阿里云短信模板 Code");
+      assertRequiredConfig(values.aliyunSmsTemplateParamCodeKey, "请填写短信验证码变量名");
+    }
+  }
+}
+
+function assertRequiredConfig(value: string, message: string) {
+  if (!value.trim()) {
+    throw new AppException(40001, message, HttpStatus.BAD_REQUEST);
+  }
+}
+
+function normalizeSmsCodeTtlSeconds(value: string) {
+  if (!/^\d+$/.test(value)) {
+    throw new AppException(40001, "验证码有效期必须是整数秒", HttpStatus.BAD_REQUEST);
+  }
+
+  const seconds = Number(value);
+
+  if (!Number.isInteger(seconds) || seconds < 60 || seconds > 1800) {
+    throw new AppException(40001, "验证码有效期必须在 60 到 1800 秒之间", HttpStatus.BAD_REQUEST);
+  }
+
+  return String(seconds);
 }
 
 function normalizeMediaUploadSizeMb(value: string) {

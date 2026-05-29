@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { getPublicSystemConfigs } from "@/lib/settings-api";
 
 interface AuthPanelProps {
   title: string;
@@ -14,27 +15,16 @@ interface AuthPanelProps {
   };
 }
 
-export function AuthPanel({ title, description, children, footer }: AuthPanelProps) {
+export async function AuthPanel({ title, description, children, footer }: AuthPanelProps) {
+  const { siteLogo, siteName } = await getSiteIdentity();
+
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <div className="grid min-h-screen w-full px-5 py-10 lg:grid-cols-[1fr_440px] lg:gap-12">
-        <section className="hidden flex-col justify-center gap-8 lg:flex">
-          <Link className="font-display text-3xl font-light" href="/">
-            AI SaaS
+      <div className="mx-auto flex min-h-screen w-full max-w-[460px] flex-col justify-center px-5 py-10">
+        <section className="flex flex-col items-center gap-6">
+          <Link className="flex min-h-10 items-center justify-center font-display text-3xl font-light" href="/">
+            {siteLogo ? <img alt={siteName} className="max-h-12 w-auto object-contain" src={siteLogo} /> : siteName}
           </Link>
-          <div className="flex w-full flex-col gap-5">
-            <p className="w-fit rounded-full bg-secondary px-3 py-1 text-xs font-semibold">
-              简体中文工具站底座
-            </p>
-            <h1 className="font-display text-6xl font-light leading-tight tracking-normal">
-              登录后继续使用 AI 工具
-            </h1>
-            <p className="text-base leading-7 text-muted-foreground">
-              前台用户可进入工具列表、任务历史、点数充值和个人资料；会话通过 HTTP Cookie 保持，错误提示保持简体中文。
-            </p>
-          </div>
-        </section>
-        <section className="flex items-center">
           <Card className="w-full">
             <CardHeader>
               <CardTitle>{title}</CardTitle>
@@ -54,4 +44,39 @@ export function AuthPanel({ title, description, children, footer }: AuthPanelPro
       </div>
     </main>
   );
+}
+
+async function getSiteIdentity() {
+  try {
+    const configs = await getPublicSystemConfigs();
+    const configMap = new Map(configs.map((config) => [config.key, config.value]));
+
+    return {
+      siteLogo: safeImageUrl(configMap.get("siteLogo")),
+      siteName: configMap.get("siteName") || "AI SaaS"
+    };
+  } catch {
+    return {
+      siteLogo: "",
+      siteName: "AI SaaS"
+    };
+  }
+}
+
+function safeImageUrl(value: string | undefined) {
+  const normalized = value?.trim();
+
+  if (!normalized) {
+    return "";
+  }
+
+  if (normalized.startsWith("/") && !normalized.startsWith("//")) {
+    return normalized;
+  }
+
+  if (/^https?:\/\//i.test(normalized)) {
+    return normalized;
+  }
+
+  return "";
 }

@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, randomInt } from "node:crypto";
 import { HttpStatus, Injectable } from "@nestjs/common";
-import { getPrismaClient, hashPassword, verifyPassword } from "@aisaas/database";
+import { decryptSecret, getPrismaClient, hashPassword, verifyPassword } from "@aisaas/database";
 import { AppException } from "../common/app-exception.js";
 import {
   assertLoginAllowed,
@@ -52,6 +52,17 @@ const defaultPhoneVerificationCode = "199599";
 const phonePattern = /^1[3-9]\d{9}$/;
 
 type SmsCodePurpose = "LOGIN" | "BIND_PHONE";
+
+interface AliyunSmsConfig {
+  accessKeyId: string;
+  accessKeySecret: string;
+  endpoint: string;
+  regionId: string;
+  signName: string;
+  templateCode: string;
+  templateParamCodeKey: string;
+  timeoutMs: number;
+}
 
 @Injectable()
 export class AuthService {
@@ -149,14 +160,16 @@ export class AuthService {
     }
 
     const code = this.createSmsCode();
-    const expiresIn = this.getSmsCodeTtlSeconds();
+    const expiresIn = await this.getSmsCodeTtlSeconds();
     const expiresAt = new Date(Date.now() + expiresIn * 1000);
     let sendProvider = "LOCAL_DEFAULT";
     let sendRequestId: string | null = null;
     let sendStatus = "短信服务未配置，已启用默认验证码";
 
-    if (this.hasAliyunSmsConfig()) {
-      const sent = await this.sendAliyunSms(phone, code);
+    const aliyunSmsConfig = await this.getAliyunSmsConfig();
+
+    if (aliyunSmsConfig) {
+      const sent = await this.sendAliyunSms(phone, code, aliyunSmsConfig);
       sendProvider = "ALIYUN";
       sendRequestId = sent.requestId;
       sendStatus = sent.status;
@@ -605,44 +618,106 @@ export class AuthService {
     });
   }
 
-  private getSmsCodeTtlSeconds() {
-    const value = Number(process.env.SMS_CODE_TTL_SECONDS);
+  private async getSmsCodeTtlSeconds() {
+    const config = await this.prisma.systemConfig.findUnique({
+      where: {
+        key: "smsCodeTtlSeconds"
+      },
+      select: {
+        value: true
+      }
+    });
+    const value = Number(config?.value ?? process.env.SMS_CODE_TTL_SECONDS);
 
     return Number.isFinite(value) && value > 0 ? value : defaultSmsCodeTtlSeconds;
   }
 
-  private hasAliyunSmsConfig() {
-    return Boolean(
-      process.env.ALIYUN_SMS_ACCESS_KEY_ID?.trim() &&
-        process.env.ALIYUN_SMS_ACCESS_KEY_SECRET?.trim() &&
-        process.env.ALIYUN_SMS_SIGN_NAME?.trim() &&
-        process.env.ALIYUN_SMS_TEMPLATE_CODE?.trim()
-    );
-  }
+  private async getAliyunSmsConfig(): Promise<AliyunSmsConfig | null> {
+    const configs = await this.prisma.systemConfig.findMany({
+      where: {
+        key: {
+          in: [
+            "smsVerificationEnabled",
+            "aliyunSmsAccessKeyId",
+            "aliyunSmsAccessKeySecretEncrypted",
+            "aliyunSmsEndpoint",
+            "aliyunSmsRegionId",
+            "aliyunSmsSignName",
+            "aliyunSmsTemplateCode",
+            "aliyunSmsTemplateParamCodeKey",
+            "smsCodeTtlSeconds"
+          ]
+        }
+      }
+    });
+    const values = new Map(configs.map((config) => [config.key, config.value]));
+    const enabled = values.get("smsVerificationEnabled") === "true";
 
-  private async sendAliyunSms(phone: string, code: string) {
-    const accessKeyId = process.env.ALIYUN_SMS_ACCESS_KEY_ID?.trim();
-    const accessKeySecret = process.env.ALIYUN_SMS_ACCESS_KEY_SECRET?.trim();
-    const signName = process.env.ALIYUN_SMS_SIGN_NAME?.trim();
-    const templateCode = process.env.ALIYUN_SMS_TEMPLATE_CODE?.trim();
+    if (enabled) {
+      const accessKeyId = values.get("aliyunSmsAccessKeyId")?.trim();
+      const accessKeySecretEncrypted = values.get("aliyunSmsAccessKeySecretEncrypted")?.trim();
+      const signName = values.get("aliyunSmsSignName")?.trim();
+      const templateCode = values.get("aliyunSmsTemplateCode")?.trim();
 
-    if (!accessKeyId || !accessKeySecret || !signName || !templateCode) {
-      throw new AppException(50001, "短信服务配置缺失", HttpStatus.INTERNAL_SERVER_ERROR);
+      if (!accessKeyId || !accessKeySecretEncrypted || !signName || !templateCode) {
+        throw new AppException(50001, "短信服务配置缺失", HttpStatus.INTERNAL_SERVER_ERROR);
+      }
+
+      let accessKeySecret: string;
+
+      try {
+        accessKeySecret = decryptSecret(accessKeySecretEncrypted);
+      } catch {
+        throw new AppException(50001, "短信服务密钥无法解密，请在后台重新保存", HttpStatus.INTERNAL_SERVER_ERROR);
+      }
+
+      return {
+        accessKeyId,
+        accessKeySecret,
+        endpoint: values.get("aliyunSmsEndpoint")?.trim() || "https://dysmsapi.aliyuncs.com/",
+        regionId: values.get("aliyunSmsRegionId")?.trim() || "cn-hangzhou",
+        signName,
+        templateCode,
+        templateParamCodeKey: values.get("aliyunSmsTemplateParamCodeKey")?.trim() || "code",
+        timeoutMs: safePositiveNumber(process.env.ALIYUN_SMS_TIMEOUT_MS, 10_000)
+      };
     }
 
+    const envAccessKeyId = process.env.ALIYUN_SMS_ACCESS_KEY_ID?.trim();
+    const envAccessKeySecret = process.env.ALIYUN_SMS_ACCESS_KEY_SECRET?.trim();
+    const envSignName = process.env.ALIYUN_SMS_SIGN_NAME?.trim();
+    const envTemplateCode = process.env.ALIYUN_SMS_TEMPLATE_CODE?.trim();
+
+    if (!envAccessKeyId || !envAccessKeySecret || !envSignName || !envTemplateCode) {
+      return null;
+    }
+
+    return {
+      accessKeyId: envAccessKeyId,
+      accessKeySecret: envAccessKeySecret,
+      endpoint: process.env.ALIYUN_SMS_ENDPOINT || "https://dysmsapi.aliyuncs.com/",
+      regionId: process.env.ALIYUN_SMS_REGION_ID?.trim() || "cn-hangzhou",
+      signName: envSignName,
+      templateCode: envTemplateCode,
+      templateParamCodeKey: process.env.ALIYUN_SMS_TEMPLATE_PARAM_CODE_KEY?.trim() || "code",
+      timeoutMs: safePositiveNumber(process.env.ALIYUN_SMS_TIMEOUT_MS, 10_000)
+    };
+  }
+
+  private async sendAliyunSms(phone: string, code: string, config: AliyunSmsConfig) {
     const params: Record<string, string> = {
-      AccessKeyId: accessKeyId,
+      AccessKeyId: config.accessKeyId,
       Action: "SendSms",
       Format: "JSON",
       PhoneNumbers: phone,
-      RegionId: process.env.ALIYUN_SMS_REGION_ID?.trim() || "cn-hangzhou",
-      SignName: signName,
+      RegionId: config.regionId,
+      SignName: config.signName,
       SignatureMethod: "HMAC-SHA1",
       SignatureNonce: randomBytes(16).toString("hex"),
       SignatureVersion: "1.0",
-      TemplateCode: templateCode,
+      TemplateCode: config.templateCode,
       TemplateParam: JSON.stringify({
-        [process.env.ALIYUN_SMS_TEMPLATE_PARAM_CODE_KEY?.trim() || "code"]: code
+        [config.templateParamCodeKey]: code
       }),
       Timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
       Version: "2017-05-25"
@@ -652,17 +727,16 @@ export class AuthService {
       .map((key) => `${this.aliyunEncode(key)}=${this.aliyunEncode(params[key] ?? "")}`)
       .join("&");
     const stringToSign = `POST&%2F&${this.aliyunEncode(canonicalQuery)}`;
-    const signature = createHmac("sha1", `${accessKeySecret}&`).update(stringToSign).digest("base64");
+    const signature = createHmac("sha1", `${config.accessKeySecret}&`).update(stringToSign).digest("base64");
     const body = new URLSearchParams({
       ...params,
       Signature: signature
     });
-    const timeoutMs = Number(process.env.ALIYUN_SMS_TIMEOUT_MS || 10_000);
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), Number.isFinite(timeoutMs) ? timeoutMs : 10_000);
+    const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
 
     try {
-      const response = await fetch(process.env.ALIYUN_SMS_ENDPOINT || "https://dysmsapi.aliyuncs.com/", {
+      const response = await fetch(config.endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded"
@@ -740,4 +814,10 @@ export class AuthService {
   private getRefreshMaxAge() {
     return parseExpiresIn(process.env.JWT_REFRESH_EXPIRES_IN, defaultPersistentSessionSeconds);
   }
+}
+
+function safePositiveNumber(value: string | number | undefined | null, fallback: number) {
+  const numberValue = Number(value);
+
+  return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : fallback;
 }

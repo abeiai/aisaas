@@ -8,6 +8,7 @@ import {
   LayoutTemplate,
   LayoutDashboard,
   Menu,
+  Mail,
   Package,
   PanelsTopLeft,
   Mic2,
@@ -290,6 +291,11 @@ export const adminNavGroups: AdminNavGroup[] = [
         href: "/admin/payment-config",
         label: "支付配置",
         icon: CreditCard
+      },
+      {
+        href: "/admin/send",
+        label: "邮件短信",
+        icon: Mail
       },
       {
         href: "/admin/system/env-check",

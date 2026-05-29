@@ -144,6 +144,116 @@ export class UpdateSystemConfigDto {
   @IsOptional()
   @IsString()
   @MaxLength(10)
+  emailVerificationEnabled?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  emailVerificationProvider?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  aliyunMailAccessKeyId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  aliyunMailAccessKeySecretEncrypted?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  aliyunMailEndpoint?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  aliyunMailRegionId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  aliyunMailAccountName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  aliyunMailFromAlias?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2)
+  aliyunMailAddressType?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  aliyunMailReplyToAddress?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  aliyunMailSubject?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  aliyunMailBodyTemplate?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  smsVerificationEnabled?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  smsVerificationProvider?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  aliyunSmsAccessKeyId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  aliyunSmsAccessKeySecretEncrypted?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  aliyunSmsEndpoint?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  aliyunSmsRegionId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  aliyunSmsSignName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  aliyunSmsTemplateCode?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  aliyunSmsTemplateParamCodeKey?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5)
+  smsCodeTtlSeconds?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
   audioVoiceCloneReviewRequired?: string;
 
   @IsOptional()
