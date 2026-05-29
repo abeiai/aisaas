@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 
 import { VideoGenerationConsole } from "@/components/experience/video-generation-console";
 import { getOptionalCurrentUser } from "@/lib/auth-actions";
-import { getWallet } from "@/lib/billing-api";
 import { getExperienceVideoModels } from "@/lib/experience-api";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +16,6 @@ export default async function ExperienceVideoPage() {
     getExperienceVideoModels(),
     getOptionalCurrentUser()
   ]);
-  const wallet = currentUser ? await getWallet().catch(() => null) : null;
 
-  return <VideoGenerationConsole availableCredits={wallet?.availableCredits ?? null} currentUser={currentUser} models={models} />;
+  return <VideoGenerationConsole currentUser={currentUser} models={models} />;
 }

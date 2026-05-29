@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 
 import { ImageGenerationConsole } from "@/components/experience/image-generation-console";
 import { getOptionalCurrentUser } from "@/lib/auth-actions";
-import { getWallet } from "@/lib/billing-api";
 import { getExperienceImageModels } from "@/lib/experience-api";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +16,6 @@ export default async function ExperienceImagePage() {
     getExperienceImageModels(),
     getOptionalCurrentUser()
   ]);
-  const wallet = currentUser ? await getWallet().catch(() => null) : null;
 
-  return <ImageGenerationConsole availableCredits={wallet?.availableCredits ?? null} currentUser={currentUser} models={models} />;
+  return <ImageGenerationConsole currentUser={currentUser} models={models} />;
 }

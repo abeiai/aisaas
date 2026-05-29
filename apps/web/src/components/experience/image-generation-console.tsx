@@ -3,27 +3,20 @@
 import Link from "next/link";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ChevronDown,
   Download,
   History,
-  ImagePlus,
   Images,
-  LogIn,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
   RotateCcw,
-  Search,
-  Settings2,
   Sparkles,
   Trash2,
-  UserRound,
   WandSparkles
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
-import { UserAccountMenu } from "@/components/shell/user-account-menu";
 import { Textarea } from "@/components/ui/textarea";
 import type { PublicUser } from "@/lib/auth-actions";
 import type { ExperienceImageModel } from "@/lib/experience-api";
@@ -31,7 +24,6 @@ import { cn } from "@/lib/utils";
 
 interface ImageGenerationConsoleProps {
   currentUser: PublicUser | null;
-  availableCredits?: number | null;
   models: ExperienceImageModel[];
 }
 
@@ -103,7 +95,7 @@ const ratios = [
 const modes = ["图片生成", "参考图生成", "风格延展"];
 const resolutions = ["高清 2K", "超清 4K"];
 
-export function ImageGenerationConsole({ currentUser, availableCredits, models }: ImageGenerationConsoleProps) {
+export function ImageGenerationConsole({ currentUser, models }: ImageGenerationConsoleProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [history, setHistory] = useState<ImageJob[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -330,11 +322,11 @@ export function ImageGenerationConsole({ currentUser, availableCredits, models }
   }
 
   return (
-    <main className="flex h-screen overflow-hidden bg-secondary/50 text-foreground">
+    <main className="flex h-[calc(100vh-4rem)] overflow-hidden bg-secondary/50 text-foreground">
       <aside
         className={cn(
           "flex shrink-0 flex-col border-r border-border bg-background transition-[width] duration-200",
-          sidebarCollapsed ? "w-20" : "w-80"
+          sidebarCollapsed ? "w-[72px]" : "w-60 lg:w-[280px]"
         )}
       >
         <div className="flex items-center justify-between gap-3 px-5 py-5">
@@ -400,62 +392,20 @@ export function ImageGenerationConsole({ currentUser, availableCredits, models }
           </div>
         </div>
 
-        <div className="border-t border-border p-4">
-          {currentUser ? (
-            <div className="flex items-center gap-3">
-              <div className="flex size-9 items-center justify-center rounded-full bg-foreground text-background">
-                <UserRound className="size-5" />
-              </div>
-              {!sidebarCollapsed ? (
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{currentUser.nickname || "体验区用户"}</p>
-                  <p className="text-xs text-muted-foreground">历史暂存于本机</p>
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <Button asChild className="w-full" variant="outline">
-              <Link href={`/login?next=${encodeURIComponent("/experience/image")}`}>
-                <LogIn data-icon="inline-start" />
-                {!sidebarCollapsed ? "登录" : null}
-              </Link>
-            </Button>
-          )}
-        </div>
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col">
-        <header className="flex shrink-0 flex-col gap-4 border-b border-border bg-background px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <ImagePlus className="size-7" />
-              <h1 className="text-xl font-semibold">图片生成</h1>
-            </div>
-            <p className="mt-1 text-sm text-muted-foreground">体验区 · 文生图与参考图生成</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="hidden items-center gap-2 rounded-full border border-border bg-secondary px-3 py-2 text-sm text-muted-foreground md:flex">
-              <Search className="size-4" />
-              <span>时间</span>
-              <ChevronDown className="size-4" />
-            </div>
-            <div className="hidden items-center gap-2 rounded-full border border-border bg-secondary px-3 py-2 text-sm text-muted-foreground md:flex">
-              <Settings2 className="size-4" />
-              <span>生成模式</span>
-              <ChevronDown className="size-4" />
-            </div>
-            <Select value={selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)}>
-              {models.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.displayName} · {model.providerPresetName}
-                </option>
-              ))}
-            </Select>
-            <UserAccountMenu
-              availableCredits={availableCredits}
-              loginHref={`/login?next=${encodeURIComponent("/experience/image")}`}
-              user={currentUser}
-            />
+        <header className="flex min-h-16 shrink-0 items-center justify-end border-b border-border bg-background px-5 py-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <label className="flex min-w-0 text-sm md:w-80">
+              <Select value={selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)}>
+                {models.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.displayName} · {model.providerPresetName}
+                  </option>
+                ))}
+              </Select>
+            </label>
           </div>
         </header>
 
@@ -476,7 +426,7 @@ export function ImageGenerationConsole({ currentUser, availableCredits, models }
         <div
           className={cn(
             "pointer-events-none fixed bottom-0 left-0 right-0 z-20 px-5 pb-5 transition-[left] duration-200",
-            sidebarCollapsed ? "md:left-20" : "md:left-80"
+            sidebarCollapsed ? "md:left-[72px]" : "md:left-60 lg:left-[280px]"
           )}
         >
           <div className="pointer-events-auto mx-auto max-w-6xl rounded-2xl border border-border bg-background/95 p-4 shadow-lg backdrop-blur">
@@ -628,7 +578,7 @@ function EmptyCanvas() {
     <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-dashed border-border bg-background">
       <div className="max-w-md px-6 text-center">
         <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-secondary">
-          <ImagePlus className="size-7" />
+          <Images className="size-7" />
         </div>
         <h2 className="mt-5 text-2xl font-semibold">开始生成图片</h2>
         <p className="mt-3 text-sm leading-6 text-muted-foreground">

@@ -19,7 +19,6 @@ import {
   type VoiceLibrary
 } from "@/lib/audio-api";
 import { getOptionalCurrentUser } from "@/lib/auth-actions";
-import { getWallet } from "@/lib/billing-api";
 import { cosyVoiceV35Presets } from "@/lib/cosyvoice-v35-presets";
 
 export const dynamic = "force-dynamic";
@@ -58,22 +57,19 @@ export default async function ExperienceVoicePage({
   let library: VoiceLibrary | null = null;
   let tasks: AudioTask[] = [];
   let task: AudioTask | null = null;
-  let availableCredits: number | null = null;
 
   if (currentUser) {
-    const [modelsResult, libraryResult, tasksResult, taskResult, wallet] = await Promise.all([
+    const [modelsResult, libraryResult, tasksResult, taskResult] = await Promise.all([
       getAudioModels().catch(() => []),
       getVoiceLibrary().catch(() => null),
       getAudioTasks().catch(() => []),
-      query.task ? getAudioTask(query.task).catch(() => null) : Promise.resolve(null),
-      getWallet().catch(() => null)
+      query.task ? getAudioTask(query.task).catch(() => null) : Promise.resolve(null)
     ]);
 
     models = modelsResult;
     library = libraryResult;
     tasks = tasksResult;
     task = taskResult;
-    availableCredits = wallet?.availableCredits ?? null;
   }
 
   const voiceModels = mapVoiceModels(models);
@@ -84,7 +80,6 @@ export default async function ExperienceVoicePage({
   return (
     <VoiceConsole
       createAction={createExperienceTtsAudioTaskAction}
-      availableCredits={availableCredits}
       currentTask={currentTask}
       currentUser={currentUser}
       error={query.error}

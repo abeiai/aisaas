@@ -11,7 +11,6 @@ import {
   Clipboard,
   FileText,
   ImageIcon,
-  LogIn,
   MessageCircle,
   PanelLeftClose,
   PanelLeftOpen,
@@ -21,14 +20,12 @@ import {
   Sparkles,
   Square,
   Upload,
-  UserRound,
   X
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { MarkdownContent } from "@/components/markdown/markdown-content";
 import { Select } from "@/components/ui/select";
-import { UserAccountMenu } from "@/components/shell/user-account-menu";
 import { Textarea } from "@/components/ui/textarea";
 import type { PublicUser } from "@/lib/auth-actions";
 import type { ExperienceChatModel } from "@/lib/experience-api";
@@ -70,7 +67,6 @@ interface ChatTokenUsage {
 
 interface AiChatConsoleProps {
   currentUser: PublicUser | null;
-  availableCredits?: number | null;
   models: ExperienceChatModel[];
 }
 
@@ -128,14 +124,13 @@ const attachmentCapabilityTags = ["VISION", "MULTIMODAL", "IMAGE", "IMAGE_INPUT"
 const reasoningCapabilityTags = ["REASONING"];
 const searchCapabilityTags = ["SEARCH", "WEB_SEARCH", "BROWSING", "TOOLS"];
 
-export function AiChatConsole({ currentUser, availableCredits, models }: AiChatConsoleProps) {
+export function AiChatConsole({ currentUser, models }: AiChatConsoleProps) {
   const normalizedModels = useMemo(() => (models.length > 0 ? models : []), [models]);
   const [selectedModelId, setSelectedModelId] = useState(normalizedModels[0]?.id ?? "mock");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState("选择模型后输入问题，即可开始体验。");
   const [isPending, setIsPending] = useState(false);
-  const [accountCredits, setAccountCredits] = useState(availableCredits ?? null);
   const [pendingAttachments, setPendingAttachments] = useState<PendingChatAttachment[]>([]);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const [reasoningEnabled, setReasoningEnabled] = useState(false);
@@ -175,10 +170,6 @@ export function AiChatConsole({ currentUser, availableCredits, models }: AiChatC
   useEffect(() => {
     pendingAttachmentsRef.current = pendingAttachments;
   }, [pendingAttachments]);
-
-  useEffect(() => {
-    setAccountCredits(availableCredits ?? null);
-  }, [availableCredits]);
 
   useEffect(() => {
     resizeComposerTextarea();
@@ -679,11 +670,6 @@ export function AiChatConsole({ currentUser, availableCredits, models }: AiChatC
               consumedCredits,
               modelName: eventData.task?.modelName ?? null
             });
-            if (typeof consumedCredits === "number") {
-              setAccountCredits((current) =>
-                typeof current === "number" ? Math.max(0, current - consumedCredits) : current
-              );
-            }
             setStatus(eventData.task?.statusName ?? "对话完成");
             return {
               ok: true
@@ -765,13 +751,13 @@ export function AiChatConsole({ currentUser, availableCredits, models }: AiChatC
   return (
     <main
       className={cn(
-        "grid h-screen min-h-0 w-full overflow-hidden bg-background",
+        "grid h-[calc(100vh-4rem)] min-h-0 w-full overflow-hidden bg-background",
         sidebarCollapsed
           ? "grid-cols-[72px_minmax(0,1fr)]"
           : "grid-cols-[240px_minmax(0,1fr)] lg:grid-cols-[280px_minmax(0,1fr)]"
       )}
     >
-      <aside className="flex h-screen min-h-0 min-w-0 flex-col overflow-hidden border-r border-border bg-card">
+      <aside className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-border bg-card">
         <div className={cn("flex h-16 items-center px-4", sidebarCollapsed ? "justify-center" : "justify-between")}>
           {sidebarCollapsed ? (
             <Button
@@ -785,9 +771,9 @@ export function AiChatConsole({ currentUser, availableCredits, models }: AiChatC
             </Button>
           ) : (
             <>
-              <Link className="flex min-w-0 items-center gap-2 font-display text-2xl font-light" href="/">
-                <Sparkles className="text-primary" />
-                <span className="truncate">AI SaaS</span>
+              <Link className="flex min-w-0 items-center gap-2 font-display text-2xl font-light" href="/experience/chat">
+                <MessageCircle className="text-primary" />
+                <span className="truncate">AI 对话</span>
               </Link>
               <Button
                 aria-label="收起历史对话"
@@ -818,14 +804,6 @@ export function AiChatConsole({ currentUser, availableCredits, models }: AiChatC
             <div className="flex flex-1 flex-col items-center gap-3 px-3 py-5 text-muted-foreground">
               <Search />
               <MessageCircle />
-              <UserRound />
-            </div>
-            <div className="flex justify-center border-t border-border px-3 py-4">
-              <Button asChild aria-label={currentUser ? "进入用户中心" : "登录"} size="sm" variant="ghost">
-                <Link href={currentUser ? "/dashboard" : "/login?next=/experience/chat"}>
-                  {currentUser ? <UserRound /> : <LogIn />}
-                </Link>
-              </Button>
             </div>
           </>
         ) : (
@@ -855,42 +833,14 @@ export function AiChatConsole({ currentUser, availableCredits, models }: AiChatC
                 )}
               </div>
             </div>
-            <div className="border-t border-border px-5 py-4 text-sm">
-              {currentUser ? (
-                <Link className="flex items-center gap-3 rounded-lg transition-colors hover:text-foreground" href="/dashboard">
-                  <span className="flex size-9 items-center justify-center rounded-full bg-secondary">
-                    <UserRound />
-                  </span>
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate text-foreground">{currentUser.nickname || "体验区用户"}</span>
-                    <span className="truncate text-xs text-muted-foreground">{currentUser.email}</span>
-                  </span>
-                </Link>
-              ) : (
-                <Button asChild className="w-full" variant="outline">
-                  <Link href="/login?next=/experience/chat">
-                    <LogIn data-icon="inline-start" />
-                    登录后体验
-                  </Link>
-                </Button>
-              )}
-            </div>
           </>
         )}
       </aside>
 
-      <div className="flex h-screen min-h-0 flex-col overflow-hidden">
-        <header className="flex min-h-16 shrink-0 flex-col gap-3 border-b border-border px-5 py-4 md:flex-row md:items-center md:justify-between">
-          <div className="flex min-w-0 flex-col gap-1">
-            <div className="flex items-center gap-2">
-              <MessageCircle className="text-primary" />
-              <h1 className="text-xl font-medium">AI 对话</h1>
-            </div>
-            <p className="text-sm text-muted-foreground">体验区 · 基础 Chat 能力</p>
-          </div>
-          <div className="flex min-w-0 items-end gap-3">
-            <label className="flex min-w-0 flex-col gap-1 text-sm md:w-80">
-              <span className="text-xs font-medium text-muted-foreground">选择模型</span>
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
+        <header className="flex min-h-16 shrink-0 items-center justify-end border-b border-border px-5 py-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <label className="flex min-w-0 text-sm md:w-80">
               <Select value={selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)}>
                 {normalizedModels.map((model) => (
                   <option key={model.id} value={model.id}>
@@ -899,11 +849,6 @@ export function AiChatConsole({ currentUser, availableCredits, models }: AiChatC
                 ))}
               </Select>
             </label>
-            <UserAccountMenu
-              availableCredits={accountCredits}
-              loginHref="/login?next=/experience/chat"
-              user={currentUser}
-            />
           </div>
         </header>
 

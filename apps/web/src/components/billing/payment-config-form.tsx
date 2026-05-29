@@ -19,30 +19,50 @@ const initialState: PaymentConfigActionState = {};
 
 function statusBadge(enabled: boolean, ready: boolean) {
   if (enabled && ready) {
-    return <Badge variant="secondary">已启用</Badge>;
+    return (
+      <Badge className="px-4 py-2 text-sm" variant="secondary">
+        已启用
+      </Badge>
+    );
   }
 
   if (ready) {
-    return <Badge variant="outline">已配置，未启用</Badge>;
+    return (
+      <Badge className="px-4 py-2 text-sm" variant="outline">
+        已配置，未启用
+      </Badge>
+    );
   }
 
-  return <Badge variant="muted">待配置</Badge>;
+  return (
+    <Badge className="px-4 py-2 text-sm" variant="muted">
+      待配置
+    </Badge>
+  );
 }
 
 export function PaymentConfigForm({ config }: { config: AdminPaymentConfig }) {
-  const [state, formAction, isPending] = useActionState(updatePaymentConfigAction, initialState);
+  const [alipayState, alipayFormAction, isAlipayPending] = useActionState(updatePaymentConfigAction, initialState);
+  const [wechatState, wechatFormAction, isWechatPending] = useActionState(updatePaymentConfigAction, initialState);
 
   return (
-    <form action={formAction} className="flex flex-col gap-6">
-      <Card>
+    <div className="flex flex-col gap-6">
+      <form action={alipayFormAction}>
+        <Card>
         <CardHeader className="flex flex-row items-start justify-between gap-4">
           <div className="flex flex-col gap-1.5">
             <CardTitle>支付宝</CardTitle>
             <CardDescription>同一套商户凭据下，分别控制 PC 与手机浏览器可用能力。</CardDescription>
           </div>
-          {statusBadge(config.alipay.enabled, config.alipay.ready)}
+          <PaymentCardActions
+            enabled={config.alipay.enabled}
+            isPending={isAlipayPending}
+            ready={config.alipay.ready}
+            saveLabel="保存支付宝"
+          />
         </CardHeader>
         <CardContent>
+          <WechatHiddenFields config={config.wechatPay} />
           <FieldGroup className="grid gap-4 xl:grid-cols-2">
             <Field>
               <FieldLabel htmlFor="alipay-enabled">启用支付宝</FieldLabel>
@@ -104,18 +124,27 @@ export function PaymentConfigForm({ config }: { config: AdminPaymentConfig }) {
               <FieldDescription>可选，用于用户完成支付后的浏览器跳转。</FieldDescription>
             </Field>
           </FieldGroup>
+          <ActionMessage state={alipayState} />
         </CardContent>
       </Card>
+      </form>
 
-      <Card>
+      <form action={wechatFormAction}>
+        <Card>
         <CardHeader className="flex flex-row items-start justify-between gap-4">
           <div className="flex flex-col gap-1.5">
             <CardTitle>微信支付</CardTitle>
             <CardDescription>按 PC、手机浏览器和微信内浏览器分别启用支付产品。</CardDescription>
           </div>
-          {statusBadge(config.wechatPay.enabled, config.wechatPay.ready)}
+          <PaymentCardActions
+            enabled={config.wechatPay.enabled}
+            isPending={isWechatPending}
+            ready={config.wechatPay.ready}
+            saveLabel="保存微信支付"
+          />
         </CardHeader>
         <CardContent>
+          <AlipayHiddenFields config={config.alipay} />
           <FieldGroup className="grid gap-4 xl:grid-cols-2">
             <Field>
               <FieldLabel htmlFor="wechat-enabled">启用微信支付</FieldLabel>
@@ -211,15 +240,88 @@ export function PaymentConfigForm({ config }: { config: AdminPaymentConfig }) {
               <FieldDescription>仅微信内 JSAPI 支付需要。</FieldDescription>
             </Field>
           </FieldGroup>
+          <ActionMessage state={wechatState} />
         </CardContent>
       </Card>
-
-      {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
-      {state.success ? <p className="text-sm text-muted-foreground">{state.success}</p> : null}
-
-      <Button className="w-fit" disabled={isPending} type="submit">
-        {isPending ? "保存中..." : "保存支付配置"}
-      </Button>
-    </form>
+      </form>
+    </div>
   );
+}
+
+function PaymentCardActions({
+  enabled,
+  isPending,
+  ready,
+  saveLabel
+}: {
+  enabled: boolean;
+  isPending: boolean;
+  ready: boolean;
+  saveLabel: string;
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-3">
+      {statusBadge(enabled, ready)}
+      <Button disabled={isPending} size="sm" type="submit">
+        {isPending ? "保存中..." : saveLabel}
+      </Button>
+    </div>
+  );
+}
+
+function ActionMessage({ state }: { state: PaymentConfigActionState }) {
+  if (state.error) {
+    return <p className="mt-4 text-sm text-destructive">{state.error}</p>;
+  }
+
+  if (state.success) {
+    return <p className="mt-4 text-sm text-muted-foreground">{state.success}</p>;
+  }
+
+  return null;
+}
+
+function AlipayHiddenFields({ config }: { config: AdminPaymentConfig["alipay"] }) {
+  return (
+    <>
+      <HiddenBoolean name="alipayEnabled" value={config.enabled} />
+      <HiddenBoolean name="alipayPageEnabled" value={config.pageEnabled} />
+      <HiddenBoolean name="alipayWapEnabled" value={config.wapEnabled} />
+      <HiddenText name="alipayAppId" value={config.appId} />
+      <HiddenText name="alipayEnvironment" value={config.environment} />
+      <HiddenText name="alipayPrivateKey" value="" />
+      <HiddenText name="alipayPublicKey" value="" />
+      <HiddenText name="alipayNotifyUrl" value={config.notifyUrl} />
+      <HiddenText name="alipayReturnUrl" value={config.returnUrl} />
+    </>
+  );
+}
+
+function WechatHiddenFields({ config }: { config: AdminPaymentConfig["wechatPay"] }) {
+  return (
+    <>
+      <HiddenBoolean name="wechatPayEnabled" value={config.enabled} />
+      <HiddenBoolean name="wechatPayNativeEnabled" value={config.nativeEnabled} />
+      <HiddenBoolean name="wechatPayH5Enabled" value={config.h5Enabled} />
+      <HiddenBoolean name="wechatPayJsapiEnabled" value={config.jsapiEnabled} />
+      <HiddenText name="wechatPayAppId" value={config.appId} />
+      <HiddenText name="wechatPayMerchantId" value={config.merchantId} />
+      <HiddenText name="wechatPayApiV3Key" value="" />
+      <HiddenText name="wechatPayMerchantPrivateKey" value="" />
+      <HiddenText name="wechatPayMerchantSerialNo" value={config.merchantSerialNo} />
+      <HiddenText name="wechatPayNotifyUrl" value={config.notifyUrl} />
+      <HiddenText name="wechatPayPublicKey" value="" />
+      <HiddenText name="wechatPayPublicKeyId" value={config.publicKeyId} />
+      <HiddenText name="wechatPayAppSecret" value="" />
+      <HiddenText name="wechatPayJsapiOauthCallbackUrl" value={config.jsapiOauthCallbackUrl} />
+    </>
+  );
+}
+
+function HiddenBoolean({ name, value }: { name: string; value: boolean }) {
+  return value ? <input defaultValue="on" name={name} type="hidden" /> : null;
+}
+
+function HiddenText({ name, value }: { name: string; value: string }) {
+  return <input defaultValue={value} name={name} type="hidden" />;
 }

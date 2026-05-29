@@ -15,7 +15,6 @@ import {
   Play,
   RotateCcw,
   Sparkles,
-  UserRound,
   Volume2,
   WandSparkles
 } from "lucide-react";
@@ -23,7 +22,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
-import { UserAccountMenu } from "@/components/shell/user-account-menu";
 import { Textarea } from "@/components/ui/textarea";
 import type { PublicUser } from "@/lib/auth-actions";
 import { cosyVoiceV35PresetPrefix } from "@/lib/cosyvoice-v35-presets";
@@ -79,7 +77,6 @@ export interface CurrentVoiceTask extends VoiceTaskItem {
 
 interface VoiceConsoleProps {
   currentUser: PublicUser | null;
-  availableCredits?: number | null;
   models: VoiceModelOption[];
   voices: VoiceOption[];
   history: VoiceTaskItem[];
@@ -103,7 +100,6 @@ interface VoiceConsoleDraft {
 
 export function VoiceConsole({
   currentUser,
-  availableCredits,
   models,
   voices,
   history,
@@ -271,7 +267,7 @@ export function VoiceConsole({
   return (
     <main
       className={cn(
-        "grid h-screen min-h-0 overflow-hidden bg-[#f6f6f5] text-foreground",
+        "grid h-[calc(100vh-4rem)] min-h-0 overflow-hidden bg-[#f6f6f5] text-foreground",
         sidebarCollapsed ? "grid-cols-[76px_minmax(0,1fr)]" : "grid-cols-[292px_minmax(0,1fr)]"
       )}
     >
@@ -345,26 +341,6 @@ export function VoiceConsole({
           )}
         </div>
 
-        <div className="flex shrink-0 items-center gap-3 border-t border-border px-5 py-4">
-          <div className="flex size-10 items-center justify-center rounded-full bg-primary text-primary-foreground">
-            <UserRound className="size-5" />
-          </div>
-          {!sidebarCollapsed ? (
-            currentUser ? (
-              <div className="min-w-0 text-sm">
-                <p className="truncate font-medium">{currentUser.nickname || "体验区用户"}</p>
-                <p className="truncate text-xs text-muted-foreground">{currentUser.email}</p>
-              </div>
-            ) : (
-              <Button asChild className="flex-1" size="sm">
-                <Link href={`/login?next=${encodeURIComponent("/experience/voice")}`}>
-                  <LogIn data-icon="inline-start" />
-                  登录后合成
-                </Link>
-              </Button>
-            )
-          ) : null}
-        </div>
       </aside>
 
       <form action={createAction} className="flex min-h-0 flex-col">
@@ -388,11 +364,6 @@ export function VoiceConsole({
                 {models.length === 0 ? <option value="tts-default">默认语音合成模型 · 登录后加载</option> : null}
               </Select>
             </label>
-            <UserAccountMenu
-              availableCredits={availableCredits}
-              loginHref={`/login?next=${encodeURIComponent("/experience/voice")}`}
-              user={currentUser}
-            />
           </div>
         </header>
 
