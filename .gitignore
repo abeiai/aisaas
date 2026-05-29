@@ -19,6 +19,7 @@ backups/
 *.backup
 *.dump
 *.sql.gz
+*.pem
 deploy/certs/*
 !deploy/certs/.gitkeep
 deploy/data/postgres/

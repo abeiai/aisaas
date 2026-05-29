@@ -74,6 +74,7 @@ echo "  api-core:   ${API_CORE_IMAGE}"
 echo "  ai-gateway: ${AI_GATEWAY_IMAGE}"
 
 run mkdir -p deploy/data/logs/api-core deploy/data/logs/nginx deploy/data/uploads
+run chown -R 1000:1000 deploy/data/logs/api-core deploy/data/uploads
 
 run compose down --remove-orphans
 

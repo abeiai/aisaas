@@ -33,16 +33,6 @@ const defaultFooterLinks = [
   { href: "/pages/about", label: "关于我们" }
 ];
 
-const accountLinks = [
-  { href: "/dashboard", label: "用户中心" },
-  { href: "/dashboard/tasks", label: "任务历史" },
-  { href: "/dashboard/voices", label: "我的音色" },
-  { href: "/dashboard/billing", label: "账单中心" },
-  { href: "/dashboard/profile", label: "个人资料" },
-  { href: "/admin/login", label: "管理员登录" },
-  { href: "/admin/articles", label: "文章管理" }
-];
-
 export async function PublicShell({
   children,
   showHeader = true,
@@ -55,10 +45,8 @@ export async function PublicShell({
   const wallet = user ? await getWallet().catch(() => null) : null;
   const siteName = configs.get("siteName") || "AI SaaS";
   const siteLogo = safeImageUrl(configs.get("siteLogo"));
-  const footerText =
-    configs.get("footerText") || configs.get("siteDescription") || "面向中国市场的简体中文 AI SaaS / 内容型工具站底座。";
   const beianNo = configs.get("beianNo") || "";
-  const serviceQrCode = safeImageUrl(configs.get("serviceQrCode"));
+  const copyrightText = configs.get("copyrightText") || "";
   const siteMenusValue = configs.get("siteMenus");
   const hasManagedMenus = Boolean(siteMenusValue?.trim());
   const siteMenus = parseSiteMenuConfig(siteMenusValue);
@@ -86,7 +74,7 @@ export async function PublicShell({
           <div className="flex h-16 w-full items-center justify-between px-5">
             <Link className="flex min-w-0 items-center gap-2 font-display text-2xl font-light tracking-normal" href="/">
               {siteLogo ? <img alt={siteName} className="h-8 w-auto shrink-0 object-contain" src={siteLogo} /> : null}
-              <span className="truncate">{siteName}</span>
+              {!siteLogo ? <span className="truncate">{siteName}</span> : null}
             </Link>
             <nav className="hidden items-center gap-7 text-sm font-medium text-muted-foreground lg:flex">
               {navItems.map((item, index) => (
@@ -111,29 +99,20 @@ export async function PublicShell({
       {children}
       {showFooter ? (
         <footer className="border-t border-border bg-background">
-          <div className="grid w-full gap-8 px-5 py-12 md:grid-cols-[1.2fr_1fr_1fr]">
-            <div className="flex flex-col gap-3">
-              <p className="font-display text-2xl font-light">{siteName}</p>
-              <p className="max-w-md text-sm leading-6 text-muted-foreground">{footerText}</p>
-              {beianNo ? <p className="text-xs text-muted-foreground">{beianNo}</p> : null}
-              {serviceQrCode ? (
-                <img alt="客服二维码" className="mt-2 size-24 rounded-md border border-border object-cover" src={serviceQrCode} />
-              ) : null}
-            </div>
-            <div className="flex flex-col gap-3 text-sm text-muted-foreground">
-              <p className="font-medium text-foreground">前台入口</p>
-              {footerLinks.map((item) => (
-                <FooterMenuItem item={item} key={item.id} />
-              ))}
-            </div>
-            <div className="flex flex-col gap-3 text-sm text-muted-foreground">
-              <p className="font-medium text-foreground">账户入口</p>
-              {accountLinks.map((item) => (
-                <Link href={item.href} key={item.href}>
-                  {item.label}
-                </Link>
-              ))}
-            </div>
+          <div className="flex w-full flex-col items-center gap-4 px-5 py-8 text-center text-sm text-muted-foreground">
+            {footerLinks.length > 0 ? (
+              <nav className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
+                {footerLinks.map((item) => (
+                  <FooterMenuItem item={item} key={item.id} />
+                ))}
+              </nav>
+            ) : null}
+            {beianNo || copyrightText ? (
+              <p className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs">
+                {beianNo ? <span>{beianNo}</span> : null}
+                {copyrightText ? <span>{copyrightText}</span> : null}
+              </p>
+            ) : null}
           </div>
         </footer>
       ) : null}
@@ -196,9 +175,9 @@ function HeaderMenuItem({ item }: { item: NavMenuItem }) {
 function FooterMenuItem({ item }: { item: NavMenuItem }) {
   return (
     <>
-      <MenuLink item={item} />
+      <MenuLink className="hover:text-foreground" item={item} />
       {item.children.map((child) => (
-        <MenuLink className="pl-3 text-xs" item={child} key={child.id} />
+        <MenuLink className="hover:text-foreground" item={child} key={child.id} />
       ))}
     </>
   );

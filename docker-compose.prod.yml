@@ -16,6 +16,7 @@ services:
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./deploy/nginx/conf.d:/etc/nginx/conf.d:ro
       - ./deploy/certs:/etc/nginx/certs:ro
+      - ./deploy/data/certbot:/var/www/certbot:ro
       - ./deploy/data/logs/nginx:/var/log/nginx
       - ./deploy/data/uploads:/var/www/uploads:ro
     healthcheck:

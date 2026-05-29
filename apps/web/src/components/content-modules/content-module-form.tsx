@@ -93,7 +93,8 @@ function defaultSettings(type: ContentModuleType): Record<string, unknown> {
   if (type === "SLIDESHOW") {
     return {
       transition: "FADE",
-      intervalSeconds: 5
+      intervalSeconds: 5,
+      opacity: 100
     };
   }
 
@@ -312,7 +313,7 @@ export function ContentModuleForm({ module, categories, pages, articles }: Conte
       const formData = new FormData();
       formData.set("file", file);
       formData.set("sourceType", "USER_UPLOAD");
-      const response = await fetch("/api/admin/media/upload-json", {
+      const response = await fetch("/internal/admin/media/upload-json", {
         method: "POST",
         body: formData
       });
@@ -335,7 +336,7 @@ export function ContentModuleForm({ module, categories, pages, articles }: Conte
     setMessage("");
 
     try {
-      const response = await fetch(draft.id ? `/api/admin/modules/${draft.id}` : "/api/admin/modules", {
+      const response = await fetch(draft.id ? `/internal/admin/modules/${draft.id}` : "/internal/admin/modules", {
         method: draft.id ? "PATCH" : "POST",
         headers: {
           "Content-Type": "application/json"
@@ -573,6 +574,17 @@ function SlideshowEditor({
               value={valueOf(draft.settings, "intervalSeconds", "5")}
               onChange={(event) => onPatchSettings({ intervalSeconds: Number(event.target.value) })}
             />
+          </Field>
+          <Field>
+            <FieldLabel>幻灯片透明度</FieldLabel>
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              value={valueOf(draft.settings, "opacity", "100")}
+              onChange={(event) => onPatchSettings({ opacity: Number(event.target.value) })}
+            />
+            <FieldDescription>100% 为完全不透明。</FieldDescription>
           </Field>
         </FieldGroup>
 

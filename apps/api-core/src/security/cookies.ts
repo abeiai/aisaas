@@ -15,6 +15,16 @@ export const userRefreshCookie = "aisaas_user_refresh";
 export const adminAccessCookie = "aisaas_admin_access";
 export const adminRefreshCookie = "aisaas_admin_refresh";
 
+function shouldUseSecureCookies() {
+  const appBaseUrl = process.env.APP_BASE_URL?.trim().toLowerCase();
+
+  if (appBaseUrl) {
+    return appBaseUrl.startsWith("https://");
+  }
+
+  return process.env.NODE_ENV === "production";
+}
+
 export function readCookie(request: RequestLike, name: string) {
   const cookieHeader = request.headers.cookie;
 
@@ -54,7 +64,7 @@ export function setAuthCookies(
   const baseOptions = {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureCookies(),
     path: "/"
   };
 
@@ -76,7 +86,7 @@ export function clearAuthCookies(
   const options = {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureCookies(),
     path: "/"
   };
 

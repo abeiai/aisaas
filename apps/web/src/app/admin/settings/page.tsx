@@ -1,6 +1,7 @@
+import { SiteAssetUploader } from "@/components/admin/site-asset-uploader";
 import { AdminShell } from "@/components/shell/admin-shell";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -20,12 +21,12 @@ export default async function AdminSettingsPage() {
     >
       <div className="flex flex-col gap-6">
         <Card>
-          <CardHeader>
-            <CardTitle>运营配置</CardTitle>
-            <CardDescription>配置会保存到数据库，公开项可被前台首页读取，后台项只在管理端使用。</CardDescription>
-          </CardHeader>
           <CardContent>
             <form action={updateSystemConfigAction} className="grid gap-6 xl:grid-cols-2">
+              <SiteAssetUploader
+                initialFavicon={configByKey.get("siteFavicon") ?? ""}
+                initialLogo={configByKey.get("siteLogo") ?? ""}
+              />
               <FieldGroup>
                 <Field>
                   <FieldLabel htmlFor="site-name">站点名称</FieldLabel>
@@ -34,15 +35,6 @@ export default async function AdminSettingsPage() {
                     name="siteName"
                     defaultValue={configByKey.get("siteName") ?? "AI SaaS"}
                     required
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="site-logo">站点 Logo</FieldLabel>
-                  <Input
-                    id="site-logo"
-                    name="siteLogo"
-                    defaultValue={configByKey.get("siteLogo") ?? ""}
-                    placeholder="https://example.com/logo.png"
                   />
                 </Field>
                 <Field>
@@ -107,6 +99,15 @@ export default async function AdminSettingsPage() {
                     name="beianNo"
                     defaultValue={configByKey.get("beianNo") ?? "待备案"}
                     required
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="copyright-text">版权信息</FieldLabel>
+                  <Input
+                    id="copyright-text"
+                    name="copyrightText"
+                    defaultValue={configByKey.get("copyrightText") ?? "© 2026 AI SaaS 版权所有"}
+                    placeholder="© 2026 公司名称 版权所有"
                   />
                 </Field>
                 <Field>

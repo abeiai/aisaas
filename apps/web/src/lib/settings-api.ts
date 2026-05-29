@@ -88,10 +88,12 @@ export async function updateSystemConfigAction(formData: FormData) {
     body: JSON.stringify({
       siteName: text(formData, "siteName"),
       siteLogo: text(formData, "siteLogo"),
+      siteFavicon: text(formData, "siteFavicon"),
       themePrimaryColor: text(formData, "themePrimaryColor"),
       seoTitle: text(formData, "seoTitle"),
       seoDescription: text(formData, "seoDescription"),
       beianNo: text(formData, "beianNo"),
+      copyrightText: text(formData, "copyrightText"),
       serviceQrCode: text(formData, "serviceQrCode"),
       defaultCreditExchangeRate: text(formData, "defaultCreditExchangeRate"),
       siteUrl: text(formData, "siteUrl"),
@@ -106,6 +108,7 @@ export async function updateSystemConfigAction(formData: FormData) {
 
   revalidatePath("/admin");
   revalidatePath("/admin/settings");
+  revalidatePath("/", "layout");
   revalidatePath("/");
   revalidatePath("/sitemap.xml");
   revalidatePath("/robots.txt");

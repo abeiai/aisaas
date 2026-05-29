@@ -28,6 +28,8 @@ const allowedMimeTypes = new Map<string, MediaAssetTypeValue>([
   ["image/png", "IMAGE"],
   ["image/webp", "IMAGE"],
   ["image/gif", "IMAGE"],
+  ["image/x-icon", "IMAGE"],
+  ["image/vnd.microsoft.icon", "IMAGE"],
   ["audio/mpeg", "AUDIO"],
   ["audio/mp3", "AUDIO"],
   ["audio/wav", "AUDIO"],
@@ -331,7 +333,7 @@ export function mediaUploadMaxBytes() {
 function extensionFor(originalName: string, mimeType: string) {
   const extension = extname(originalName).toLowerCase();
 
-  if ([".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp3", ".wav", ".webm", ".ogg", ".aac", ".m4a", ".mp4", ".mov", ".mkv"].includes(extension)) {
+  if ([".jpg", ".jpeg", ".png", ".webp", ".gif", ".ico", ".mp3", ".wav", ".webm", ".ogg", ".aac", ".m4a", ".mp4", ".mov", ".mkv"].includes(extension)) {
     return extension === ".jpeg" ? ".jpg" : extension;
   }
 
@@ -340,6 +342,8 @@ function extensionFor(originalName: string, mimeType: string) {
     "image/png": ".png",
     "image/webp": ".webp",
     "image/gif": ".gif",
+    "image/x-icon": ".ico",
+    "image/vnd.microsoft.icon": ".ico",
     "audio/mpeg": ".mp3",
     "audio/mp3": ".mp3",
     "audio/wav": ".wav",

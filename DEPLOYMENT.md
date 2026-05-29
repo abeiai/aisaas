@@ -24,9 +24,11 @@ docker compose version
 开放端口：
 
 ```text
-7340/tcp
-7346/tcp
+80/tcp
+443/tcp
 ```
+
+生产公网入口使用常用端口 `80/443`；Compose 内部仍将其映射到 Nginx 容器的 `7340/7346`。
 
 部署目录示例：
 

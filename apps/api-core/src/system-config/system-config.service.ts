@@ -21,12 +21,20 @@ const configDefinitions = [
     sortOrder: 15
   },
   {
+    key: "siteFavicon",
+    label: "网站图标",
+    value: "",
+    description: "浏览器标签页使用的 ico 图标地址。",
+    isPublic: true,
+    sortOrder: 16
+  },
+  {
     key: "themePrimaryColor",
     label: "主题主色",
     value: "#292524",
     description: "前台按钮、链接和强调元素使用的主色，只允许 6 位十六进制颜色。",
     isPublic: true,
-    sortOrder: 16
+    sortOrder: 17
   },
   {
     key: "publicNavItems",
@@ -141,12 +149,20 @@ const configDefinitions = [
     sortOrder: 35
   },
   {
+    key: "copyrightText",
+    label: "版权信息",
+    value: "© 2026 AI SaaS 版权所有",
+    description: "前台页脚展示的版权信息。",
+    isPublic: true,
+    sortOrder: 36
+  },
+  {
     key: "serviceQrCode",
     label: "客服二维码",
     value: "",
     description: "客服二维码图片地址，仅对前台展示需要的地址公开。",
     isPublic: true,
-    sortOrder: 36
+    sortOrder: 37
   },
   {
     key: "defaultCreditExchangeRate",
@@ -381,7 +397,7 @@ export class SystemConfigService {
   }
 
   private isEmptyAllowed(key: ConfigKey) {
-    return key === "siteLogo" || key === "serviceQrCode" || key === "siteMenus";
+    return key === "siteLogo" || key === "siteFavicon" || key === "copyrightText" || key === "serviceQrCode" || key === "siteMenus";
   }
 
   private normalizeConfigValue(key: ConfigKey, value: string) {

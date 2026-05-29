@@ -13,6 +13,11 @@ export class UpdateSystemConfigDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(500)
+  siteFavicon?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(20)
   themePrimaryColor?: string;
 
@@ -75,6 +80,11 @@ export class UpdateSystemConfigDto {
   @IsString()
   @MaxLength(80)
   beianNo?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  copyrightText?: string;
 
   @IsOptional()
   @IsString()

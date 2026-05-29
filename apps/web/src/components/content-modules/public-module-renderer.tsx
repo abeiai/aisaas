@@ -47,10 +47,12 @@ function RenderedModule({ module }: { module: ContentModule }) {
 }
 
 function SlideshowModule({ module }: { module: ContentModule }) {
+  const opacity = Math.min(Math.max(numberValue(module.settings.opacity, 100), 0), 100) / 100;
+
   return (
-    <section className="bg-background">
-      <div className="w-full px-5 py-12">
-        <div className="flex snap-x gap-4 overflow-x-auto pb-2">
+    <section className="w-full bg-background">
+      <div className="w-full">
+        <div className="flex snap-x overflow-x-auto">
           {module.items.map((item) => {
             const config = item.config ?? {};
             const introText = textStyle(config.introText);
@@ -61,15 +63,18 @@ function SlideshowModule({ module }: { module: ContentModule }) {
             const buttonLink = stringValue(config.buttonLink);
 
             return (
-              <div
-                className="relative min-h-[420px] min-w-full snap-start overflow-hidden rounded-md bg-secondary"
-                key={item.id}
-              >
+              <div className="relative min-w-full snap-start overflow-hidden bg-secondary" key={item.id}>
                 {item.imageUrl ? (
-                  <img alt={item.imageAlt ?? item.title ?? ""} className="absolute inset-0 size-full object-cover" src={item.imageUrl} />
-                ) : null}
-                <div className="absolute inset-0 bg-foreground/35" />
-                <div className="relative flex min-h-[420px] items-center px-8 py-12 md:px-14">
+                  <img
+                    alt={item.imageAlt ?? item.title ?? ""}
+                    className="block h-auto w-full"
+                    src={item.imageUrl}
+                    style={{ opacity }}
+                  />
+                ) : (
+                  <div className="min-h-[420px]" />
+                )}
+                <div className="absolute inset-0 flex items-center px-8 py-12 md:px-14">
                   <div className={textRight ? "ml-auto flex max-w-xl flex-col gap-5 text-right text-primary-foreground" : "flex max-w-xl flex-col gap-5 text-primary-foreground"}>
                     {introText.text ? <TextBlock value={introText} className="font-medium" /> : null}
                     {titleText.text ? <TextBlock value={titleText} className="font-display leading-tight" as="h2" /> : null}

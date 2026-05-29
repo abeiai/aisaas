@@ -254,7 +254,8 @@ export class ContentModulesService {
     if (type === "SLIDESHOW") {
       return {
         transition: this.pick(settings.transition, transitionTypes, "FADE"),
-        intervalSeconds: this.numberInRange(settings.intervalSeconds, 2, 30, 5)
+        intervalSeconds: this.numberInRange(settings.intervalSeconds, 2, 30, 5),
+        opacity: this.numberInRange(settings.opacity, 0, 100, 100)
       };
     }
 

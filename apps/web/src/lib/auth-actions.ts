@@ -48,6 +48,16 @@ function getApiBaseUrl() {
   return process.env.API_BASE_URL ?? "http://localhost:7342/api";
 }
 
+function shouldUseSecureCookies() {
+  const appBaseUrl = process.env.APP_BASE_URL?.trim().toLowerCase();
+
+  if (appBaseUrl) {
+    return appBaseUrl.startsWith("https://");
+  }
+
+  return process.env.NODE_ENV === "production";
+}
+
 async function getCookieHeader() {
   const cookieStore = await cookies();
 
@@ -119,7 +129,7 @@ async function setSessionCookies(
   const baseOptions = {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureCookies(),
     path: "/"
   };
 
