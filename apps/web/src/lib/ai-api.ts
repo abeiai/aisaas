@@ -88,6 +88,9 @@ export interface AiToolInputSchema {
 export interface AiTask {
   id: string;
   userId: string;
+  billingContext?: "PERSONAL" | "ORGANIZATION";
+  organizationId?: string | null;
+  organizationMemberId?: string | null;
   user?: {
     id: string;
     email: string;

@@ -7,7 +7,8 @@ import { PaymentProviderLabel } from "@/components/billing/payment-provider-labe
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Select } from "@/components/ui/select";
 import { detectPaymentScene, paymentSceneName, type PaymentScene } from "@/lib/payment-scene";
-import type { AvailablePaymentProduct, RechargeProduct } from "@/lib/billing-api";
+import { cn } from "@/lib/utils";
+import type { AvailablePaymentProduct, PaymentProvider, RechargeProduct } from "@/lib/billing-api";
 
 interface PaymentOrderFormProps {
   action: (formData: FormData) => void;
@@ -17,6 +18,7 @@ interface PaymentOrderFormProps {
   rechargeOptions: RechargeProduct[];
   mode?: "select" | "buttons";
   returnPath?: string;
+  selectedProvider?: PaymentProvider | null;
   selectedPackageCode?: string;
   showPackageOptions?: boolean;
   submitLabel?: string;
@@ -30,6 +32,7 @@ export function PaymentOrderForm({
   products,
   rechargeOptions,
   returnPath,
+  selectedProvider,
   selectedPackageCode,
   showPackageOptions = true,
   submitLabel = "创建充值订单"
@@ -88,16 +91,22 @@ export function PaymentOrderForm({
           <input name="scene" type="hidden" value={scene} />
           {sceneProducts.length > 0 && mode === "buttons" ? (
             <div className="grid gap-3 sm:grid-cols-2">
-              {sceneProducts.map((product) =>
-                product.requiresAuthorization ? (
-                  <Button asChild className="h-auto min-h-14 justify-start rounded-xl px-4 py-3" key={product.product} variant="outline">
+              {sceneProducts.map((product) => {
+                const isSelected = product.provider === selectedProvider;
+                const className = cn(
+                  "h-auto min-h-14 justify-start rounded-xl px-4 py-3 text-left transition",
+                  isSelected && "border-foreground bg-secondary shadow-sm ring-1 ring-foreground/20 hover:bg-secondary"
+                );
+
+                return product.requiresAuthorization ? (
+                  <Button asChild className={className} key={product.product} variant="outline">
                     <a href={authorizeUrl}>
                       <PaymentProviderLabel provider={product.provider} providerName={product.providerName} />
                     </a>
                   </Button>
                 ) : (
                   <Button
-                    className="h-auto min-h-14 justify-start rounded-xl px-4 py-3"
+                    className={className}
                     key={product.product}
                     name="provider"
                     type="submit"
@@ -106,8 +115,8 @@ export function PaymentOrderForm({
                   >
                     <PaymentProviderLabel provider={product.provider} providerName={product.providerName} />
                   </Button>
-                )
-              )}
+                );
+              })}
             </div>
           ) : sceneProducts.length > 0 ? (
             <>

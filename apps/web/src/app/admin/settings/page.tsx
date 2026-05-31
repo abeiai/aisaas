@@ -187,6 +187,23 @@ export default async function AdminSettingsPage() {
                     <FieldDescription>单位 MB，默认 200MB。</FieldDescription>
                   </Field>
                 </FieldGroup>
+                <FieldGroup className="rounded-lg border border-border bg-background p-4">
+                  <Field>
+                    <FieldLabel htmlFor="enterprise-account-enabled">企业账号体系</FieldLabel>
+                    <select
+                      className="min-h-11 rounded-md border border-input bg-background px-3 text-sm"
+                      id="enterprise-account-enabled"
+                      name="enterpriseAccountEnabled"
+                      defaultValue={configByKey.get("enterpriseAccountEnabled") ?? "false"}
+                    >
+                      <option value="false">停用</option>
+                      <option value="true">启用</option>
+                    </select>
+                    <FieldDescription>
+                      停用时不开放企业空间、企业钱包和员工额度，不影响个人用户、个人钱包和现有 AI 功能。
+                    </FieldDescription>
+                  </Field>
+                </FieldGroup>
                 <Button className="w-fit" type="submit">保存配置</Button>
               </FieldGroup>
             </form>

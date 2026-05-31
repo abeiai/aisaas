@@ -58,9 +58,9 @@ const paymentConfigDefinitions = [
   },
   {
     key: "paymentAlipayPageEnabled",
-    label: "支付宝电脑网站支付",
+    label: "支付宝扫码支付（PC）",
     value: "true",
-    description: "在 PC 浏览器中启用支付宝电脑网站支付。",
+    description: "在 PC 浏览器中展示支付宝预创建交易二维码，扫码后进入付款确认。",
     sortOrder: 416
   },
   {
@@ -348,9 +348,9 @@ export class PaymentConfigService {
         providerName: "支付宝",
         scene: "DESKTOP_WEB",
         sceneName: paymentSceneName("DESKTOP_WEB"),
-        product: "ALIPAY_PAGE",
-        productName: paymentProductName("ALIPAY_PAGE"),
-        description: "跳转到支付宝电脑网站支付"
+        product: "ALIPAY_PRECREATE",
+        productName: paymentProductName("ALIPAY_PRECREATE"),
+        description: "支付宝扫码后直接确认付款"
       });
     }
 

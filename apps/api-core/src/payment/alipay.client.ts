@@ -21,6 +21,64 @@ export class AlipayClient {
     private readonly paymentConfigService: PaymentConfigService
   ) {}
 
+  async createPrecreatePayOrder(order: AlipayOrderInput): Promise<PaymentChannelOrder> {
+    const config = await this.paymentConfigService.getAlipayRuntimeConfig();
+
+    if (!config) {
+      return {
+        product: "ALIPAY_PRECREATE",
+        action: "QR_CODE",
+        paymentUrl: null,
+        qrCodeUrl: null,
+        launchParams: null,
+        providerPayload: null,
+        paymentMode: "UNCONFIGURED"
+      };
+    }
+
+    const bizContent = {
+      out_trade_no: order.orderNo,
+      total_amount: order.amountCny,
+      subject: `AI SaaS 点数充值 ${order.credits} 点`
+    };
+    const params = this.buildSignedParams("alipay.trade.precreate", bizContent, {
+      notify_url: config.notifyUrl
+    }, config);
+    const payload = await this.postGateway<{
+      alipay_trade_precreate_response?: {
+        code?: string;
+        msg?: string;
+        sub_code?: string;
+        sub_msg?: string;
+        out_trade_no?: string;
+        qr_code?: string;
+      };
+    }>(config.gatewayUrl, params);
+    const result = payload.alipay_trade_precreate_response;
+
+    if (!result || result.code !== "10000" || !result.qr_code) {
+      throw new AppException(
+        40004,
+        `支付宝扫码支付下单失败：${result?.sub_msg || result?.msg || "支付宝接口异常"}`,
+        HttpStatus.BAD_REQUEST
+      );
+    }
+
+    return {
+      product: "ALIPAY_PRECREATE",
+      action: "QR_CODE",
+      paymentUrl: null,
+      qrCodeUrl: result.qr_code,
+      launchParams: null,
+      providerPayload: toInputJson({
+        method: "alipay.trade.precreate",
+        bizContent,
+        response: payload
+      }),
+      paymentMode: "REAL"
+    };
+  }
+
   async createPagePayOrder(order: AlipayOrderInput): Promise<PaymentChannelOrder> {
     const config = await this.paymentConfigService.getAlipayRuntimeConfig();
 
@@ -216,6 +274,23 @@ export class AlipayClient {
     params.sign = signRsaSha256(signContent, config.privateKey);
 
     return params;
+  }
+
+  private async postGateway<TPayload>(gatewayUrl: string, params: Record<string, string>) {
+    const response = await fetch(gatewayUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded;charset=utf-8"
+      },
+      body: new URLSearchParams(params)
+    });
+    const payload = await response.json() as TPayload;
+
+    if (!response.ok) {
+      throw new AppException(40004, "支付宝接口请求失败", HttpStatus.BAD_REQUEST);
+    }
+
+    return payload;
   }
 
 }

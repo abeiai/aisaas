@@ -22,11 +22,14 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { PublicUser } from "@/lib/auth-actions";
 import type { ExperienceVideoModel } from "@/lib/experience-api";
+import type { UserOrganizationsResult } from "@/lib/organizations-api";
 import { cn } from "@/lib/utils";
 
 interface VideoGenerationConsoleProps {
   currentUser: PublicUser | null;
+  initialOrganizationId?: string;
   models: ExperienceVideoModel[];
+  organizations: UserOrganizationsResult | null;
 }
 
 interface ReferenceFile {
@@ -96,12 +99,18 @@ const ratios = ["16:9", "9:16", "1:1", "4:3", "3:4"] as const;
 const resolutions = ["高清 720P", "高清 1080P"] as const;
 const durations = [5, 10] as const;
 
-export function VideoGenerationConsole({ currentUser, models }: VideoGenerationConsoleProps) {
+export function VideoGenerationConsole({
+  currentUser,
+  initialOrganizationId = "",
+  models,
+  organizations
+}: VideoGenerationConsoleProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [history, setHistory] = useState<VideoJob[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [selectedModelId, setSelectedModelId] = useState(models[0]?.id ?? "mock-video-t2v");
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState(initialOrganizationId);
   const [ratio, setRatio] = useState<(typeof ratios)[number]>("16:9");
   const [resolution, setResolution] = useState<(typeof resolutions)[number]>("高清 720P");
   const [duration, setDuration] = useState<number>(models[0]?.defaultDuration ?? 5);
@@ -114,11 +123,30 @@ export function VideoGenerationConsole({ currentUser, models }: VideoGenerationC
     () => models.find((model) => model.id === selectedModelId) ?? models[0],
     [models, selectedModelId]
   );
+  const availableOrganizations = useMemo(
+    () => (organizations?.enabled ? organizations.organizations.filter((organization) => organization.memberStatus === "ACTIVE") : []),
+    [organizations]
+  );
   const maxReferenceFiles = selectedModel?.maxReferenceFiles ?? 0;
   const acceptedReferenceTypes = selectedModel?.acceptedReferenceTypes ?? [];
   const selectedJob = history.find((job) => job.id === selectedJobId) ?? history[0] ?? null;
   const canAddReference = maxReferenceFiles > references.length;
   const accept = acceptedReferenceTypes.length > 0 ? acceptedReferenceTypes.join(",") : "image/*,video/*,audio/*";
+  const billingContext = selectedOrganizationId ? "ORGANIZATION" : "PERSONAL";
+
+  useEffect(() => {
+    setSelectedOrganizationId(initialOrganizationId);
+  }, [initialOrganizationId]);
+
+  useEffect(() => {
+    if (!selectedOrganizationId) {
+      return;
+    }
+
+    if (!availableOrganizations.some((organization) => organization.id === selectedOrganizationId)) {
+      setSelectedOrganizationId("");
+    }
+  }, [availableOrganizations, selectedOrganizationId]);
 
   useEffect(() => {
     try {
@@ -251,6 +279,8 @@ export function VideoGenerationConsole({ currentUser, models }: VideoGenerationC
       body: JSON.stringify({
         prompt: normalizedPrompt,
         modelInstanceId: model.id,
+        billingContext,
+        ...(selectedOrganizationId ? { organizationId: selectedOrganizationId } : {}),
         ratio,
         resolution,
         duration,
@@ -415,6 +445,18 @@ export function VideoGenerationConsole({ currentUser, models }: VideoGenerationC
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex min-h-16 shrink-0 items-center justify-end border-b border-border bg-background px-5 py-4">
           <div className="flex min-w-0 items-center gap-3">
+            {currentUser && availableOrganizations.length > 0 ? (
+              <label className="flex min-w-0 text-sm md:w-64">
+                <Select value={selectedOrganizationId} onChange={(event) => setSelectedOrganizationId(event.target.value)}>
+                  <option value="">个人空间</option>
+                  {availableOrganizations.map((organization) => (
+                    <option key={organization.id} value={organization.id}>
+                      {organization.name}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+            ) : null}
             <label className="flex min-w-0 text-sm md:w-80">
               <Select value={selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)}>
                 {models.map((model) => (

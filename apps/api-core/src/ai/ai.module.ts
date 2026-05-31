@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AdminAuthModule } from "../admin-auth/admin-auth.module.js";
 import { AuthModule } from "../auth/auth.module.js";
+import { OrganizationsModule } from "../organizations/organizations.module.js";
 import { AdvancedAiController } from "./advanced-ai.controller.js";
 import { AdvancedAiService } from "./advanced-ai.service.js";
 import { AdminAiModelAliasController } from "./admin-ai-model-alias.controller.js";
@@ -17,7 +18,7 @@ import { AiService } from "./ai.service.js";
 import { KnowledgeController } from "./knowledge.controller.js";
 
 @Module({
-  imports: [AuthModule, AdminAuthModule],
+  imports: [AuthModule, AdminAuthModule, OrganizationsModule],
   controllers: [
     AiController,
     AdvancedAiController,

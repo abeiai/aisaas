@@ -41,6 +41,7 @@ export interface AdminSendConfig {
     signName: string;
     templateCode: string;
     templateParamCodeKey: string;
+    templateParamExtraJson: string;
     codeTtlSeconds: string;
   };
 }
@@ -102,6 +103,18 @@ function hasSecretPreview(value: string) {
   return Boolean(value && value !== "尚未配置" && !value.includes("无法解密"));
 }
 
+function normalizeSmsProvider(value: string) {
+  return value === "ALIYUN_SMS" ? "ALIYUN_DYPNS" : value || "ALIYUN_DYPNS";
+}
+
+function normalizeSmsEndpoint(value: string) {
+  if (!value || value.includes("dysmsapi.aliyuncs.com")) {
+    return "https://dypnsapi.aliyuncs.com/";
+  }
+
+  return value;
+}
+
 export async function getAdminSendConfig(): Promise<AdminSendConfig> {
   const values = configMap(await apiFetch<SystemConfig[]>("/system-config"));
   const emailSecretPreview = valueOf(values, "aliyunMailAccessKeySecretEncrypted", "尚未配置");
@@ -122,14 +135,15 @@ export async function getAdminSendConfig(): Promise<AdminSendConfig> {
   };
   const sms = {
     enabled: valueOf(values, "smsVerificationEnabled", "false") === "true",
-    provider: valueOf(values, "smsVerificationProvider", "ALIYUN_SMS"),
+    provider: normalizeSmsProvider(valueOf(values, "smsVerificationProvider", "ALIYUN_DYPNS")),
     accessKeyId: valueOf(values, "aliyunSmsAccessKeyId"),
     accessKeySecretPreview: smsSecretPreview,
-    endpoint: valueOf(values, "aliyunSmsEndpoint", "https://dysmsapi.aliyuncs.com/"),
+    endpoint: normalizeSmsEndpoint(valueOf(values, "aliyunSmsEndpoint", "https://dypnsapi.aliyuncs.com/")),
     regionId: valueOf(values, "aliyunSmsRegionId", "cn-hangzhou"),
     signName: valueOf(values, "aliyunSmsSignName"),
     templateCode: valueOf(values, "aliyunSmsTemplateCode"),
     templateParamCodeKey: valueOf(values, "aliyunSmsTemplateParamCodeKey", "code"),
+    templateParamExtraJson: valueOf(values, "aliyunSmsTemplateParamExtraJson", "{}"),
     codeTtlSeconds: valueOf(values, "smsCodeTtlSeconds", "300")
   };
 
@@ -208,6 +222,7 @@ export async function updateSmsSendConfigAction(
         aliyunSmsSignName: text(formData, "aliyunSmsSignName"),
         aliyunSmsTemplateCode: text(formData, "aliyunSmsTemplateCode"),
         aliyunSmsTemplateParamCodeKey: text(formData, "aliyunSmsTemplateParamCodeKey"),
+        aliyunSmsTemplateParamExtraJson: text(formData, "aliyunSmsTemplateParamExtraJson"),
         smsCodeTtlSeconds: text(formData, "smsCodeTtlSeconds")
       })
     });

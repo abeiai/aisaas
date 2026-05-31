@@ -1,5 +1,16 @@
 import { Type } from "class-transformer";
-import { IsArray, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength, ValidateNested } from "class-validator";
+import {
+  IsArray,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+  ValidateNested
+} from "class-validator";
 import { AiAttachmentDto } from "./ai-attachment.dto.js";
 
 export class CreateVideoGenerationDto {
@@ -39,4 +50,13 @@ export class CreateVideoGenerationDto {
   @ValidateNested({ each: true })
   @Type(() => AiAttachmentDto)
   referenceFiles?: AiAttachmentDto[];
+
+  @IsOptional()
+  @IsIn(["PERSONAL", "ORGANIZATION"])
+  billingContext?: "PERSONAL" | "ORGANIZATION";
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  organizationId?: string;
 }

@@ -25,6 +25,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { PublicUser } from "@/lib/auth-actions";
 import { cosyVoiceV35PresetPrefix } from "@/lib/cosyvoice-v35-presets";
+import type { UserOrganizationsResult } from "@/lib/organizations-api";
 import { cn } from "@/lib/utils";
 
 export interface VoiceModelOption {
@@ -83,6 +84,8 @@ interface VoiceConsoleProps {
   currentTask: CurrentVoiceTask | null;
   error?: string;
   createAction: (formData: FormData) => void | Promise<void>;
+  initialOrganizationId?: string;
+  organizations: UserOrganizationsResult | null;
 }
 
 const textLimit = 5000;
@@ -105,7 +108,9 @@ export function VoiceConsole({
   history,
   currentTask,
   error,
-  createAction
+  createAction,
+  initialOrganizationId = "",
+  organizations
 }: VoiceConsoleProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [text, setText] = useState(currentTask?.text ?? "");
@@ -117,6 +122,7 @@ export function VoiceConsole({
   const [pitch, setPitch] = useState("0");
   const [volume, setVolume] = useState("1");
   const [draftReady, setDraftReady] = useState(Boolean(currentTask));
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState(initialOrganizationId);
 
   const selectedModelOption = useMemo(
     () => models.find((model) => model.aliasKey === selectedModel) ?? models[0],
@@ -145,6 +151,14 @@ export function VoiceConsole({
   );
   const selectedOfficialPreset = selectedVoice.startsWith(cosyVoiceV35PresetPrefix);
   const hasConfiguredModel = models.some((model) => model.isConfigured);
+  const availableOrganizations = useMemo(
+    () =>
+      organizations?.enabled
+        ? organizations.organizations.filter((organization) => organization.memberStatus === "ACTIVE")
+        : [],
+    [organizations]
+  );
+  const billingContext = selectedOrganizationId ? "ORGANIZATION" : "PERSONAL";
   const selectedModelReady = Boolean(selectedModelOption?.isConfigured);
   const selectedVoiceSupported = Boolean(
     !selectedVoiceOption?.supportedModels?.length ||
@@ -159,6 +173,10 @@ export function VoiceConsole({
         ? `当前音色需要 ${requiredModelsText}，请切换兼容模型或后台完成配置。`
         : null;
   const canSubmit = Boolean(currentUser && text.trim().length > 0 && selectedModelReady && selectedVoiceSupported);
+
+  useEffect(() => {
+    setSelectedOrganizationId(initialOrganizationId);
+  }, [initialOrganizationId]);
 
   useEffect(() => {
     if (currentTask?.text === undefined || currentTask.text === null) {
@@ -250,6 +268,14 @@ export function VoiceConsole({
 
     setSelectedVoice(compatibleVoices.find((voice) => voice.isDefault)?.value ?? compatibleVoices[0].value);
   }, [compatibleVoices, selectedVoice]);
+
+  useEffect(() => {
+    if (!selectedOrganizationId || availableOrganizations.some((organization) => organization.id === selectedOrganizationId)) {
+      return;
+    }
+
+    setSelectedOrganizationId("");
+  }, [availableOrganizations, selectedOrganizationId]);
 
   function insertSnippet(snippet: string) {
     setText((current) => {
@@ -344,6 +370,8 @@ export function VoiceConsole({
       </aside>
 
       <form action={createAction} className="flex min-h-0 flex-col">
+        <input name="billingContext" type="hidden" value={billingContext} />
+        {selectedOrganizationId ? <input name="organizationId" type="hidden" value={selectedOrganizationId} /> : null}
         <header className="flex h-[86px] shrink-0 items-center justify-between gap-4 border-b border-border bg-background px-6">
           <div className="flex min-w-0 flex-col gap-1">
             <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-normal">
@@ -353,6 +381,19 @@ export function VoiceConsole({
             <p className="text-sm text-muted-foreground">体验区 · 语音合成</p>
           </div>
           <div className="flex min-w-[300px] max-w-[580px] flex-1 items-end justify-end gap-3">
+            {currentUser && availableOrganizations.length > 0 ? (
+              <label className="flex w-full max-w-[220px] flex-col gap-1 text-xs font-medium text-muted-foreground">
+                使用空间
+                <Select value={selectedOrganizationId} onChange={(event) => setSelectedOrganizationId(event.target.value)}>
+                  <option value="">个人空间</option>
+                  {availableOrganizations.map((organization) => (
+                    <option key={organization.id} value={organization.id}>
+                      {organization.name}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+            ) : null}
             <label className="flex w-full max-w-[420px] flex-col gap-1 text-xs font-medium text-muted-foreground">
               选择模型
               <Select name="modelAlias" value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)}>

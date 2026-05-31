@@ -5,6 +5,7 @@ import { basename, extname, join, resolve } from "node:path";
 import { HttpStatus, Injectable } from "@nestjs/common";
 import { decryptSecret, encryptSecret, getPrismaClient, hashPassword, maskSecret, type Prisma } from "@aisaas/database";
 import { AppException } from "../common/app-exception.js";
+import { OrganizationsService } from "../organizations/organizations.service.js";
 import {
   type AiModelPricingMode,
   type AiModelPricingUnit,
@@ -56,6 +57,12 @@ type AudioBillingMode = "PER_CHARACTER" | "PER_TASK" | "PER_SECOND";
 type CreditReservationStatus = "RESERVED" | "SETTLED" | "RELEASED" | "EXPIRED" | "FAILED";
 type VoiceConsentType = "SELF_VOICE" | "AUTHORIZED_VOICE";
 type VoiceAssetModerationAction = "APPROVE" | "REJECT" | "DISABLE";
+type BillingContext = "PERSONAL" | "ORGANIZATION";
+
+interface BillingContextOptions {
+  billingContext: BillingContext;
+  organizationId?: string;
+}
 
 interface ActiveAudioModel {
   modelInstanceId: string;
@@ -81,6 +88,9 @@ interface ActiveAudioModel {
 interface AudioTaskRecord {
   id: string;
   userId: string;
+  billingContext: BillingContext;
+  organizationId: string | null;
+  organizationMemberId: string | null;
   type: AudioTaskType;
   status: AudioTaskStatus;
   provider: string;
@@ -263,6 +273,8 @@ const dashscopeAudioProviderKey = "aliyun_dashscope_audio";
 @Injectable()
 export class AudioService {
   private readonly prisma = getPrismaClient();
+
+  constructor(private readonly organizationsService?: OrganizationsService) {}
 
   private async ensureDashScopeAudioDefaults() {
     const preset = await this.prisma.aiProviderPreset.findUnique({
@@ -1442,6 +1454,7 @@ export class AudioService {
 
   async createTtsTask(userId: string, dto: CreateTtsAudioTaskDto) {
     const text = dto.text.trim();
+    const billingContext = this.billingContextFromDto(dto);
     if (text.length > 8000) {
       throw new AppException(40001, "语音合成文本不能超过 8000 字", HttpStatus.BAD_REQUEST);
     }
@@ -1476,7 +1489,8 @@ export class AudioService {
         timeoutMs,
         pricing: pricingSnapshot(pricing)
       } as unknown as Prisma.InputJsonValue,
-      reserveNote: `语音合成冻结 ${estimatedCredits} 点`
+      reserveNote: `语音合成冻结 ${estimatedCredits} 点`,
+      billingContext
     });
 
     if (!dto.execute) {
@@ -1487,6 +1501,8 @@ export class AudioService {
   }
 
   async createVoiceCloneTask(userId: string, dto: CreateVoiceCloneTaskDto, request?: HeaderRequestLike) {
+    const billingContext = this.billingContextFromDto(dto);
+
     if (!dto.consentAccepted) {
       throw new AppException(40001, "请先勾选声音授权声明", HttpStatus.BAD_REQUEST);
     }
@@ -1562,7 +1578,8 @@ export class AudioService {
         targetModel: model.modelName,
         pricing: pricingSnapshot(pricing)
       },
-      reserveNote: `声音复刻冻结 ${estimatedCredits} 点`
+      reserveNote: `声音复刻冻结 ${estimatedCredits} 点`,
+      billingContext
     });
 
     await this.executeVoiceCloneTask(task.id, voiceAsset.id, model, sourceAsset.url, dto.name.trim());
@@ -1572,6 +1589,7 @@ export class AudioService {
 
   async createVoiceDesignTask(userId: string, dto: CreateVoiceDesignTaskDto) {
     const prompt = dto.prompt.trim();
+    const billingContext = this.billingContextFromDto(dto);
 
     await this.ensureDashScopeAudioDefaults();
 
@@ -1609,7 +1627,8 @@ export class AudioService {
         targetModel: model.modelName,
         pricing: pricingSnapshot(pricing)
       },
-      reserveNote: `声音设计冻结 ${estimatedCredits} 点`
+      reserveNote: `声音设计冻结 ${estimatedCredits} 点`,
+      billingContext
     });
 
     await this.executeVoiceDesignTask(task.id, voiceAsset.id, model, prompt, dto.name.trim(), emptyToNull(dto.previewText));
@@ -2102,11 +2121,78 @@ export class AudioService {
     voiceAssetId?: string;
     providerPayload?: Prisma.InputJsonValue;
     reserveNote: string;
+    billingContext: BillingContextOptions;
   }) {
+    if (input.billingContext.billingContext === "ORGANIZATION") {
+      if (!input.billingContext.organizationId) {
+        throw new AppException(40001, "请选择要使用的企业空间", HttpStatus.BAD_REQUEST);
+      }
+
+      if (!this.organizationsService) {
+        throw new AppException(50001, "企业账号服务未初始化", HttpStatus.INTERNAL_SERVER_ERROR);
+      }
+
+      const task = await this.prisma.audioTask.create({
+        data: {
+          userId: input.userId,
+          billingContext: "ORGANIZATION",
+          organizationId: input.billingContext.organizationId,
+          type: input.type,
+          status: "CREATED",
+          provider: input.model.providerKey,
+          model: input.model.modelName,
+          providerInstanceId: input.model.providerInstanceId,
+          modelInstanceId: input.model.modelInstanceId,
+          voiceAssetId: input.voiceAssetId ?? null,
+          inputText: input.inputText ?? null,
+          inputTextLength: input.inputText?.length ?? 0,
+          sourceAudioAssetId: input.sourceAudioAssetId ?? null,
+          estimatedCredits: input.estimatedCredits,
+          providerPayload: input.providerPayload ?? undefined
+        }
+      });
+
+      try {
+        const reservation = await this.organizationsService.reserveEnterpriseUsage({
+          userId: input.userId,
+          orgId: input.billingContext.organizationId,
+          points: input.estimatedCredits,
+          featureCode: audioEnterpriseFeatureCode(input.type),
+          usageRequestId: this.enterpriseUsageRequestId(task.id),
+          resourceType: "audio_task",
+          resourceId: task.id
+        });
+
+        return this.prisma.audioTask.update({
+          where: {
+            id: task.id
+          },
+          data: {
+            status: "RESERVED",
+            organizationMemberId: reservation.memberId
+          }
+        });
+      } catch (error) {
+        await this.prisma.audioTask.update({
+          where: {
+            id: task.id
+          },
+          data: {
+            status: "FAILED",
+            errorCode: "ENTERPRISE_RESERVE_FAILED",
+            errorMessage: error instanceof Error ? error.message : "企业额度预占失败",
+            finishedAt: new Date()
+          }
+        });
+        throw error;
+      }
+    }
+
     return this.prisma.$transaction(async (transaction) => {
       const task = await transaction.audioTask.create({
         data: {
           userId: input.userId,
+          billingContext: "PERSONAL",
           type: input.type,
           status: "CREATED",
           provider: input.model.providerKey,
@@ -2188,6 +2274,66 @@ export class AudioService {
   }
 
   private async settleSuccessfulAudioTask(taskId: string, providerPayload: Record<string, unknown>) {
+    const initialTask = await this.prisma.audioTask.findUnique({
+      where: {
+        id: taskId
+      },
+      include: {
+        reservation: true
+      }
+    });
+
+    if (!initialTask) {
+      throw new AppException(40401, "语音任务不存在", HttpStatus.NOT_FOUND);
+    }
+
+    if (initialTask.billingContext === "ORGANIZATION") {
+      if (!this.organizationsService) {
+        throw new AppException(50001, "企业账号服务未初始化", HttpStatus.INTERNAL_SERVER_ERROR);
+      }
+
+      const mergedProviderPayload = mergeProviderPayload(initialTask.providerPayload, providerPayload);
+      const actualCredits = calculateActualCreditsFromTask(initialTask, providerPayload);
+
+      await this.organizationsService.settleEnterpriseUsage({
+        usageRequestId: this.enterpriseUsageRequestId(initialTask.id),
+        actualPoints: actualCredits,
+        featureCode: audioEnterpriseFeatureCode(initialTask.type),
+        resourceType: "audio_task",
+        resourceId: initialTask.id,
+        usageQuantity: billableCharacterCountForTask(initialTask, providerPayload),
+        usageUnit: "character"
+      });
+
+      await this.prisma.$transaction(async (transaction) => {
+        const outputAudioAssetId = await this.createOutputAudioAsset(transaction, initialTask.userId, providerPayload);
+
+        await transaction.audioTask.update({
+          where: {
+            id: initialTask.id
+          },
+          data: {
+            status: "SUCCEEDED",
+            outputAudioAssetId,
+            actualCredits,
+            errorCode: null,
+            errorMessage: null,
+            requestId: extractProviderRequestId(providerPayload),
+            providerPayload: mergedProviderPayload as Prisma.InputJsonValue,
+            finishedAt: new Date()
+          }
+        });
+
+        await this.writeAudioUsageLog(transaction, initialTask, {
+          success: true,
+          consumedCredits: actualCredits,
+          providerPayload
+        });
+      });
+
+      return this.getUserTask(initialTask.userId, initialTask.id);
+    }
+
     const result = await this.prisma.$transaction(async (transaction) => {
       const task = await transaction.audioTask.findUnique({
         where: {
@@ -2304,6 +2450,55 @@ export class AudioService {
   }
 
   private async releaseFailedAudioTask(taskId: string, errorCode: string, errorMessage: string) {
+    const initialTask = await this.prisma.audioTask.findUnique({
+      where: {
+        id: taskId
+      },
+      include: {
+        reservation: true
+      }
+    });
+
+    if (!initialTask) {
+      throw new AppException(40401, "语音任务不存在", HttpStatus.NOT_FOUND);
+    }
+
+    if (initialTask.billingContext === "ORGANIZATION") {
+      if (!this.organizationsService) {
+        throw new AppException(50001, "企业账号服务未初始化", HttpStatus.INTERNAL_SERVER_ERROR);
+      }
+
+      await this.organizationsService.releaseEnterpriseUsage({
+        usageRequestId: this.enterpriseUsageRequestId(initialTask.id),
+        reason: `语音任务失败释放企业预占点数`
+      });
+
+      await this.prisma.$transaction(async (transaction) => {
+        await transaction.audioTask.update({
+          where: {
+            id: initialTask.id
+          },
+          data: {
+            status: "FAILED",
+            errorCode,
+            errorMessage,
+            finishedAt: new Date()
+          }
+        });
+
+        await this.writeAudioUsageLog(transaction, initialTask, {
+          success: false,
+          consumedCredits: 0,
+          providerPayload: {
+            errorCode,
+            errorMessage
+          }
+        });
+      });
+
+      return this.getUserTask(initialTask.userId, initialTask.id);
+    }
+
     const result = await this.prisma.$transaction(async (transaction) => {
       const task = await transaction.audioTask.findUnique({
         where: {
@@ -3012,6 +3207,29 @@ export class AudioService {
     });
   }
 
+  private billingContextFromDto(dto: { billingContext?: BillingContext; organizationId?: string | null }): BillingContextOptions {
+    if (dto.billingContext !== "ORGANIZATION") {
+      return {
+        billingContext: "PERSONAL"
+      };
+    }
+
+    const organizationId = dto.organizationId?.trim();
+
+    if (!organizationId) {
+      throw new AppException(40001, "请选择要使用的企业空间", HttpStatus.BAD_REQUEST);
+    }
+
+    return {
+      billingContext: "ORGANIZATION",
+      organizationId
+    };
+  }
+
+  private enterpriseUsageRequestId(taskId: string) {
+    return `audio-task:${taskId}`;
+  }
+
   private assertAudioAsset(dto: CreateAudioAssetDto) {
     const mimeType = dto.mimeType.trim().toLowerCase();
 
@@ -3323,6 +3541,9 @@ export class AudioService {
       id: task.id,
       userId: task.userId,
       user: task.user ?? null,
+      billingContext: task.billingContext,
+      organizationId: task.organizationId,
+      organizationMemberId: task.organizationMemberId,
       type: task.type,
       typeName: audioTaskTypeName(task.type),
       status: task.status,
@@ -4641,6 +4862,16 @@ function audioTaskTypeName(type: string) {
   };
 
   return names[type] ?? type;
+}
+
+function audioEnterpriseFeatureCode(type: AudioTaskType) {
+  const names: Record<AudioTaskType, string> = {
+    TTS: "audio.tts",
+    VOICE_CLONE: "audio.voice_clone",
+    VOICE_DESIGN: "audio.voice_design"
+  };
+
+  return names[type];
 }
 
 function voiceConsentTypeName(type: string) {

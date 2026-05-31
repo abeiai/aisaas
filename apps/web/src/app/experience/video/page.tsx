@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 
 import { VideoGenerationConsole } from "@/components/experience/video-generation-console";
 import { getOptionalCurrentUser } from "@/lib/auth-actions";
+import { getCurrentBillingIdentity } from "@/lib/billing-identity";
 import { getExperienceVideoModels } from "@/lib/experience-api";
+import { getUserOrganizations } from "@/lib/organizations-api";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +18,15 @@ export default async function ExperienceVideoPage() {
     getExperienceVideoModels(),
     getOptionalCurrentUser()
   ]);
+  const organizations = currentUser ? await getUserOrganizations().catch(() => null) : null;
+  const billingIdentity = currentUser ? await getCurrentBillingIdentity(organizations) : null;
 
-  return <VideoGenerationConsole currentUser={currentUser} models={models} />;
+  return (
+    <VideoGenerationConsole
+      currentUser={currentUser}
+      initialOrganizationId={billingIdentity?.organizationId ?? ""}
+      models={models}
+      organizations={organizations}
+    />
+  );
 }

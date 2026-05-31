@@ -9,6 +9,7 @@ import {
 } from "@aisaas/database";
 import { AppException } from "../common/app-exception.js";
 import { assertValidSlug } from "../cms/slug.js";
+import { OrganizationsService } from "../organizations/organizations.service.js";
 import { estimateMockUsageCredits, type TokenUsage } from "./ai-cost.js";
 import {
   CreateAiProviderPresetDto,
@@ -51,6 +52,12 @@ type AiTaskStatus =
   | "COMPENSATED";
 
 type AdminAiTaskType = "TEXT" | "IMAGE" | "VIDEO";
+type BillingContext = "PERSONAL" | "ORGANIZATION";
+
+interface BillingContextOptions {
+  billingContext: BillingContext;
+  organizationId?: string;
+}
 
 interface AdminAiTaskListFilters {
   taskType?: string;
@@ -165,6 +172,9 @@ interface NormalizedToolTemplateImport {
 interface AiTaskRecord {
   id: string;
   userId: string;
+  billingContext: BillingContext;
+  organizationId: string | null;
+  organizationMemberId: string | null;
   scenarioId: string;
   knowledgeBaseId: string | null;
   aiProviderId: string | null;
@@ -331,6 +341,8 @@ interface AiCallLogRecord {
 @Injectable()
 export class AiService {
   private readonly prisma = getPrismaClient();
+
+  constructor(private readonly organizationsService: OrganizationsService) {}
 
   async listScenarios() {
     const scenarios = await this.prisma.aiScenario.findMany({
@@ -625,6 +637,7 @@ export class AiService {
 
   async generateImage(userId: string, dto: CreateImageGenerationDto): Promise<ImageGenerationResult> {
     const prompt = dto.prompt.trim();
+    const billingContext = this.billingContextFromDto(dto);
     const scenario = await this.ensureExperienceImageScenario();
     const model = await this.getImageGenerationModel(dto.modelInstanceId);
     const activeModel = this.activeModelFromInstance(model, scenario, null);
@@ -665,7 +678,8 @@ export class AiService {
         knowledgeBaseId: null,
         knowledgeContext: ""
       },
-      estimatedCredits
+      estimatedCredits,
+      billingContext
     );
     const startedAt = Date.now();
 
@@ -916,6 +930,7 @@ export class AiService {
 
   async generateVideo(userId: string, dto: CreateVideoGenerationDto): Promise<VideoGenerationResult> {
     const prompt = dto.prompt.trim();
+    const billingContext = this.billingContextFromDto(dto);
     const scenario = await this.ensureExperienceVideoScenario();
     const model = await this.getVideoGenerationModel(dto.modelInstanceId);
     const activeModel = this.activeModelFromInstance(model, scenario, null);
@@ -957,7 +972,8 @@ export class AiService {
         knowledgeBaseId: null,
         knowledgeContext: ""
       },
-      estimatedCredits
+      estimatedCredits,
+      billingContext
     );
     const startedAt = Date.now();
 
@@ -1582,6 +1598,7 @@ export class AiService {
 
   async createTask(userId: string, dto: CreateAiTaskDto) {
     const input = dto.input.trim();
+    const billingContext = this.billingContextFromDto(dto);
     const scenario = await this.prisma.aiScenario.findFirst({
       where: {
         id: dto.scenarioId,
@@ -1599,7 +1616,7 @@ export class AiService {
     const promptInput = await this.preparePromptInput(userId, scenario, dto);
     const activeModel = await this.getModelForScenario(scenario, dto.modelInstanceId);
     const attachments = attachmentsForModel(activeModel, normalizeProviderAttachments(dto.attachments));
-    const reservedTask = await this.reserveCredits(userId, scenario, input, activeModel, promptInput);
+    const reservedTask = await this.reserveCredits(userId, scenario, input, activeModel, promptInput, undefined, billingContext);
 
     await this.prisma.aiTask.update({
       where: {
@@ -1639,6 +1656,7 @@ export class AiService {
     signal?: AbortSignal
   ) {
     const input = dto.input.trim();
+    const billingContext = this.billingContextFromDto(dto);
     const scenario = await this.prisma.aiScenario.findFirst({
       where: {
         id: dto.scenarioId,
@@ -1656,7 +1674,7 @@ export class AiService {
     const promptInput = await this.preparePromptInput(userId, scenario, dto);
     const activeModel = await this.getModelForScenario(scenario, dto.modelInstanceId);
     const attachments = attachmentsForModel(activeModel, normalizeProviderAttachments(dto.attachments));
-    const reservedTask = await this.reserveCredits(userId, scenario, input, activeModel, promptInput);
+    const reservedTask = await this.reserveCredits(userId, scenario, input, activeModel, promptInput, undefined, billingContext);
 
     await this.prisma.aiTask.update({
       where: {
@@ -1738,7 +1756,9 @@ export class AiService {
         modelInstanceId: dto.modelInstanceId?.trim() || "mock",
         attachments: dto.attachments,
         reasoningEnabled: dto.reasoningEnabled,
-        searchEnabled: dto.searchEnabled
+        searchEnabled: dto.searchEnabled,
+        billingContext: dto.billingContext,
+        organizationId: dto.organizationId
       },
       onEvent,
       signal
@@ -3410,7 +3430,10 @@ export class AiService {
       knowledgeBaseId: string | null;
       knowledgeContext: string;
     },
-    estimatedCredits = scenario.costCredits
+    estimatedCredits = scenario.costCredits,
+    billingContext: BillingContextOptions = {
+      billingContext: "PERSONAL"
+    }
   ) {
     const creditsToReserve = Math.max(0, Math.ceil(estimatedCredits));
     const saveFullContent = await this.shouldSaveFullAiContent();
@@ -3418,10 +3441,79 @@ export class AiService {
     const knowledgeContextPreview = contentPreview(promptInput.knowledgeContext, 800);
     const renderedPromptPreview = contentPreview(promptInput.renderedPrompt, 1000);
 
+    if (billingContext.billingContext === "ORGANIZATION") {
+      if (!billingContext.organizationId) {
+        throw new AppException(40001, "请选择要使用的企业空间", HttpStatus.BAD_REQUEST);
+      }
+
+      const task = await this.prisma.aiTask.create({
+        data: {
+          userId,
+          billingContext: "ORGANIZATION",
+          organizationId: billingContext.organizationId,
+          scenarioId: scenario.id,
+          aiProviderId: activeModel?.providerId ?? null,
+          aiModelId: activeModel?.providerId ? activeModel.id : null,
+          aiProviderInstanceId: activeModel?.providerInstanceId ?? null,
+          aiModelInstanceId: activeModel?.modelInstanceId ?? null,
+          providerName: activeModel?.provider.name,
+          modelName: activeModel?.modelName,
+          status: "CREATED",
+          input: {
+            text: saveFullContent ? input : inputPreview,
+            variables: promptInput.variables,
+            knowledgeBaseId: promptInput.knowledgeBaseId,
+            knowledgeContext: saveFullContent ? promptInput.knowledgeContext : knowledgeContextPreview
+          },
+          knowledgeBaseId: promptInput.knowledgeBaseId,
+          renderedPrompt: saveFullContent ? promptInput.renderedPrompt : renderedPromptPreview,
+          inputPreview,
+          inputHash: contentHash(input),
+          saveFullContent,
+          estimatedCredits: creditsToReserve
+        }
+      });
+
+      try {
+        const reservation = await this.organizationsService.reserveEnterpriseUsage({
+          userId,
+          orgId: billingContext.organizationId,
+          points: creditsToReserve,
+          featureCode: scenario.slug,
+          usageRequestId: this.enterpriseUsageRequestId(task.id),
+          resourceType: "ai_task",
+          resourceId: task.id
+        });
+
+        return this.prisma.aiTask.update({
+          where: {
+            id: task.id
+          },
+          data: {
+            status: "RESERVED",
+            organizationMemberId: reservation.memberId
+          }
+        });
+      } catch (error) {
+        await this.prisma.aiTask.update({
+          where: {
+            id: task.id
+          },
+          data: {
+            status: "FAILED",
+            errorMessage: this.providerErrorMessage(error),
+            finishedAt: new Date()
+          }
+        });
+        throw error;
+      }
+    }
+
     return this.prisma.$transaction(async (transaction) => {
       const task = await transaction.aiTask.create({
         data: {
           userId,
+          billingContext: "PERSONAL",
           scenarioId: scenario.id,
           aiProviderId: activeModel?.providerId ?? null,
           aiModelId: activeModel?.providerId ? activeModel.id : null,
@@ -3509,6 +3601,24 @@ export class AiService {
   }
 
   private async settleSuccessfulTask(taskId: string, result: ProviderResult, actualCredits: number) {
+    const initialTask = await this.prisma.aiTask.findUnique({
+      where: {
+        id: taskId
+      },
+      include: {
+        scenario: true,
+        reservation: true
+      }
+    });
+
+    if (!initialTask) {
+      throw new AppException(40401, "AI 任务不存在", HttpStatus.NOT_FOUND);
+    }
+
+    if (initialTask.billingContext === "ORGANIZATION") {
+      return this.settleSuccessfulEnterpriseTask(initialTask as AiTaskRecord, result, actualCredits);
+    }
+
     return this.prisma.$transaction(async (transaction) => {
       const task = await transaction.aiTask.findUnique({
         where: {
@@ -3619,7 +3729,86 @@ export class AiService {
     });
   }
 
+  private async settleSuccessfulEnterpriseTask(task: AiTaskRecord, result: ProviderResult, actualCredits: number) {
+    const settledCredits = Math.min(Math.max(0, Math.ceil(actualCredits)), task.estimatedCredits);
+
+    await this.organizationsService.settleEnterpriseUsage({
+      usageRequestId: this.enterpriseUsageRequestId(task.id),
+      actualPoints: settledCredits,
+      featureCode: task.scenario.slug,
+      resourceType: "ai_task",
+      resourceId: task.id,
+      usageQuantity: normalizedUsage(result.usage).totalTokens ?? 1,
+      usageUnit: "task"
+    });
+
+    const outputPreview = contentPreview(result.text, 1000);
+    const updatedTask = await this.prisma.aiTask.update({
+      where: {
+        id: task.id
+      },
+      data: {
+        status: "SUCCEEDED",
+        output: task.saveFullContent ? result.text : outputPreview,
+        outputPreview,
+        outputHash: contentHash(result.text),
+        errorMessage: null,
+        actualCredits: settledCredits,
+        providerName: result.provider ?? task.providerName,
+        modelName: result.model ?? task.modelName,
+        inputTokens: normalizedUsage(result.usage).inputTokens,
+        outputTokens: normalizedUsage(result.usage).outputTokens,
+        totalTokens: normalizedUsage(result.usage).totalTokens,
+        finishedAt: new Date()
+      },
+      include: {
+        scenario: true,
+        reservation: true
+      }
+    });
+
+    return this.toTask(updatedTask as AiTaskRecord);
+  }
+
   private async releaseFailedTask(taskId: string, errorMessage: string) {
+    const initialTask = await this.prisma.aiTask.findUnique({
+      where: {
+        id: taskId
+      },
+      include: {
+        scenario: true,
+        reservation: true
+      }
+    });
+
+    if (!initialTask) {
+      throw new AppException(40401, "AI 任务不存在", HttpStatus.NOT_FOUND);
+    }
+
+    if (initialTask.billingContext === "ORGANIZATION") {
+      await this.organizationsService.releaseEnterpriseUsage({
+        usageRequestId: this.enterpriseUsageRequestId(initialTask.id),
+        reason: `${initialTask.scenario.name}失败释放企业预占点数`
+      });
+
+      const updatedTask = await this.prisma.aiTask.update({
+        where: {
+          id: initialTask.id
+        },
+        data: {
+          status: "FAILED",
+          errorMessage,
+          finishedAt: new Date()
+        },
+        include: {
+          scenario: true,
+          reservation: true
+        }
+      });
+
+      return this.toTask(updatedTask as AiTaskRecord);
+    }
+
     return this.prisma.$transaction(async (transaction) => {
       const task = await transaction.aiTask.findUnique({
         where: {
@@ -3694,6 +3883,44 @@ export class AiService {
   }
 
   private async cancelTask(taskId: string, errorMessage: string) {
+    const initialTask = await this.prisma.aiTask.findUnique({
+      where: {
+        id: taskId
+      },
+      include: {
+        scenario: true,
+        reservation: true
+      }
+    });
+
+    if (!initialTask) {
+      throw new AppException(40401, "AI 任务不存在", HttpStatus.NOT_FOUND);
+    }
+
+    if (initialTask.billingContext === "ORGANIZATION") {
+      await this.organizationsService.releaseEnterpriseUsage({
+        usageRequestId: this.enterpriseUsageRequestId(initialTask.id),
+        reason: `${initialTask.scenario.name}中断释放企业预占点数`
+      });
+
+      const updatedTask = await this.prisma.aiTask.update({
+        where: {
+          id: initialTask.id
+        },
+        data: {
+          status: "CANCELLED",
+          errorMessage,
+          finishedAt: new Date()
+        },
+        include: {
+          scenario: true,
+          reservation: true
+        }
+      });
+
+      return this.toTask(updatedTask as AiTaskRecord);
+    }
+
     return this.prisma.$transaction(async (transaction) => {
       const task = await transaction.aiTask.findUnique({
         where: {
@@ -3775,6 +4002,29 @@ export class AiService {
         userId
       }
     });
+  }
+
+  private billingContextFromDto(dto: { billingContext?: BillingContext; organizationId?: string | null }): BillingContextOptions {
+    if (dto.billingContext !== "ORGANIZATION") {
+      return {
+        billingContext: "PERSONAL"
+      };
+    }
+
+    const organizationId = dto.organizationId?.trim();
+
+    if (!organizationId) {
+      throw new AppException(40001, "请选择要使用的企业空间", HttpStatus.BAD_REQUEST);
+    }
+
+    return {
+      billingContext: "ORGANIZATION",
+      organizationId
+    };
+  }
+
+  private enterpriseUsageRequestId(taskId: string) {
+    return `ai-task:${taskId}`;
   }
 
   private async ensureExperienceChatScenario() {
@@ -5005,6 +5255,9 @@ export class AiService {
       id: task.id,
       userId: task.userId,
       user: task.user ?? null,
+      billingContext: task.billingContext,
+      organizationId: task.organizationId,
+      organizationMemberId: task.organizationMemberId,
       scenarioId: task.scenarioId,
       knowledgeBaseId: task.knowledgeBaseId,
       aiProviderId: task.aiProviderId,

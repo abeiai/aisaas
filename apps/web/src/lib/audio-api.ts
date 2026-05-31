@@ -128,6 +128,9 @@ export interface AudioTask {
   statusName: string;
   provider: string;
   model: string;
+  billingContext?: "PERSONAL" | "ORGANIZATION";
+  organizationId?: string | null;
+  organizationMemberId?: string | null;
   voiceAssetId: string | null;
   inputText: string | null;
   inputTextLength: number;
@@ -430,6 +433,8 @@ export async function createExperienceTtsAudioTaskAction(formData: FormData) {
   try {
     const voiceChoice = text(formData, "voiceChoice");
     const modelAlias = text(formData, "modelAlias") || "tts-default";
+    const billingContext = text(formData, "billingContext") === "ORGANIZATION" ? "ORGANIZATION" : "PERSONAL";
+    const organizationId = text(formData, "organizationId");
     let voiceAssetId = voiceChoice.startsWith("voice:") ? voiceChoice.slice("voice:".length) : undefined;
     const voice = voiceChoice.startsWith("system:") ? voiceChoice.slice("system:".length) : undefined;
 
@@ -444,6 +449,8 @@ export async function createExperienceTtsAudioTaskAction(formData: FormData) {
         voiceAssetId,
         voice,
         modelAlias,
+        billingContext,
+        ...(billingContext === "ORGANIZATION" && organizationId ? { organizationId } : {}),
         source: "EXPERIENCE",
         speed: numberValue(formData, "speed"),
         pitch: numberValue(formData, "pitch"),

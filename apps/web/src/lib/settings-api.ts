@@ -102,7 +102,8 @@ export async function updateSystemConfigAction(formData: FormData) {
       registrationStatus: text(formData, "registrationStatus"),
       mediaImageMaxSizeMb: text(formData, "mediaImageMaxSizeMb"),
       mediaAudioMaxSizeMb: text(formData, "mediaAudioMaxSizeMb"),
-      mediaVideoMaxSizeMb: text(formData, "mediaVideoMaxSizeMb")
+      mediaVideoMaxSizeMb: text(formData, "mediaVideoMaxSizeMb"),
+      enterpriseAccountEnabled: text(formData, "enterpriseAccountEnabled")
     })
   });
 

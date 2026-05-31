@@ -20,11 +20,14 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { PublicUser } from "@/lib/auth-actions";
 import type { ExperienceImageModel } from "@/lib/experience-api";
+import type { UserOrganizationsResult } from "@/lib/organizations-api";
 import { cn } from "@/lib/utils";
 
 interface ImageGenerationConsoleProps {
   currentUser: PublicUser | null;
+  initialOrganizationId?: string;
   models: ExperienceImageModel[];
+  organizations: UserOrganizationsResult | null;
 }
 
 interface ReferenceImage {
@@ -95,12 +98,18 @@ const ratios = [
 const modes = ["图片生成", "参考图生成", "风格延展"];
 const resolutions = ["高清 2K", "超清 4K"];
 
-export function ImageGenerationConsole({ currentUser, models }: ImageGenerationConsoleProps) {
+export function ImageGenerationConsole({
+  currentUser,
+  initialOrganizationId = "",
+  models,
+  organizations
+}: ImageGenerationConsoleProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [history, setHistory] = useState<ImageJob[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [selectedModelId, setSelectedModelId] = useState(models[0]?.id ?? "mock-image-lite");
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState(initialOrganizationId);
   const [mode, setMode] = useState(modes[0]);
   const [ratio, setRatio] = useState<(typeof ratios)[number]["value"]>("16:9");
   const [resolution, setResolution] = useState(resolutions[0]);
@@ -116,10 +125,29 @@ export function ImageGenerationConsole({ currentUser, models }: ImageGenerationC
     () => models.find((model) => model.id === selectedModelId) ?? models[0],
     [models, selectedModelId]
   );
+  const availableOrganizations = useMemo(
+    () => (organizations?.enabled ? organizations.organizations.filter((organization) => organization.memberStatus === "ACTIVE") : []),
+    [organizations]
+  );
   const maxReferenceImages = selectedModel?.maxReferenceImages ?? 0;
   const maxOutputImages = Math.max(1, selectedModel?.maxOutputImages ?? 4);
   const selectedJob = history.find((job) => job.id === selectedJobId) ?? history[0] ?? null;
   const canAddReference = maxReferenceImages > references.length;
+  const billingContext = selectedOrganizationId ? "ORGANIZATION" : "PERSONAL";
+
+  useEffect(() => {
+    setSelectedOrganizationId(initialOrganizationId);
+  }, [initialOrganizationId]);
+
+  useEffect(() => {
+    if (!selectedOrganizationId) {
+      return;
+    }
+
+    if (!availableOrganizations.some((organization) => organization.id === selectedOrganizationId)) {
+      setSelectedOrganizationId("");
+    }
+  }, [availableOrganizations, selectedOrganizationId]);
 
   useEffect(() => {
     try {
@@ -268,6 +296,8 @@ export function ImageGenerationConsole({ currentUser, models }: ImageGenerationC
       body: JSON.stringify({
         prompt: normalizedPrompt,
         modelInstanceId: model.id,
+        billingContext,
+        ...(selectedOrganizationId ? { organizationId: selectedOrganizationId } : {}),
         width,
         height,
         count: safeCount,
@@ -397,6 +427,18 @@ export function ImageGenerationConsole({ currentUser, models }: ImageGenerationC
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex min-h-16 shrink-0 items-center justify-end border-b border-border bg-background px-5 py-4">
           <div className="flex min-w-0 items-center gap-3">
+            {currentUser && availableOrganizations.length > 0 ? (
+              <label className="flex min-w-0 text-sm md:w-64">
+                <Select value={selectedOrganizationId} onChange={(event) => setSelectedOrganizationId(event.target.value)}>
+                  <option value="">个人空间</option>
+                  {availableOrganizations.map((organization) => (
+                    <option key={organization.id} value={organization.id}>
+                      {organization.name}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+            ) : null}
             <label className="flex min-w-0 text-sm md:w-80">
               <Select value={selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)}>
                 {models.map((model) => (

@@ -229,6 +229,14 @@ const configDefinitions = [
     sortOrder: 92
   },
   {
+    key: "enterpriseAccountEnabled",
+    label: "企业账号体系",
+    value: "false",
+    description: "启用后开放企业/组织账号、企业钱包、成员额度和企业用量归集能力。",
+    isPublic: false,
+    sortOrder: 100
+  },
+  {
     key: "emailVerificationEnabled",
     label: "邮件验证启用",
     value: "false",
@@ -335,8 +343,8 @@ const configDefinitions = [
   {
     key: "smsVerificationProvider",
     label: "短信验证方案",
-    value: "ALIYUN_SMS",
-    description: "当前支持阿里云短信服务 SendSms。",
+    value: "ALIYUN_DYPNS",
+    description: "当前支持阿里云云通信号码认证服务 SendSmsVerifyCode / CheckSmsVerifyCode。",
     isPublic: false,
     sortOrder: 141
   },
@@ -359,8 +367,8 @@ const configDefinitions = [
   {
     key: "aliyunSmsEndpoint",
     label: "阿里云短信 Endpoint",
-    value: "https://dysmsapi.aliyuncs.com/",
-    description: "阿里云短信 SendSms API Endpoint。",
+    value: "https://dypnsapi.aliyuncs.com/",
+    description: "阿里云 Dypnsapi Endpoint。",
     isPublic: false,
     sortOrder: 144
   },
@@ -368,7 +376,7 @@ const configDefinitions = [
     key: "aliyunSmsRegionId",
     label: "阿里云短信区域",
     value: "cn-hangzhou",
-    description: "阿里云短信 SendSms RegionId。",
+    description: "阿里云 Dypnsapi RegionId。",
     isPublic: false,
     sortOrder: 145
   },
@@ -392,9 +400,17 @@ const configDefinitions = [
     key: "aliyunSmsTemplateParamCodeKey",
     label: "验证码变量名",
     value: "code",
-    description: "短信模板中接收验证码的变量名，默认 code。",
+    description: "短信模板中接收验证码的变量名，调用 Dypnsapi 时会传入 ##code## 占位。",
     isPublic: false,
     sortOrder: 148
+  },
+  {
+    key: "aliyunSmsTemplateParamExtraJson",
+    label: "短信模板扩展参数",
+    value: "{}",
+    description: "短信模板除验证码外的额外变量，JSON 格式。例如 {\"min\":\"5\"}。",
+    isPublic: false,
+    sortOrder: 149
   },
   {
     key: "smsCodeTtlSeconds",
@@ -402,7 +418,7 @@ const configDefinitions = [
     value: "300",
     description: "手机验证码有效期，单位秒。",
     isPublic: false,
-    sortOrder: 149
+    sortOrder: 150
   },
   {
     key: "audioVoiceCloneReviewRequired",
@@ -648,6 +664,7 @@ export class SystemConfigService {
     if (
       key === "emailVerificationEnabled" ||
       key === "smsVerificationEnabled" ||
+      key === "enterpriseAccountEnabled" ||
       key === "aliyunMailReplyToAddress"
     ) {
       if (value !== "true" && value !== "false") {
@@ -659,8 +676,8 @@ export class SystemConfigService {
       throw new AppException(40001, "邮件验证方案暂只支持阿里云邮件推送", HttpStatus.BAD_REQUEST);
     }
 
-    if (key === "smsVerificationProvider" && value !== "ALIYUN_SMS") {
-      throw new AppException(40001, "短信验证方案暂只支持阿里云短信服务", HttpStatus.BAD_REQUEST);
+    if (key === "smsVerificationProvider" && value !== "ALIYUN_DYPNS" && value !== "ALIYUN_SMS") {
+      throw new AppException(40001, "短信验证方案暂只支持阿里云云通信号码认证服务", HttpStatus.BAD_REQUEST);
     }
 
     if (key === "aliyunMailAddressType" && value !== "0" && value !== "1") {
@@ -669,6 +686,10 @@ export class SystemConfigService {
 
     if (key === "smsCodeTtlSeconds") {
       return normalizeSmsCodeTtlSeconds(value);
+    }
+
+    if (key === "aliyunSmsTemplateParamExtraJson") {
+      return normalizeJsonObjectConfig(value, "短信模板扩展参数必须是 JSON 对象");
     }
 
     if (key === "mediaImageMaxSizeMb" || key === "mediaAudioMaxSizeMb" || key === "mediaVideoMaxSizeMb") {
@@ -713,6 +734,7 @@ export class SystemConfigService {
       assertRequiredConfig(values.aliyunSmsSignName, "请填写阿里云短信签名");
       assertRequiredConfig(values.aliyunSmsTemplateCode, "请填写阿里云短信模板 Code");
       assertRequiredConfig(values.aliyunSmsTemplateParamCodeKey, "请填写短信验证码变量名");
+      assertRequiredConfig(values.aliyunSmsTemplateParamExtraJson, "请填写短信模板扩展参数，留空请填写 {}");
     }
   }
 }
@@ -735,6 +757,22 @@ function normalizeSmsCodeTtlSeconds(value: string) {
   }
 
   return String(seconds);
+}
+
+function normalizeJsonObjectConfig(value: string, message: string) {
+  const trimmedValue = value.trim() || "{}";
+
+  try {
+    const parsed = JSON.parse(trimmedValue) as unknown;
+
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+      throw new Error("invalid json");
+    }
+
+    return JSON.stringify(parsed);
+  } catch {
+    throw new AppException(40001, message, HttpStatus.BAD_REQUEST);
+  }
 }
 
 function normalizeMediaUploadSizeMb(value: string) {

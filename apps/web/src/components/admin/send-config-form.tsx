@@ -147,7 +147,9 @@ export function SendConfigForm({ config }: { config: AdminSendConfig }) {
                 <MessageSquareText className="size-5" />
                 手机短信验证
               </CardTitle>
-              <CardDescription>配置阿里云短信服务 SendSms，用于手机号登录和绑定验证码。</CardDescription>
+              <CardDescription>
+                配置阿里云云通信号码认证服务 SendSmsVerifyCode，用于手机号登录和绑定验证码。
+              </CardDescription>
             </div>
             <ConfigCardActions
               enabled={config.sms.enabled}
@@ -167,18 +169,22 @@ export function SendConfigForm({ config }: { config: AdminSendConfig }) {
                     name="smsVerificationEnabled"
                     type="checkbox"
                   />
-                  <span className="text-sm">配置完整后使用阿里云短信发送验证码</span>
+                  <span className="text-sm">配置完整后由阿里云生成并校验短信验证码</span>
                 </label>
               </Field>
               <Field>
                 <FieldLabel htmlFor="sms-provider">短信方案</FieldLabel>
                 <Select id="sms-provider" name="smsVerificationProvider" defaultValue={config.sms.provider}>
-                  <option value="ALIYUN_SMS">阿里云短信服务 SendSms</option>
+                  <option value="ALIYUN_DYPNS">阿里云号码认证 SendSmsVerifyCode</option>
                 </Select>
               </Field>
               <Field>
                 <FieldLabel htmlFor="sms-access-key-id">AccessKey ID</FieldLabel>
                 <Input id="sms-access-key-id" name="aliyunSmsAccessKeyId" defaultValue={config.sms.accessKeyId} />
+                <FieldDescription>
+                  RAM 子账号需具备 <code>dypns:SendSmsVerifyCode</code> 和{" "}
+                  <code>dypns:CheckSmsVerifyCode</code> 权限。
+                </FieldDescription>
               </Field>
               <Field>
                 <FieldLabel htmlFor="sms-access-key-secret">AccessKey Secret</FieldLabel>
@@ -212,7 +218,22 @@ export function SendConfigForm({ config }: { config: AdminSendConfig }) {
                   name="aliyunSmsTemplateParamCodeKey"
                   defaultValue={config.sms.templateParamCodeKey}
                 />
-                <FieldDescription>默认是 <code>code</code>，需与阿里云短信模板变量一致。</FieldDescription>
+                <FieldDescription>
+                  默认是 <code>code</code>，系统会按 Dypnsapi 要求传入 <code>{"##code##"}</code> 占位。
+                </FieldDescription>
+              </Field>
+              <Field className="xl:col-span-2">
+                <FieldLabel htmlFor="sms-template-param-extra-json">其他模板参数 JSON</FieldLabel>
+                <Textarea
+                  id="sms-template-param-extra-json"
+                  name="aliyunSmsTemplateParamExtraJson"
+                  rows={3}
+                  defaultValue={config.sms.templateParamExtraJson}
+                  placeholder='{"min":"5"}'
+                />
+                <FieldDescription>
+                  如果短信模板含有效期等变量，在这里补齐。常见模板需要 <code>{"{\"min\":\"5\"}"}</code>。
+                </FieldDescription>
               </Field>
               <Field>
                 <FieldLabel htmlFor="sms-code-ttl-seconds">验证码有效期（秒）</FieldLabel>

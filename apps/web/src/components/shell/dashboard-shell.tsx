@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import {
   BookOpenText,
+  Building2,
   Coins,
   FileText,
   LayoutDashboard,
@@ -13,7 +14,9 @@ import {
 import { PublicShell } from "@/components/shell/public-shell";
 import { UserAccountMenu } from "@/components/shell/user-account-menu";
 import { getCurrentUser } from "@/lib/auth-actions";
+import { getCurrentBillingIdentity } from "@/lib/billing-identity";
 import { getWallet } from "@/lib/billing-api";
+import { getUserOrganizations } from "@/lib/organizations-api";
 import { cn } from "@/lib/utils";
 
 export type DashboardNavKey =
@@ -23,6 +26,7 @@ export type DashboardNavKey =
   | "tasks"
   | "voices"
   | "billing"
+  | "organizations"
   | "profile";
 
 type DashboardNavItem = {
@@ -64,6 +68,12 @@ const dashboardNavItems: DashboardNavItem[] = [
     icon: Coins
   },
   {
+    key: "organizations",
+    href: "/dashboard/organizations",
+    label: "企业空间",
+    icon: Building2
+  },
+  {
     key: "profile",
     href: "/dashboard/profile",
     label: "个人资料",
@@ -75,11 +85,24 @@ export async function DashboardShell({
   active,
   children
 }: Readonly<{ active: DashboardNavKey; children: ReactNode }>) {
-  const [user, wallet] = await Promise.all([
+  const [user, wallet, organizationResult] = await Promise.all([
     getCurrentUser(),
-    getWallet().catch(() => null)
+    getWallet().catch(() => null),
+    getUserOrganizations().catch(() => null)
   ]);
-  const activeItem = dashboardNavItems.find((item) => item.key === active);
+  const billingIdentity = await getCurrentBillingIdentity(organizationResult);
+  const billingOrganization =
+    billingIdentity.type === "ORGANIZATION"
+      ? organizationResult?.organizations.find((organization) => organization.id === billingIdentity.organizationId)
+      : null;
+  const displayedCredits =
+    billingIdentity.type === "ORGANIZATION"
+      ? billingOrganization?.quota.remainingQuota ?? billingOrganization?.wallet?.balanceAvailable ?? null
+      : wallet?.availableCredits ?? null;
+  const visibleNavItems = dashboardNavItems.filter(
+    (item) => item.key !== "organizations" || organizationResult?.enabled
+  );
+  const activeItem = visibleNavItems.find((item) => item.key === active);
 
   return (
     <PublicShell showFooter={false} showHeader={false}>
@@ -90,7 +113,7 @@ export async function DashboardShell({
               <p className="text-lg font-semibold">用户中心</p>
             </div>
             <nav className="flex gap-2 overflow-x-auto pb-1 md:flex-col md:overflow-visible md:pb-0">
-              {dashboardNavItems.map((item) => {
+              {visibleNavItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = item.key === active;
 
@@ -120,7 +143,12 @@ export async function DashboardShell({
             <h1 className="truncate text-xl font-semibold tracking-normal">
               {activeItem?.label ?? "用户中心"}
             </h1>
-            <UserAccountMenu user={user} availableCredits={wallet?.availableCredits ?? null} />
+            <UserAccountMenu
+              availableCredits={displayedCredits}
+              billingIdentity={billingIdentity}
+              organizations={organizationResult}
+              user={user}
+            />
           </header>
           {children}
         </div>

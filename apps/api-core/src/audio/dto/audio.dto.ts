@@ -113,6 +113,15 @@ export class CreateTtsAudioTaskDto {
   @IsOptional()
   @IsIn(["TOOL", "EXPERIENCE"])
   source?: "TOOL" | "EXPERIENCE";
+
+  @IsOptional()
+  @IsIn(["PERSONAL", "ORGANIZATION"])
+  billingContext?: "PERSONAL" | "ORGANIZATION";
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  organizationId?: string;
 }
 
 export class CreateVoiceCloneTaskDto {
@@ -164,6 +173,15 @@ export class CreateVoiceCloneTaskDto {
   @IsOptional()
   @IsIn(["TOOL", "EXPERIENCE"])
   source?: "TOOL" | "EXPERIENCE";
+
+  @IsOptional()
+  @IsIn(["PERSONAL", "ORGANIZATION"])
+  billingContext?: "PERSONAL" | "ORGANIZATION";
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  organizationId?: string;
 }
 
 export class CreateVoiceDesignTaskDto {
@@ -195,6 +213,15 @@ export class CreateVoiceDesignTaskDto {
   @IsOptional()
   @IsIn(["TOOL", "EXPERIENCE"])
   source?: "TOOL" | "EXPERIENCE";
+
+  @IsOptional()
+  @IsIn(["PERSONAL", "ORGANIZATION"])
+  billingContext?: "PERSONAL" | "ORGANIZATION";
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  organizationId?: string;
 }
 
 export class UpdateVoiceAssetDto {

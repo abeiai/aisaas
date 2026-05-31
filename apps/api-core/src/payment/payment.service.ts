@@ -587,6 +587,10 @@ export class PaymentService {
       clientIp: string | null;
     }
   ) {
+    if (product === "ALIPAY_PRECREATE") {
+      return this.alipayClient.createPrecreatePayOrder(order);
+    }
+
     if (product === "ALIPAY_PAGE") {
       return this.alipayClient.createPagePayOrder(order);
     }
@@ -1050,9 +1054,9 @@ export class PaymentService {
         providerName: "支付宝",
         scene: "DESKTOP_WEB",
         sceneName: paymentSceneName("DESKTOP_WEB"),
-        product: "ALIPAY_PAGE",
-        productName: paymentProductName("ALIPAY_PAGE"),
-        description: "本地模拟支付宝电脑网站支付"
+        product: "ALIPAY_PRECREATE",
+        productName: paymentProductName("ALIPAY_PRECREATE"),
+        description: "本地模拟支付宝扫码支付"
       },
       {
         provider: "ALIPAY",
@@ -1103,7 +1107,7 @@ export class PaymentService {
   }
 
   private paymentAction(product: PaymentProduct) {
-    if (product === "WECHAT_NATIVE") {
+    if (product === "ALIPAY_PRECREATE" || product === "WECHAT_NATIVE") {
       return "QR_CODE" as const;
     }
 

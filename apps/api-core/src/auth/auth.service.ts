@@ -49,6 +49,8 @@ const defaultAccessSessionSeconds = 15 * 60;
 const defaultPersistentSessionSeconds = 400 * 24 * 60 * 60;
 const defaultSmsCodeTtlSeconds = 5 * 60;
 const defaultPhoneVerificationCode = "199599";
+const aliyunDypnsSmsProvider = "ALIYUN_DYPNS";
+const aliyunDypnsEndpoint = "https://dypnsapi.aliyuncs.com/";
 const phonePattern = /^1[3-9]\d{9}$/;
 
 type SmsCodePurpose = "LOGIN" | "BIND_PHONE";
@@ -61,6 +63,7 @@ interface AliyunSmsConfig {
   signName: string;
   templateCode: string;
   templateParamCodeKey: string;
+  templateParamExtraJson: string;
   timeoutMs: number;
 }
 
@@ -159,7 +162,7 @@ export class AuthService {
       }
     }
 
-    const code = this.createSmsCode();
+    let code = this.createSmsCode();
     const expiresIn = await this.getSmsCodeTtlSeconds();
     const expiresAt = new Date(Date.now() + expiresIn * 1000);
     let sendProvider = "LOCAL_DEFAULT";
@@ -169,10 +172,11 @@ export class AuthService {
     const aliyunSmsConfig = await this.getAliyunSmsConfig();
 
     if (aliyunSmsConfig) {
-      const sent = await this.sendAliyunSms(phone, code, aliyunSmsConfig);
-      sendProvider = "ALIYUN";
+      const sent = await this.sendAliyunSmsVerifyCode(phone, expiresIn, aliyunSmsConfig);
+      sendProvider = aliyunDypnsSmsProvider;
       sendRequestId = sent.requestId;
       sendStatus = sent.status;
+      code = sent.requestId || this.createOpaqueToken();
     }
 
     await this.prisma.smsVerificationCode.create({
@@ -191,9 +195,9 @@ export class AuthService {
       phone,
       purpose,
       expiresIn,
-      sent: sendProvider === "ALIYUN",
+      sent: sendProvider === aliyunDypnsSmsProvider,
       message:
-        sendProvider === "ALIYUN"
+        sendProvider === aliyunDypnsSmsProvider
           ? "验证码已发送"
           : `短信服务未配置，可使用默认验证码 ${defaultPhoneVerificationCode}`
     };
@@ -604,7 +608,31 @@ export class AuthService {
       }
     });
 
-    if (!record || record.codeHash !== this.hashSmsCode(phone, purpose, normalizedCode)) {
+    if (!record) {
+      throw new AppException(40003, "验证码错误或已过期", HttpStatus.BAD_REQUEST);
+    }
+
+    if (record.sendProvider === aliyunDypnsSmsProvider) {
+      const aliyunSmsConfig = await this.getAliyunSmsConfig();
+
+      if (!aliyunSmsConfig) {
+        throw new AppException(50001, "短信服务配置缺失，请联系管理员", HttpStatus.INTERNAL_SERVER_ERROR);
+      }
+
+      await this.checkAliyunSmsVerifyCode(phone, normalizedCode, aliyunSmsConfig);
+      await this.prisma.smsVerificationCode.update({
+        where: {
+          id: record.id
+        },
+        data: {
+          consumedAt: new Date()
+        }
+      });
+
+      return;
+    }
+
+    if (record.codeHash !== this.hashSmsCode(phone, purpose, normalizedCode)) {
       throw new AppException(40003, "验证码错误或已过期", HttpStatus.BAD_REQUEST);
     }
 
@@ -645,6 +673,7 @@ export class AuthService {
             "aliyunSmsSignName",
             "aliyunSmsTemplateCode",
             "aliyunSmsTemplateParamCodeKey",
+            "aliyunSmsTemplateParamExtraJson",
             "smsCodeTtlSeconds"
           ]
         }
@@ -674,11 +703,12 @@ export class AuthService {
       return {
         accessKeyId,
         accessKeySecret,
-        endpoint: values.get("aliyunSmsEndpoint")?.trim() || "https://dysmsapi.aliyuncs.com/",
+        endpoint: this.resolveAliyunDypnsEndpoint(values.get("aliyunSmsEndpoint")),
         regionId: values.get("aliyunSmsRegionId")?.trim() || "cn-hangzhou",
         signName,
         templateCode,
         templateParamCodeKey: values.get("aliyunSmsTemplateParamCodeKey")?.trim() || "code",
+        templateParamExtraJson: values.get("aliyunSmsTemplateParamExtraJson")?.trim() || "{}",
         timeoutMs: safePositiveNumber(process.env.ALIYUN_SMS_TIMEOUT_MS, 10_000)
       };
     }
@@ -695,32 +725,143 @@ export class AuthService {
     return {
       accessKeyId: envAccessKeyId,
       accessKeySecret: envAccessKeySecret,
-      endpoint: process.env.ALIYUN_SMS_ENDPOINT || "https://dysmsapi.aliyuncs.com/",
+      endpoint: this.resolveAliyunDypnsEndpoint(process.env.ALIYUN_SMS_ENDPOINT),
       regionId: process.env.ALIYUN_SMS_REGION_ID?.trim() || "cn-hangzhou",
       signName: envSignName,
       templateCode: envTemplateCode,
       templateParamCodeKey: process.env.ALIYUN_SMS_TEMPLATE_PARAM_CODE_KEY?.trim() || "code",
+      templateParamExtraJson: process.env.ALIYUN_SMS_TEMPLATE_PARAM_EXTRA_JSON?.trim() || "{}",
       timeoutMs: safePositiveNumber(process.env.ALIYUN_SMS_TIMEOUT_MS, 10_000)
     };
   }
 
-  private async sendAliyunSms(phone: string, code: string, config: AliyunSmsConfig) {
+  private async sendAliyunSmsVerifyCode(phone: string, expiresIn: number, config: AliyunSmsConfig) {
+    const templateParams = this.buildAliyunSmsTemplateParams(config, expiresIn, false);
+    let payload: Awaited<ReturnType<typeof this.requestAliyunSmsApi>>;
+
+    try {
+      payload = await this.requestAliyunSmsApi(
+        "SendSmsVerifyCode",
+        this.buildAliyunSmsVerifyCodeParams(phone, expiresIn, config, templateParams),
+        config,
+        "短信验证码发送失败"
+      );
+    } catch (error) {
+      if (error instanceof AppException && this.shouldRetryAliyunSmsWithMinParam(error, templateParams)) {
+        payload = await this.requestAliyunSmsApi(
+          "SendSmsVerifyCode",
+          this.buildAliyunSmsVerifyCodeParams(
+            phone,
+            expiresIn,
+            config,
+            this.buildAliyunSmsTemplateParams(config, expiresIn, true)
+          ),
+          config,
+          "短信验证码发送失败"
+        );
+      } else {
+        throw error;
+      }
+    }
+
+    return {
+      requestId: payload.RequestId ?? null,
+      status: payload.Code ?? "OK"
+    };
+  }
+
+  private buildAliyunSmsVerifyCodeParams(
+    phone: string,
+    expiresIn: number,
+    config: AliyunSmsConfig,
+    templateParams: Record<string, string>
+  ) {
+    return {
+      PhoneNumber: phone,
+      SignName: config.signName,
+      TemplateCode: config.templateCode,
+      TemplateParam: JSON.stringify(templateParams),
+      CodeType: "1",
+      CodeLength: "6",
+      ValidTime: String(expiresIn)
+    };
+  }
+
+  private buildAliyunSmsTemplateParams(config: AliyunSmsConfig, expiresIn: number, includeDefaultMin: boolean) {
+    const templateParams = this.parseAliyunSmsTemplateExtraParams(config.templateParamExtraJson);
+
+    if (includeDefaultMin && !Object.hasOwn(templateParams, "min")) {
+      templateParams.min = String(Math.ceil(expiresIn / 60));
+    }
+
+    templateParams[config.templateParamCodeKey] = "##code##";
+
+    return templateParams;
+  }
+
+  private parseAliyunSmsTemplateExtraParams(value: string) {
+    if (!value.trim()) {
+      return {} as Record<string, string>;
+    }
+
+    try {
+      const parsed = JSON.parse(value) as unknown;
+
+      if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+        throw new Error("invalid json");
+      }
+
+      return Object.fromEntries(
+        Object.entries(parsed).map(([key, entryValue]) => [key, String(entryValue)])
+      ) as Record<string, string>;
+    } catch {
+      throw new AppException(50001, "短信模板扩展参数 JSON 格式不正确，请在后台邮件短信配置中修正", HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  private shouldRetryAliyunSmsWithMinParam(error: AppException, templateParams: Record<string, string>) {
+    if (Object.hasOwn(templateParams, "min")) {
+      return false;
+    }
+
+    return /模板内容与模板参数|template/i.test(error.message);
+  }
+
+  private async checkAliyunSmsVerifyCode(phone: string, code: string, config: AliyunSmsConfig) {
+    const payload = await this.requestAliyunSmsApi(
+      "CheckSmsVerifyCode",
+      {
+        PhoneNumber: phone,
+        VerifyCode: code
+      },
+      config,
+      "短信验证码校验失败"
+    );
+    const model = payload.Model;
+    const verifyResult = typeof model === "string" ? model : model?.VerifyResult;
+
+    if (verifyResult !== "PASS") {
+      throw new AppException(40003, "验证码错误或已过期", HttpStatus.BAD_REQUEST);
+    }
+  }
+
+  private async requestAliyunSmsApi(
+    action: string,
+    actionParams: Record<string, string>,
+    config: AliyunSmsConfig,
+    errorPrefix: string
+  ) {
     const params: Record<string, string> = {
       AccessKeyId: config.accessKeyId,
-      Action: "SendSms",
+      Action: action,
       Format: "JSON",
-      PhoneNumbers: phone,
       RegionId: config.regionId,
-      SignName: config.signName,
       SignatureMethod: "HMAC-SHA1",
       SignatureNonce: randomBytes(16).toString("hex"),
       SignatureVersion: "1.0",
-      TemplateCode: config.templateCode,
-      TemplateParam: JSON.stringify({
-        [config.templateParamCodeKey]: code
-      }),
       Timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
-      Version: "2017-05-25"
+      Version: "2017-05-25",
+      ...actionParams
     };
     const canonicalQuery = Object.keys(params)
       .sort()
@@ -748,29 +889,63 @@ export class AuthService {
         Code?: string;
         Message?: string;
         RequestId?: string;
+        AccessDeniedDetail?: string;
+        Model?: {
+          VerifyResult?: string;
+        } | string;
       } | null;
 
       if (!response.ok || payload?.Code !== "OK") {
         throw new AppException(
           50201,
-          `短信发送失败：${payload?.Message || payload?.Code || "阿里云短信接口异常"}`,
+          this.formatAliyunSmsError(errorPrefix, payload),
           HttpStatus.BAD_GATEWAY
         );
       }
 
-      return {
-        requestId: payload.RequestId ?? null,
-        status: payload.Code
-      };
+      return payload;
     } catch (error) {
       if (error instanceof AppException) {
         throw error;
       }
 
-      throw new AppException(50201, "短信发送失败：阿里云短信接口请求超时或不可用", HttpStatus.BAD_GATEWAY);
+      throw new AppException(50201, `${errorPrefix}：阿里云短信接口请求超时或不可用`, HttpStatus.BAD_GATEWAY);
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  private formatAliyunSmsError(
+    errorPrefix: string,
+    payload: {
+      Code?: string;
+      Message?: string;
+      AccessDeniedDetail?: string;
+    } | null
+  ) {
+    const code = payload?.Code ?? "";
+    const message = payload?.Message ?? "";
+    const accessDeniedDetail = payload?.AccessDeniedDetail ? `，详情：${payload.AccessDeniedDetail}` : "";
+
+    if (code.includes("Forbidden") || code.includes("Unauthorized") || /not authorized/i.test(message)) {
+      return `${errorPrefix}：当前阿里云 AccessKey 没有号码认证服务权限，请在 RAM 中授予 dypns:SendSmsVerifyCode 和 dypns:CheckSmsVerifyCode，或绑定 AliyunDypnsFullAccess 后重试${accessDeniedDetail}`;
+    }
+
+    if (code === "FUNCTION_NOT_OPENED") {
+      return `${errorPrefix}：阿里云号码认证服务或短信验证码能力尚未开通，请在阿里云控制台开通后重试`;
+    }
+
+    return `${errorPrefix}：${message || code || "阿里云短信接口异常"}`;
+  }
+
+  private resolveAliyunDypnsEndpoint(endpoint?: string | null) {
+    const normalizedEndpoint = endpoint?.trim();
+
+    if (!normalizedEndpoint || normalizedEndpoint.includes("dysmsapi.aliyuncs.com")) {
+      return aliyunDypnsEndpoint;
+    }
+
+    return normalizedEndpoint;
   }
 
   private aliyunEncode(value: string) {

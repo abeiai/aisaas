@@ -116,7 +116,6 @@ export function RegisterForm({ next }: { next?: string }) {
                   maxLength={8}
                   placeholder="请输入短信验证码"
                 />
-                <FieldDescription>本地默认验证码为 199599。</FieldDescription>
               </Field>
             </FieldGroup>
             {phoneState.error ? <p className="text-sm text-destructive">{phoneState.error}</p> : null}

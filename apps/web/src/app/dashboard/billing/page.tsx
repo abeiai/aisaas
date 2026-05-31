@@ -233,9 +233,9 @@ export default async function BillingPage({
                   ) : null}
                   {qrCodeDataUrl ? (
                     <div className="flex w-fit flex-col gap-3 rounded-xl border border-border bg-background p-4">
-                      <img alt="微信支付二维码" className="size-[180px]" src={qrCodeDataUrl} />
+                      <img alt="支付二维码" className="size-[180px]" src={qrCodeDataUrl} />
                       <p className="max-w-[180px] text-center text-xs text-muted-foreground">
-                        使用微信扫码完成支付，页面会自动刷新订单状态。
+                        请扫码完成支付，页面会自动刷新订单状态。
                       </p>
                     </div>
                   ) : null}

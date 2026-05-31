@@ -1,5 +1,15 @@
 import { Type } from "class-transformer";
-import { IsArray, IsBoolean, IsObject, IsOptional, IsString, MaxLength, MinLength, ValidateNested } from "class-validator";
+import {
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsObject,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+  ValidateNested
+} from "class-validator";
 import { AiAttachmentDto } from "./ai-attachment.dto.js";
 
 export class CreateAiTaskDto {
@@ -38,4 +48,13 @@ export class CreateAiTaskDto {
   @IsOptional()
   @IsBoolean()
   searchEnabled?: boolean;
+
+  @IsOptional()
+  @IsIn(["PERSONAL", "ORGANIZATION"])
+  billingContext?: "PERSONAL" | "ORGANIZATION";
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  organizationId?: string;
 }

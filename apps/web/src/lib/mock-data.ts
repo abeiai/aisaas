@@ -1,6 +1,7 @@
 import {
   Bot,
   BrainCircuit,
+  Building2,
   FileText,
   FolderTree,
   Home,
@@ -227,6 +228,11 @@ export const adminNavGroups: AdminNavGroup[] = [
         href: "/admin/products",
         label: "产品管理",
         icon: Package
+      },
+      {
+        href: "/admin/organizations",
+        label: "企业账号",
+        icon: Building2
       },
       {
         href: "/admin/payments",

@@ -12,7 +12,13 @@ interface ApiResponse<TData> {
 
 export type PaymentProvider = "ALIPAY" | "WECHAT_PAY";
 export type PaymentScene = "DESKTOP_WEB" | "MOBILE_WEB" | "WECHAT_BROWSER";
-export type PaymentProduct = "ALIPAY_PAGE" | "ALIPAY_WAP" | "WECHAT_NATIVE" | "WECHAT_H5" | "WECHAT_JSAPI";
+export type PaymentProduct =
+  | "ALIPAY_PRECREATE"
+  | "ALIPAY_PAGE"
+  | "ALIPAY_WAP"
+  | "WECHAT_NATIVE"
+  | "WECHAT_H5"
+  | "WECHAT_JSAPI";
 export type PaymentAction = "REDIRECT" | "QR_CODE" | "WECHAT_JSAPI";
 export type PaymentOrderStatus = "CREATED" | "PAYING" | "PAID" | "CLOSED" | "FAILED";
 

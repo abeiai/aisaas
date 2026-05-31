@@ -11,6 +11,7 @@ import { ContentModulesModule } from "./content-modules/content-modules.module.j
 import { HealthModule } from "./health/health.module.js";
 import { MediaModule } from "./media/media.module.js";
 import { OperationsModule } from "./operations/operations.module.js";
+import { OrganizationsModule } from "./organizations/organizations.module.js";
 import { OnboardingModule } from "./onboarding/onboarding.module.js";
 import { PageCompositionsModule } from "./page-compositions/page-compositions.module.js";
 import { PaymentModule } from "./payment/payment.module.js";
@@ -36,6 +37,7 @@ import { WalletModule } from "./wallet/wallet.module.js";
     MediaModule,
     WalletModule,
     PaymentModule,
+    OrganizationsModule,
     PageCompositionsModule,
     OperationsModule,
     OnboardingModule,

@@ -144,6 +144,11 @@ export class UpdateSystemConfigDto {
   @IsOptional()
   @IsString()
   @MaxLength(10)
+  enterpriseAccountEnabled?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
   emailVerificationEnabled?: string;
 
   @IsOptional()
@@ -245,6 +250,11 @@ export class UpdateSystemConfigDto {
   @IsString()
   @MaxLength(40)
   aliyunSmsTemplateParamCodeKey?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  aliyunSmsTemplateParamExtraJson?: string;
 
   @IsOptional()
   @IsString()

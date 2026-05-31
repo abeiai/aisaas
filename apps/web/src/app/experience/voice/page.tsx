@@ -19,7 +19,9 @@ import {
   type VoiceLibrary
 } from "@/lib/audio-api";
 import { getOptionalCurrentUser } from "@/lib/auth-actions";
+import { getCurrentBillingIdentity } from "@/lib/billing-identity";
 import { cosyVoiceV35Presets } from "@/lib/cosyvoice-v35-presets";
+import { getUserOrganizations, type UserOrganizationsResult } from "@/lib/organizations-api";
 
 export const dynamic = "force-dynamic";
 
@@ -57,25 +59,29 @@ export default async function ExperienceVoicePage({
   let library: VoiceLibrary | null = null;
   let tasks: AudioTask[] = [];
   let task: AudioTask | null = null;
+  let organizations: UserOrganizationsResult | null = null;
 
   if (currentUser) {
-    const [modelsResult, libraryResult, tasksResult, taskResult] = await Promise.all([
+    const [modelsResult, libraryResult, tasksResult, taskResult, organizationsResult] = await Promise.all([
       getAudioModels().catch(() => []),
       getVoiceLibrary().catch(() => null),
       getAudioTasks().catch(() => []),
-      query.task ? getAudioTask(query.task).catch(() => null) : Promise.resolve(null)
+      query.task ? getAudioTask(query.task).catch(() => null) : Promise.resolve(null),
+      getUserOrganizations().catch(() => null)
     ]);
 
     models = modelsResult;
     library = libraryResult;
     tasks = tasksResult;
     task = taskResult;
+    organizations = organizationsResult;
   }
 
   const voiceModels = mapVoiceModels(models);
   const voiceOptions = mapVoiceOptions(library);
   const history = tasks.filter((item) => item.type === "TTS").slice(0, 30).map(mapTaskItem);
   const currentTask = task ? mapCurrentTask(task) : null;
+  const billingIdentity = currentUser ? await getCurrentBillingIdentity(organizations) : null;
 
   return (
     <VoiceConsole
@@ -84,7 +90,9 @@ export default async function ExperienceVoicePage({
       currentUser={currentUser}
       error={query.error}
       history={history}
+      initialOrganizationId={billingIdentity?.organizationId ?? ""}
       models={voiceModels}
+      organizations={organizations}
       voices={voiceOptions}
     />
   );

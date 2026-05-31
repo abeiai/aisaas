@@ -1,6 +1,7 @@
 import { Type } from "class-transformer";
 import {
   IsArray,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -60,4 +61,13 @@ export class CreateImageGenerationDto {
   @ValidateNested({ each: true })
   @Type(() => AiAttachmentDto)
   referenceImages?: AiAttachmentDto[];
+
+  @IsOptional()
+  @IsIn(["PERSONAL", "ORGANIZATION"])
+  billingContext?: "PERSONAL" | "ORGANIZATION";
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  organizationId?: string;
 }

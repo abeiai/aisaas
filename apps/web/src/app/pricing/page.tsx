@@ -251,15 +251,15 @@ function PricingPurchaseModal({
           </Button>
         </div>
 
-        <div className="grid gap-6 p-5 md:p-7 lg:grid-cols-[0.9fr_1.1fr]">
-          <Card>
+        <div className="grid items-stretch gap-6 p-5 md:p-7 lg:grid-cols-[0.9fr_1.1fr]">
+          <Card className="flex h-full flex-col">
             <CardHeader className="flex flex-row items-center gap-3">
               <div className="flex size-11 items-center justify-center rounded-full bg-secondary">
                 <WalletCards />
               </div>
               <CardTitle>已选充值套餐</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="flex flex-1 flex-col">
               {product ? (
                 <div className="flex flex-col gap-5">
                   <div className="rounded-2xl bg-foreground p-6 text-background">
@@ -297,61 +297,43 @@ function PricingPurchaseModal({
             </CardContent>
           </Card>
 
-          <div className="flex flex-col gap-5">
-            {error ? (
-              <Card>
-                <CardContent className="pt-6 text-sm text-muted-foreground">操作失败：{error}</CardContent>
-              </Card>
-            ) : null}
+          <Card className="flex h-full flex-col">
+            <CardHeader className="flex flex-row items-center gap-3">
+              <div className="flex size-11 items-center justify-center rounded-full bg-secondary">
+                <CreditCard />
+              </div>
+              <CardTitle>选择支付方式</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-1 flex-col gap-6">
+              <PaymentOrderForm
+                action={createPaymentOrderAction}
+                authorizeUrl={authorizeUrl}
+                initialScene={initialScene}
+                mode="buttons"
+                products={availableProducts}
+                rechargeOptions={product ? [product] : []}
+                returnPath="/pricing"
+                selectedPackageCode={product?.code}
+                selectedProvider={currentOrder?.provider ?? null}
+                showPackageOptions={false}
+              />
 
-            {paid ? (
-              <Card>
-                <CardContent className="flex items-center gap-3 pt-6 text-sm">
-                  <CheckCircle2 data-icon="inline-start" />
-                  支付成功回调已处理，钱包余额和流水已刷新。
-                </CardContent>
-              </Card>
-            ) : null}
-
-            <Card>
-              <CardHeader className="flex flex-row items-center gap-3">
-                <div className="flex size-11 items-center justify-center rounded-full bg-secondary">
-                  <CreditCard />
-                </div>
-                <CardTitle>选择支付方式</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <PaymentOrderForm
-                  action={createPaymentOrderAction}
-                  authorizeUrl={authorizeUrl}
-                  initialScene={initialScene}
-                  mode="buttons"
-                  products={availableProducts}
-                  rechargeOptions={product ? [product] : []}
-                  returnPath="/pricing"
-                  selectedPackageCode={product?.code}
-                  showPackageOptions={false}
-                />
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="flex flex-col gap-4 pt-6">
+              <div className="flex min-h-[320px] flex-1 flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-border bg-muted/20 p-5 text-center">
                 {currentOrder ? (
                   <>
                     {currentOrder.paymentMode === "UNCONFIGURED" ? (
-                      <div className="flex w-fit flex-col items-center gap-3 rounded-2xl border border-dashed border-border bg-background p-5 text-center">
+                      <>
                         <div className="flex size-[180px] items-center justify-center rounded-2xl bg-secondary">
                           <QrCode className="size-20 text-muted-foreground" />
                         </div>
                         <p className="max-w-[220px] text-xs leading-5 text-muted-foreground">
                           当前支付方式尚未正式接入，暂显示替代图标。
                         </p>
-                      </div>
+                      </>
                     ) : null}
 
                     {qrCodeDataUrl ? (
-                      <div className="flex w-fit flex-col items-center gap-3 rounded-2xl border border-border bg-background p-5">
+                      <div className="flex flex-col items-center gap-3">
                         <img alt="二维码" className="size-[180px]" src={qrCodeDataUrl} />
                         <p className="max-w-[220px] text-center text-xs leading-5 text-muted-foreground">
                           请扫码完成支付，页面会自动刷新订单状态。
@@ -373,6 +355,17 @@ function PricingPurchaseModal({
                       <WechatJsapiLauncher params={currentOrder.launchParams} />
                     ) : null}
 
+                    {error ? (
+                      <p className="max-w-[280px] text-sm leading-6 text-destructive">操作失败：{error}</p>
+                    ) : null}
+
+                    {paid ? (
+                      <p className="flex items-center gap-2 text-sm">
+                        <CheckCircle2 className="size-4" />
+                        支付成功回调已处理，钱包余额和流水已刷新。
+                      </p>
+                    ) : null}
+
                     {currentOrder.status !== "PAID" && currentOrder.paymentMode === "UNCONFIGURED" ? (
                       <form action={mockPayOrderAction}>
                         <input name="orderId" type="hidden" value={currentOrder.id} />
@@ -387,13 +380,18 @@ function PricingPurchaseModal({
                     ) : null}
                   </>
                 ) : (
-                  <div className="rounded-xl border border-dashed border-border bg-background p-6 text-sm text-muted-foreground">
-                    请选择支付方式。订单创建后，这里会展示二维码或替代图标。
-                  </div>
+                  <>
+                    <div className="rounded-xl border border-dashed border-border bg-background p-6 text-sm text-muted-foreground">
+                      请选择支付方式。订单创建后，这里会展示二维码或替代图标。
+                    </div>
+                    {error ? (
+                      <p className="max-w-[280px] text-sm leading-6 text-destructive">操作失败：{error}</p>
+                    ) : null}
+                  </>
                 )}
-              </CardContent>
-            </Card>
-          </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>

@@ -29,6 +29,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { PublicUser } from "@/lib/auth-actions";
 import type { ExperienceChatModel } from "@/lib/experience-api";
+import type { UserOrganizationsResult } from "@/lib/organizations-api";
 import { cn } from "@/lib/utils";
 
 interface ChatMessage {
@@ -67,7 +68,9 @@ interface ChatTokenUsage {
 
 interface AiChatConsoleProps {
   currentUser: PublicUser | null;
+  initialOrganizationId?: string;
   models: ExperienceChatModel[];
+  organizations: UserOrganizationsResult | null;
 }
 
 interface StreamChatResult {
@@ -124,9 +127,14 @@ const attachmentCapabilityTags = ["VISION", "MULTIMODAL", "IMAGE", "IMAGE_INPUT"
 const reasoningCapabilityTags = ["REASONING"];
 const searchCapabilityTags = ["SEARCH", "WEB_SEARCH", "BROWSING", "TOOLS"];
 
-export function AiChatConsole({ currentUser, models }: AiChatConsoleProps) {
+export function AiChatConsole({ currentUser, initialOrganizationId = "", models, organizations }: AiChatConsoleProps) {
   const normalizedModels = useMemo(() => (models.length > 0 ? models : []), [models]);
   const [selectedModelId, setSelectedModelId] = useState(normalizedModels[0]?.id ?? "mock");
+  const availableOrganizations = useMemo(
+    () => (organizations?.enabled ? organizations.organizations.filter((organization) => organization.memberStatus === "ACTIVE") : []),
+    [organizations]
+  );
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState(initialOrganizationId);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState("选择模型后输入问题，即可开始体验。");
@@ -166,10 +174,25 @@ export function AiChatConsole({ currentUser, models }: AiChatConsoleProps) {
   const supportsReasoning = hasAnyCapability(selectedModelCapabilities, reasoningCapabilityTags);
   const supportsSearch = hasAnyCapability(selectedModelCapabilities, searchCapabilityTags);
   const canSubmit = (input.trim().length >= 2 || pendingAttachments.length > 0) && !isPending;
+  const billingContext = selectedOrganizationId ? "ORGANIZATION" : "PERSONAL";
+
+  useEffect(() => {
+    setSelectedOrganizationId(initialOrganizationId);
+  }, [initialOrganizationId]);
 
   useEffect(() => {
     pendingAttachmentsRef.current = pendingAttachments;
   }, [pendingAttachments]);
+
+  useEffect(() => {
+    if (!selectedOrganizationId) {
+      return;
+    }
+
+    if (!availableOrganizations.some((organization) => organization.id === selectedOrganizationId)) {
+      setSelectedOrganizationId("");
+    }
+  }, [availableOrganizations, selectedOrganizationId]);
 
   useEffect(() => {
     resizeComposerTextarea();
@@ -600,6 +623,8 @@ export function AiChatConsole({ currentUser, models }: AiChatConsoleProps) {
         body: JSON.stringify({
           input: requestInput,
           modelInstanceId: modelId,
+          billingContext,
+          ...(selectedOrganizationId ? { organizationId: selectedOrganizationId } : {}),
           reasoningEnabled: supportsReasoning ? reasoningEnabled : false,
           searchEnabled: supportsSearch ? searchEnabled : false,
           messages: history,
@@ -840,6 +865,18 @@ export function AiChatConsole({ currentUser, models }: AiChatConsoleProps) {
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <header className="flex min-h-16 shrink-0 items-center justify-end border-b border-border px-5 py-4">
           <div className="flex min-w-0 items-center gap-3">
+            {currentUser && availableOrganizations.length > 0 ? (
+              <label className="flex min-w-0 text-sm md:w-64">
+                <Select value={selectedOrganizationId} onChange={(event) => setSelectedOrganizationId(event.target.value)}>
+                  <option value="">个人空间</option>
+                  {availableOrganizations.map((organization) => (
+                    <option key={organization.id} value={organization.id}>
+                      {organization.name}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+            ) : null}
             <label className="flex min-w-0 text-sm md:w-80">
               <Select value={selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)}>
                 {normalizedModels.map((model) => (

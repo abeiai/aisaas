@@ -35,6 +35,7 @@ async function loadModules() {
   const { AudioService } = await import("../src/audio/audio.service.js");
   const { calculateUsageCredits } = await import("../src/ai/ai-cost.js");
   const { AdminUsersService } = await import("../src/operations/admin-users.service.js");
+  const { OrganizationsService } = await import("../src/organizations/organizations.service.js");
 
   return {
     ...database,
@@ -50,7 +51,8 @@ async function loadModules() {
     AiService,
     AudioService,
     calculateUsageCredits,
-    AdminUsersService
+    AdminUsersService,
+    OrganizationsService
   };
 }
 
@@ -72,7 +74,8 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
     AiService,
     AudioService,
     calculateUsageCredits,
-    AdminUsersService
+    AdminUsersService,
+    OrganizationsService
   } = await loadModules();
   const prisma = getPrismaClient();
   const authService = new AuthService();
@@ -85,8 +88,51 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
     new WechatPayClient(paymentConfigService)
   );
   const aiService = new AiService();
-  const audioService = new AudioService();
+  const organizationsService = new OrganizationsService();
+  const audioService = new AudioService(organizationsService);
   const adminUsersService = new AdminUsersService();
+  const smsEnabledConfigSnapshot = await prisma.systemConfig.findUnique({
+    where: {
+      key: "smsVerificationEnabled"
+    }
+  });
+
+  await prisma.systemConfig.upsert({
+    where: {
+      key: "smsVerificationEnabled"
+    },
+    update: {
+      value: "false"
+    },
+    create: {
+      key: "smsVerificationEnabled",
+      label: "短信验证启用",
+      value: "false",
+      description: "测试期间关闭正式短信通道，避免本地配置影响默认验证码用例。",
+      group: "send",
+      isPublic: false,
+      sortOrder: 140
+    }
+  });
+
+  await t.after(async () => {
+    if (smsEnabledConfigSnapshot) {
+      await prisma.systemConfig.update({
+        where: {
+          key: "smsVerificationEnabled"
+        },
+        data: {
+          value: smsEnabledConfigSnapshot.value
+        }
+      });
+    } else {
+      await prisma.systemConfig.deleteMany({
+        where: {
+          key: "smsVerificationEnabled"
+        }
+      });
+    }
+  });
 
   await t.after(async () => {
     const paymentOrders = await prisma.paymentOrder.findMany({
@@ -263,6 +309,15 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
       where: {
         phone: {
           contains: phoneSuffix
+        }
+      }
+    });
+    await prisma.organization.deleteMany({
+      where: {
+        owner: {
+          email: {
+            contains: unique
+          }
         }
       }
     });
@@ -572,7 +627,7 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
     assert.equal(detectPaymentScene("Mozilla/5.0 MicroMessenger"), "WECHAT_BROWSER");
     assert.equal(detectPaymentScene("Mozilla/5.0 iPhone Mobile"), "MOBILE_WEB");
     assert.equal(detectPaymentScene("Mozilla/5.0 Macintosh"), "DESKTOP_WEB");
-    assert.equal(resolvePaymentProduct("ALIPAY", "DESKTOP_WEB"), "ALIPAY_PAGE");
+    assert.equal(resolvePaymentProduct("ALIPAY", "DESKTOP_WEB"), "ALIPAY_PRECREATE");
     assert.equal(resolvePaymentProduct("ALIPAY", "MOBILE_WEB"), "ALIPAY_WAP");
     assert.equal(resolvePaymentProduct("ALIPAY", "WECHAT_BROWSER"), null);
     assert.equal(resolvePaymentProduct("WECHAT_PAY", "DESKTOP_WEB"), "WECHAT_NATIVE");
@@ -2052,6 +2107,207 @@ test("核心业务单元测试", { timeout: 120_000 }, async (t) => {
     assert.equal(dashboard.byModel[0]?.id, modelName);
     assert.equal(dashboard.byUser[0]?.id, user.id);
     assert.equal(dashboard.byStatus[0]?.id, "SUCCEEDED");
+  });
+
+  await t.test("企业空间语音合成按企业钱包和成员额度结算", async () => {
+    const previousEnterpriseConfig = await prisma.systemConfig.findUnique({
+      where: {
+        key: "enterpriseAccountEnabled"
+      }
+    });
+    const providerPreset = await prisma.aiProviderPreset.create({
+      data: {
+        providerKey: `audio-enterprise-${unique}`,
+        displayName: "单元测试企业语音 Provider",
+        adapterType: "DASHSCOPE_AUDIO",
+        modality: "AUDIO",
+        defaultBaseUrl: "https://dashscope.aliyuncs.com/api/v1",
+        defaultWebSocketUrl: "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
+        apiKeyEnvName: "DASHSCOPE_API_KEY",
+        region: "cn-beijing",
+        isBuiltIn: true,
+        isEnabledByDefault: false,
+        presetVersion: "unit",
+        lastUpdatedAt: new Date()
+      }
+    });
+    const providerInstance = await prisma.aiProviderInstance.create({
+      data: {
+        providerPresetId: providerPreset.id,
+        name: "单元测试企业语音实例",
+        baseUrl: providerPreset.defaultBaseUrl,
+        webSocketUrl: providerPreset.defaultWebSocketUrl,
+        region: "cn-beijing",
+        status: "ENABLED"
+      }
+    });
+    const modelName = `cosyvoice-enterprise-${unique}`;
+    const modelInstance = await prisma.aiModelInstance.create({
+      data: {
+        providerInstanceId: providerInstance.id,
+        displayName: "单元测试企业 TTS 计费模型",
+        providerModelName: modelName,
+        capabilityTags: ["AUDIO", "TTS"],
+        inputPrice: "1",
+        outputPrice: "0",
+        pricingMode: "CHARACTERS",
+        pricingUnit: "TEN_K_CHARACTERS",
+        isEnabled: true
+      }
+    });
+    const alias = await prisma.aiModelAlias.create({
+      data: {
+        aliasKey: `tts-enterprise-${unique}`,
+        displayName: "单元测试企业语音别名",
+        modelInstanceId: modelInstance.id
+      }
+    });
+    const user = await prisma.user.create({
+      data: {
+        email: `audio-enterprise-${unique}@example.com`,
+        passwordHash: await hashPassword("Unit123456"),
+        nickname: "企业语音单元测试用户"
+      }
+    });
+
+    try {
+      await prisma.systemConfig.upsert({
+        where: {
+          key: "enterpriseAccountEnabled"
+        },
+        update: {
+          value: "true"
+        },
+        create: {
+          key: "enterpriseAccountEnabled",
+          label: "企业账号体系启用",
+          value: "true",
+          description: "单元测试启用企业账号体系。",
+          group: "business",
+          isPublic: false,
+          sortOrder: 410
+        }
+      });
+
+      const organization = await organizationsService.createOrganization(user.id, {
+        name: `企业语音测试 ${unique}`
+      });
+      const memberId = organization.members[0]?.id;
+
+      assert.ok(memberId);
+
+      await organizationsService.adjustOrganizationCredits("unit-admin", organization.id, {
+        amount: 30,
+        reason: "单元测试企业充值"
+      });
+      await organizationsService.allocateQuota(user.id, organization.id, memberId, {
+        totalQuota: 20,
+        remark: "单元测试成员额度"
+      });
+
+      const task = await audioService.createTtsTask(user.id, {
+        text: "测".repeat(101),
+        modelAlias: alias.aliasKey,
+        voice: "longxiaochun",
+        execute: false,
+        billingContext: "ORGANIZATION",
+        organizationId: organization.id
+      });
+      let wallet = await prisma.organizationWallet.findUniqueOrThrow({
+        where: {
+          orgId: organization.id
+        }
+      });
+
+      assert.equal(task.status, "RESERVED");
+      assert.equal(task.billingContext, "ORGANIZATION");
+      assert.equal(task.organizationId, organization.id);
+      assert.equal(task.organizationMemberId, memberId);
+      assert.equal(task.estimatedCredits, 3);
+      assert.equal(wallet.balanceTotal, 30);
+      assert.equal(wallet.balanceAvailable, 27);
+      assert.equal(wallet.balanceReserved, 3);
+
+      const audioTaskSettler = audioService as unknown as {
+        settleSuccessfulAudioTask(
+          taskId: string,
+          providerPayload: Record<string, unknown>
+        ): Promise<{
+          status: string;
+          actualCredits: number | null;
+        }>;
+      };
+      const settledTask = await audioTaskSettler.settleSuccessfulAudioTask(task.id, {
+        audioUrl: "https://example.com/unit-enterprise-audio.mp3",
+        requestId: `audio-enterprise-request-${unique}`,
+        usage: {
+          providerUsage: {
+            characters: 620
+          }
+        }
+      });
+
+      wallet = await prisma.organizationWallet.findUniqueOrThrow({
+        where: {
+          orgId: organization.id
+        }
+      });
+      const quota = await prisma.organizationMemberQuota.findFirstOrThrow({
+        where: {
+          orgId: organization.id,
+          memberId
+        }
+      });
+      const usageEvent = await prisma.organizationUsageEvent.findFirstOrThrow({
+        where: {
+          resourceId: task.id
+        }
+      });
+      const audioUsageLog = await prisma.audioUsageLog.findUniqueOrThrow({
+        where: {
+          taskId: task.id
+        }
+      });
+      const quotaConsumeLedger = await prisma.organizationQuotaLedger.findFirstOrThrow({
+        where: {
+          sourceId: `audio-task:${task.id}`,
+          direction: "CONSUME"
+        }
+      });
+
+      assert.equal(settledTask.status, "SUCCEEDED");
+      assert.equal(settledTask.actualCredits, 7);
+      assert.equal(wallet.balanceTotal, 23);
+      assert.equal(wallet.balanceAvailable, 23);
+      assert.equal(wallet.balanceReserved, 0);
+      assert.equal(wallet.totalConsumed, 7);
+      assert.equal(quota.usedQuota, 7);
+      assert.equal(quota.reservedQuota, 0);
+      assert.equal(quota.totalQuota - quota.usedQuota - quota.reservedQuota, 13);
+      assert.equal(usageEvent.featureCode, "audio.tts");
+      assert.equal(usageEvent.pointsCharged, 7);
+      assert.equal(Number(usageEvent.usageQuantity), 620);
+      assert.equal(audioUsageLog.consumedCredits, 7);
+      assert.equal(audioUsageLog.characterCount, 620);
+      assert.equal(quotaConsumeLedger.quotaAfter, 13);
+    } finally {
+      if (previousEnterpriseConfig) {
+        await prisma.systemConfig.update({
+          where: {
+            key: "enterpriseAccountEnabled"
+          },
+          data: {
+            value: previousEnterpriseConfig.value
+          }
+        });
+      } else {
+        await prisma.systemConfig.deleteMany({
+          where: {
+            key: "enterpriseAccountEnabled"
+          }
+        });
+      }
+    }
   });
 
   await t.test("待审核音色不可合成，管理员审核与禁用会更新状态", async () => {

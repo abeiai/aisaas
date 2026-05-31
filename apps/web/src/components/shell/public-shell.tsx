@@ -4,6 +4,7 @@ import { ChevronDown } from "lucide-react";
 
 import { UserAccountMenu } from "@/components/shell/user-account-menu";
 import { getOptionalCurrentUser } from "@/lib/auth-actions";
+import { getCurrentBillingIdentity } from "@/lib/billing-identity";
 import { getWallet } from "@/lib/billing-api";
 import {
   getMenuByLocation,
@@ -12,6 +13,7 @@ import {
   parseSiteMenuConfig,
   type NavMenuItem
 } from "@/lib/menu-config";
+import { getUserOrganizations } from "@/lib/organizations-api";
 import { getPublicSystemConfigs } from "@/lib/settings-api";
 
 const defaultNavItems = [
@@ -42,7 +44,21 @@ export async function PublicShell({
     loadPublicConfigMap(),
     getOptionalCurrentUser()
   ]);
-  const wallet = user ? await getWallet().catch(() => null) : null;
+  const [wallet, organizations] = user
+    ? await Promise.all([
+      getWallet().catch(() => null),
+      getUserOrganizations().catch(() => null)
+    ])
+    : [null, null];
+  const billingIdentity = user ? await getCurrentBillingIdentity(organizations) : null;
+  const billingOrganization =
+    billingIdentity?.type === "ORGANIZATION"
+      ? organizations?.organizations.find((organization) => organization.id === billingIdentity.organizationId)
+      : null;
+  const displayedCredits =
+    billingIdentity?.type === "ORGANIZATION"
+      ? billingOrganization?.quota.remainingQuota ?? billingOrganization?.wallet?.balanceAvailable ?? null
+      : wallet?.availableCredits ?? null;
   const siteName = configs.get("siteName") || "AI SaaS";
   const siteLogo = safeImageUrl(configs.get("siteLogo"));
   const beianNo = configs.get("beianNo") || "";
@@ -87,8 +103,10 @@ export async function PublicShell({
             </nav>
             <div className="flex items-center gap-2">
               <UserAccountMenu
-                availableCredits={wallet?.availableCredits ?? null}
+                availableCredits={displayedCredits}
+                billingIdentity={billingIdentity}
                 loginHref="/login"
+                organizations={organizations}
                 registerHref="/register"
                 user={user}
               />

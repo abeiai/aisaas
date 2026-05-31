@@ -55,6 +55,7 @@ enum PaymentScene {
 }
 
 enum PaymentProduct {
+  ALIPAY_PRECREATE
   ALIPAY_PAGE
   ALIPAY_WAP
   WECHAT_NATIVE
@@ -131,6 +132,98 @@ enum LedgerEntryType {
   RELEASE
   REFUND
   ADMIN_ADJUST
+}
+
+enum BillingContextType {
+  PERSONAL
+  ORGANIZATION
+}
+
+enum OrganizationStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+enum OrganizationMemberRole {
+  OWNER
+  ADMIN
+  FINANCE_ADMIN
+  MEMBER
+}
+
+enum OrganizationMemberStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+  REMOVED
+}
+
+enum OrganizationWalletStatus {
+  ACTIVE
+  FROZEN
+  CLOSED
+}
+
+enum OrganizationPointLotStatus {
+  ACTIVE
+  USED_UP
+  EXPIRED
+  REFUNDED
+}
+
+enum OrganizationWalletLedgerDirection {
+  CREDIT
+  DEBIT
+  RESERVE
+  RELEASE
+}
+
+enum OrganizationWalletTransactionType {
+  PURCHASE
+  CONSUME
+  REFUND
+  EXPIRE
+  ADJUST
+  GIFT
+  RESERVE
+  RELEASE
+}
+
+enum OrganizationReservationStatus {
+  RESERVED
+  SETTLED
+  RELEASED
+  EXPIRED
+}
+
+enum OrganizationQuotaType {
+  ONE_TIME
+  MONTHLY
+}
+
+enum OrganizationQuotaStatus {
+  ACTIVE
+  PAUSED
+  EXPIRED
+  REVOKED
+}
+
+enum OrganizationQuotaLedgerDirection {
+  GRANT
+  CONSUME
+  RESERVE
+  RELEASE
+  REVOKE
+  ADJUST
+  RESET
+}
+
+enum OrganizationUsageEventStatus {
+  SUCCESS
+  FAILED
+  REVERSED
 }
 
 enum MediaStorageProvider {
@@ -241,6 +334,9 @@ model User {
   voiceConsents   VoiceConsent[]
   audioPreference UserAudioPreference?
   audioUsageLogs  AudioUsageLog[]
+  ownedOrganizations Organization[] @relation("OrganizationOwner")
+  organizationMembers OrganizationMember[]
+  organizationUsageEvents OrganizationUsageEvent[]
 
   @@map("users")
 }
@@ -890,9 +986,302 @@ model Wallet {
   @@map("wallets")
 }
 
+model Organization {
+  id              String             @id @default(cuid())
+  name            String
+  legalName       String?
+  type            String             @default("企业")
+  status          OrganizationStatus @default(ACTIVE)
+  billingMode     String             @default("PREPAID")
+  ownerUserId     String
+  defaultTimezone String             @default("Asia/Shanghai")
+  defaultLocale   String             @default("zh-CN")
+  industry        String?
+  employeeSize    String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  owner           User               @relation("OrganizationOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  settings        OrganizationSettings?
+  wallet          OrganizationWallet?
+  members         OrganizationMember[]
+  pointLots       OrganizationPointLot[]
+  walletLedgers   OrganizationWalletLedger[]
+  walletReservations OrganizationWalletReservation[]
+  memberQuotas    OrganizationMemberQuota[]
+  quotaLedgers    OrganizationQuotaLedger[]
+  usageEvents     OrganizationUsageEvent[]
+  orders          EnterpriseOrder[]
+  aiTasks         AiTask[]
+  audioTasks      AudioTask[]
+
+  @@index([ownerUserId])
+  @@index([status])
+  @@map("organizations")
+}
+
+model OrganizationSettings {
+  orgId                String       @id
+  defaultMemberRole    OrganizationMemberRole @default(MEMBER)
+  defaultQuota         Int          @default(0)
+  quotaResetDay        Int          @default(1)
+  lowBalanceThreshold  Int          @default(1000)
+  usageAlertEnabled    Boolean      @default(true)
+  invoiceRequired      Boolean      @default(false)
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  organization         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("organization_settings")
+}
+
+model OrganizationMember {
+  id            String                   @id @default(cuid())
+  orgId         String
+  userId        String
+  role          OrganizationMemberRole   @default(MEMBER)
+  status        OrganizationMemberStatus @default(ACTIVE)
+  title         String?
+  joinedAt      DateTime                 @default(now())
+  invitedById   String?
+  removedAt     DateTime?
+  removedById   String?
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
+  organization  Organization             @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user          User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quotas        OrganizationMemberQuota[]
+  quotaLedgers  OrganizationQuotaLedger[]
+  usageEvents   OrganizationUsageEvent[]
+  reservations  OrganizationWalletReservation[]
+  aiTasks       AiTask[]
+  audioTasks    AudioTask[]
+
+  @@unique([orgId, userId])
+  @@index([userId])
+  @@index([role])
+  @@index([status])
+  @@map("organization_members")
+}
+
+model OrganizationWallet {
+  id               String                   @id @default(cuid())
+  orgId            String                   @unique
+  status           OrganizationWalletStatus @default(ACTIVE)
+  balanceTotal     Int                      @default(0)
+  balanceAvailable Int                      @default(0)
+  balanceReserved  Int                      @default(0)
+  totalPurchased   Int                      @default(0)
+  totalGranted     Int                      @default(0)
+  totalConsumed    Int                      @default(0)
+  totalExpired     Int                      @default(0)
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  organization     Organization             @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  pointLots        OrganizationPointLot[]
+  ledgers          OrganizationWalletLedger[]
+  reservations     OrganizationWalletReservation[]
+
+  @@index([status])
+  @@map("organization_wallets")
+}
+
+model OrganizationPointLot {
+  id              String                     @id @default(cuid())
+  walletId        String
+  orgId           String
+  sourceType      String
+  sourceId        String?
+  initialPoints   Int
+  remainingPoints Int
+  effectiveAt     DateTime                   @default(now())
+  expiresAt       DateTime?
+  status          OrganizationPointLotStatus  @default(ACTIVE)
+  createdAt       DateTime                   @default(now())
+  updatedAt       DateTime                   @updatedAt
+  wallet          OrganizationWallet         @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  organization    Organization               @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  ledgers         OrganizationWalletLedger[]
+
+  @@index([walletId])
+  @@index([orgId])
+  @@index([status, expiresAt])
+  @@map("organization_point_lots")
+}
+
+model OrganizationWalletLedger {
+  id              String                            @id @default(cuid())
+  orgId           String
+  walletId        String
+  lotId           String?
+  direction       OrganizationWalletLedgerDirection
+  transactionType OrganizationWalletTransactionType
+  pointsDelta     Int
+  balanceAfter    Int
+  sourceType      String?
+  sourceId        String?
+  idempotencyKey  String                            @unique
+  operatorType    String                            @default("system")
+  operatorId      String?
+  remark          String?
+  createdAt       DateTime                          @default(now())
+  organization    Organization                      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  wallet          OrganizationWallet                @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  lot             OrganizationPointLot?             @relation(fields: [lotId], references: [id], onDelete: SetNull)
+  usageEvents     OrganizationUsageEvent[]
+
+  @@index([orgId, createdAt])
+  @@index([walletId])
+  @@index([lotId])
+  @@index([transactionType])
+  @@map("organization_wallet_ledgers")
+}
+
+model OrganizationWalletReservation {
+  id              String                    @id @default(cuid())
+  orgId           String
+  walletId        String
+  memberId        String
+  usageRequestId  String                    @unique
+  reservedPoints  Int
+  settledPoints   Int                       @default(0)
+  status          OrganizationReservationStatus @default(RESERVED)
+  expiresAt       DateTime
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+  settledAt       DateTime?
+  organization    Organization              @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  wallet          OrganizationWallet        @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  member          OrganizationMember        @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  usageEvents     OrganizationUsageEvent[]
+
+  @@index([orgId])
+  @@index([memberId])
+  @@index([status])
+  @@index([expiresAt])
+  @@map("organization_wallet_reservations")
+}
+
+model EnterpriseOrder {
+  id              String        @id @default(cuid())
+  orderNo         String        @unique
+  orgId           String
+  buyerMemberId   String?
+  packageId       String?
+  pointsAmount    Int
+  bonusPoints     Int           @default(0)
+  cashAmount      Decimal       @db.Decimal(10, 2)
+  originalAmount  Decimal       @default(0) @db.Decimal(10, 2)
+  discountAmount  Decimal       @default(0) @db.Decimal(10, 2)
+  currency        String        @default("CNY")
+  status          String        @default("pending_payment")
+  paymentMethod   String?
+  paymentTransactionId String?
+  invoiceStatus   String        @default("not_required")
+  paidAt          DateTime?
+  creditedAt      DateTime?
+  expiresAt       DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  organization    Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([status])
+  @@map("enterprise_orders")
+}
+
+model OrganizationMemberQuota {
+  id              String                  @id @default(cuid())
+  orgId           String
+  memberId        String
+  quotaType       OrganizationQuotaType   @default(ONE_TIME)
+  periodStart     DateTime?
+  periodEnd       DateTime?
+  totalQuota      Int
+  usedQuota       Int                     @default(0)
+  reservedQuota   Int                     @default(0)
+  status          OrganizationQuotaStatus @default(ACTIVE)
+  createdById     String?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  organization    Organization            @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  member          OrganizationMember      @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  quotaLedgers    OrganizationQuotaLedger[]
+  usageEvents     OrganizationUsageEvent[]
+
+  @@index([orgId])
+  @@index([memberId])
+  @@index([status])
+  @@map("organization_member_quotas")
+}
+
+model OrganizationQuotaLedger {
+  id              String                           @id @default(cuid())
+  orgId           String
+  memberId        String
+  quotaAccountId  String
+  direction       OrganizationQuotaLedgerDirection
+  pointsDelta     Int
+  quotaAfter      Int
+  sourceType      String?
+  sourceId        String?
+  operatorId      String?
+  idempotencyKey  String                           @unique
+  remark          String?
+  createdAt       DateTime                         @default(now())
+  organization    Organization                     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  member          OrganizationMember               @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  quotaAccount    OrganizationMemberQuota          @relation(fields: [quotaAccountId], references: [id], onDelete: Cascade)
+  usageEvents     OrganizationUsageEvent[]
+
+  @@index([orgId, createdAt])
+  @@index([memberId])
+  @@index([quotaAccountId])
+  @@map("organization_quota_ledgers")
+}
+
+model OrganizationUsageEvent {
+  id              String                       @id @default(cuid())
+  orgId           String
+  userId          String
+  memberId        String
+  quotaAccountId  String?
+  featureCode     String
+  resourceType    String?
+  resourceId      String?
+  usageQuantity   Decimal                      @default(0) @db.Decimal(14, 4)
+  usageUnit        String?
+  unitPrice        Decimal                      @default(0) @db.Decimal(14, 6)
+  pointsCharged    Int
+  pricingVersion   String?
+  walletLedgerId   String?
+  quotaLedgerId    String?
+  reservationId    String?
+  status           OrganizationUsageEventStatus @default(SUCCESS)
+  idempotencyKey   String                       @unique
+  occurredAt       DateTime                     @default(now())
+  createdAt        DateTime                     @default(now())
+  organization     Organization                 @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user             User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  member           OrganizationMember           @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  quotaAccount     OrganizationMemberQuota?     @relation(fields: [quotaAccountId], references: [id], onDelete: SetNull)
+  walletLedger     OrganizationWalletLedger?    @relation(fields: [walletLedgerId], references: [id], onDelete: SetNull)
+  quotaLedger      OrganizationQuotaLedger?     @relation(fields: [quotaLedgerId], references: [id], onDelete: SetNull)
+  reservation      OrganizationWalletReservation? @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, occurredAt])
+  @@index([userId, occurredAt])
+  @@index([memberId, occurredAt])
+  @@index([featureCode])
+  @@index([resourceType, resourceId])
+  @@map("organization_usage_events")
+}
+
 model AiTask {
   id               String       @id @default(cuid())
   userId           String
+  billingContext   BillingContextType @default(PERSONAL)
+  organizationId   String?
+  organizationMemberId String?
   scenarioId       String
   knowledgeBaseId  String?
   aiProviderId     String?
@@ -920,6 +1309,8 @@ model AiTask {
   updatedAt        DateTime     @updatedAt
   finishedAt       DateTime?
   user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization     Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  organizationMember OrganizationMember? @relation(fields: [organizationMemberId], references: [id], onDelete: SetNull)
   scenario         AiScenario   @relation(fields: [scenarioId], references: [id], onDelete: Restrict)
   knowledgeBase    KnowledgeBase? @relation(fields: [knowledgeBaseId], references: [id], onDelete: SetNull)
   aiProvider       AiProvider?  @relation(fields: [aiProviderId], references: [id], onDelete: SetNull)
@@ -931,6 +1322,9 @@ model AiTask {
   callLogs         AiCallLog[]
 
   @@index([userId, createdAt])
+  @@index([billingContext])
+  @@index([organizationId])
+  @@index([organizationMemberId])
   @@index([scenarioId])
   @@index([knowledgeBaseId])
   @@index([aiProviderId])
@@ -1173,6 +1567,9 @@ model AudioPricingRule {
 model AudioTask {
   id                   String              @id @default(cuid())
   userId               String
+  billingContext       BillingContextType  @default(PERSONAL)
+  organizationId       String?
+  organizationMemberId String?
   type                 AudioTaskType
   status               AudioTaskStatus     @default(CREATED)
   provider             String
@@ -1194,6 +1591,8 @@ model AudioTask {
   updatedAt            DateTime            @updatedAt
   finishedAt           DateTime?
   user                 User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization         Organization?       @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  organizationMember   OrganizationMember? @relation(fields: [organizationMemberId], references: [id], onDelete: SetNull)
   providerInstance     AiProviderInstance? @relation(fields: [providerInstanceId], references: [id], onDelete: SetNull)
   modelInstance        AiModelInstance?    @relation(fields: [modelInstanceId], references: [id], onDelete: SetNull)
   voiceAsset           VoiceAsset?         @relation(fields: [voiceAssetId], references: [id], onDelete: SetNull)
@@ -1204,6 +1603,9 @@ model AudioTask {
   usageLogs            AudioUsageLog[]
 
   @@index([userId, createdAt])
+  @@index([billingContext])
+  @@index([organizationId])
+  @@index([organizationMemberId])
   @@index([type])
   @@index([status])
   @@index([providerInstanceId])

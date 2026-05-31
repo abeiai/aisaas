@@ -17,7 +17,7 @@ export function detectPaymentScene(userAgent: string | null | undefined): Paymen
 export function resolvePaymentProduct(provider: PaymentProvider, scene: PaymentScene): PaymentProduct | null {
   if (provider === "ALIPAY") {
     if (scene === "DESKTOP_WEB") {
-      return "ALIPAY_PAGE";
+      return "ALIPAY_PRECREATE";
     }
 
     if (scene === "MOBILE_WEB") {
@@ -50,6 +50,7 @@ export function paymentSceneName(scene: PaymentScene) {
 
 export function paymentProductName(product: PaymentProduct) {
   const names: Record<PaymentProduct, string> = {
+    ALIPAY_PRECREATE: "支付宝扫码支付",
     ALIPAY_PAGE: "支付宝电脑网站支付",
     ALIPAY_WAP: "支付宝手机网站支付",
     WECHAT_NATIVE: "微信 Native 扫码支付",
