@@ -70,7 +70,7 @@ const dashboardNavItems: DashboardNavItem[] = [
   {
     key: "organizations",
     href: "/dashboard/organizations",
-    label: "企业空间",
+    label: "组织账号",
     icon: Building2
   },
   {

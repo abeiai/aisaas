@@ -80,3 +80,5 @@ scripts/release/deploy.sh 0.0.0
 ## 开发规则
 
 仓库级开发规则见 [AGENTS.md](AGENTS.md)，视觉设计规则见 [DESIGN.md](DESIGN.md)。
+
+第三方场景应用开发说明见 [docs/scene-application-development.md](docs/scene-application-development.md)。

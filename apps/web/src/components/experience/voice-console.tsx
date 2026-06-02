@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import {
   AudioLines,
@@ -13,13 +13,12 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Play,
-  RotateCcw,
   Sparkles,
   Volume2,
-  WandSparkles
+  WandSparkles,
+  X
 } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -91,6 +90,8 @@ interface VoiceConsoleProps {
 const textLimit = 5000;
 const defaultVoiceValue = `${cosyVoiceV35PresetPrefix}announcer`;
 const voiceDraftKey = "aisaas:experience-voice:draft";
+const voiceRecentKey = "aisaas:experience-voice:recent";
+const voiceFavoriteKey = "aisaas:experience-voice:favorite";
 
 interface VoiceConsoleDraft {
   text?: string;
@@ -123,6 +124,10 @@ export function VoiceConsole({
   const [volume, setVolume] = useState("1");
   const [draftReady, setDraftReady] = useState(Boolean(currentTask));
   const [selectedOrganizationId, setSelectedOrganizationId] = useState(initialOrganizationId);
+  const [voicePickerOpen, setVoicePickerOpen] = useState(false);
+  const [recentVoiceValues, setRecentVoiceValues] = useState<string[]>([]);
+  const [favoriteVoiceValues, setFavoriteVoiceValues] = useState<string[]>([]);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const selectedModelOption = useMemo(
     () => models.find((model) => model.aliasKey === selectedModel) ?? models[0],
@@ -149,8 +154,6 @@ export function VoiceConsole({
     () => compatibleVoices.find((voice) => voice.value === selectedVoice) ?? compatibleVoices[0] ?? voices[0],
     [compatibleVoices, selectedVoice, voices]
   );
-  const selectedOfficialPreset = selectedVoice.startsWith(cosyVoiceV35PresetPrefix);
-  const hasConfiguredModel = models.some((model) => model.isConfigured);
   const availableOrganizations = useMemo(
     () =>
       organizations?.enabled
@@ -164,19 +167,69 @@ export function VoiceConsole({
     !selectedVoiceOption?.supportedModels?.length ||
       (selectedModelOption?.modelName && selectedVoiceOption.supportedModels.includes(selectedModelOption.modelName))
   );
-  const requiredModelsText = selectedVoiceOption?.supportedModels?.join(" 或 ");
-  const modelWarning = !hasConfiguredModel
-    ? "尚未配置可用语音模型，请先在后台启用阿里云百炼语音 Provider 并绑定语音模型。"
-    : !selectedModelReady
-      ? "当前选择的语音默认模型尚未配置可用模型。"
-      : !selectedVoiceSupported
-        ? `当前音色需要 ${requiredModelsText}，请切换兼容模型或后台完成配置。`
-        : null;
   const canSubmit = Boolean(currentUser && text.trim().length > 0 && selectedModelReady && selectedVoiceSupported);
+
+  function playPreviewAudio(url: string | null | undefined) {
+    previewAudioRef.current?.pause();
+
+    if (previewAudioRef.current) {
+      previewAudioRef.current.currentTime = 0;
+    }
+
+    if (!url) {
+      return;
+    }
+
+    const audio = new Audio(url);
+    previewAudioRef.current = audio;
+    void audio.play();
+  }
+
+  function pickVoice(value: string) {
+    setSelectedVoice(value);
+    setVoicePickerOpen(false);
+    setRecentVoiceValues((current) => {
+      const next = [value, ...current.filter((item) => item !== value)].slice(0, 5);
+      window.localStorage.setItem(voiceRecentKey, JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function toggleFavoriteVoice(value: string) {
+    setFavoriteVoiceValues((current) => {
+      const next = current.includes(value)
+        ? current.filter((item) => item !== value)
+        : [value, ...current].slice(0, 50);
+      window.localStorage.setItem(voiceFavoriteKey, JSON.stringify(next));
+      return next;
+    });
+  }
 
   useEffect(() => {
     setSelectedOrganizationId(initialOrganizationId);
   }, [initialOrganizationId]);
+
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(voiceRecentKey) ?? "[]") as unknown;
+      if (Array.isArray(stored)) {
+        setRecentVoiceValues(stored.filter((item): item is string => typeof item === "string").slice(0, 5));
+      }
+    } catch {
+      window.localStorage.removeItem(voiceRecentKey);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(voiceFavoriteKey) ?? "[]") as unknown;
+      if (Array.isArray(stored)) {
+        setFavoriteVoiceValues(stored.filter((item): item is string => typeof item === "string").slice(0, 50));
+      }
+    } catch {
+      window.localStorage.removeItem(voiceFavoriteKey);
+    }
+  }, []);
 
   useEffect(() => {
     if (currentTask?.text === undefined || currentTask.text === null) {
@@ -277,19 +330,6 @@ export function VoiceConsole({
     setSelectedOrganizationId("");
   }, [availableOrganizations, selectedOrganizationId]);
 
-  function insertSnippet(snippet: string) {
-    setText((current) => {
-      const glue = current && !current.endsWith("\n") ? "\n" : "";
-      return `${current}${glue}${snippet}`.slice(0, textLimit);
-    });
-  }
-
-  function resetParameters() {
-    setSpeed("1");
-    setPitch("0");
-    setVolume("1");
-  }
-
   return (
     <main
       className={cn(
@@ -380,9 +420,9 @@ export function VoiceConsole({
             </h1>
             <p className="text-sm text-muted-foreground">体验区 · 语音合成</p>
           </div>
-          <div className="flex min-w-[300px] max-w-[580px] flex-1 items-end justify-end gap-3">
+          <div className="flex min-w-[220px] max-w-[260px] flex-1 items-end justify-end gap-3">
             {currentUser && availableOrganizations.length > 0 ? (
-              <label className="flex w-full max-w-[220px] flex-col gap-1 text-xs font-medium text-muted-foreground">
+              <label className="flex w-full flex-col gap-1 text-xs font-medium text-muted-foreground">
                 使用空间
                 <Select value={selectedOrganizationId} onChange={(event) => setSelectedOrganizationId(event.target.value)}>
                   <option value="">个人空间</option>
@@ -394,17 +434,6 @@ export function VoiceConsole({
                 </Select>
               </label>
             ) : null}
-            <label className="flex w-full max-w-[420px] flex-col gap-1 text-xs font-medium text-muted-foreground">
-              选择模型
-              <Select name="modelAlias" value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)}>
-                {models.map((model) => (
-                  <option key={model.aliasKey} value={model.aliasKey}>
-                    {model.displayName} · {model.providerName ?? "语音模型"}
-                  </option>
-                ))}
-                {models.length === 0 ? <option value="tts-default">默认语音合成模型 · 登录后加载</option> : null}
-              </Select>
-            </label>
           </div>
         </header>
 
@@ -421,134 +450,70 @@ export function VoiceConsole({
                 required
                 value={text}
               />
-              <div className="flex shrink-0 flex-col gap-4 border-t border-border px-6 py-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    className="h-9 bg-[#9f86ff] px-4 text-white hover:bg-[#8d73ef]"
-                    onClick={() => insertSnippet("[开心]")}
-                    type="button"
-                  >
-                    <Sparkles data-icon="inline-start" />
-                    情绪
-                  </Button>
-                  <Button onClick={() => insertSnippet("<break time=\"500ms\" />")} type="button" variant="outline">
-                    {"<#>"} 停顿
-                  </Button>
-                  <Button onClick={() => insertSnippet("嗯，")} type="button" variant="outline">
-                    {"()"} 语气词
-                  </Button>
-                  <div className="ml-auto flex items-center gap-3 text-sm text-muted-foreground">
-                    <span>长文模式</span>
-                    <span className="inline-flex h-5 w-9 items-center rounded-full bg-secondary p-0.5">
-                      <span className="size-4 rounded-full bg-muted-foreground/70" />
-                    </span>
-                    <span>
-                      {text.length.toLocaleString("zh-CN")} / {textLimit.toLocaleString("zh-CN")} 字符
-                    </span>
-                    <span>
-                      计费字符 {estimatedBillingCharacters.toLocaleString("zh-CN")} · 预估{" "}
-                      {estimatedCredits.toLocaleString("zh-CN")} 点
-                    </span>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-3">
-                  <Select className="max-w-[220px] bg-secondary text-muted-foreground" defaultValue="auto" name="languageDetection">
-                    <option value="auto">语言检测</option>
-                    <option value="zh-CN">中文</option>
-                    <option value="en-US">英文</option>
-                  </Select>
-                  <Select className="max-w-[160px]" defaultValue="mp3" name="format">
-                    <option value="mp3">MP3</option>
-                    <option value="wav">WAV</option>
-                    <option value="opus">Opus</option>
-                  </Select>
-                  <Select className="max-w-[160px]" defaultValue="24000" name="sampleRate">
-                    <option value="16000">16000 Hz</option>
-                    <option value="24000">24000 Hz</option>
-                    <option value="48000">48000 Hz</option>
-                  </Select>
+              <div className="flex shrink-0 flex-wrap items-center gap-3 border-t border-border px-6 py-4">
+                <Select className="max-w-[220px] bg-secondary text-muted-foreground" defaultValue="auto" name="languageDetection">
+                  <option value="auto">语言检测</option>
+                  <option value="zh-CN">中文</option>
+                  <option value="en-US">英文</option>
+                </Select>
+                <Select className="max-w-[160px]" defaultValue="mp3" name="format">
+                  <option value="mp3">MP3</option>
+                  <option value="wav">WAV</option>
+                  <option value="opus">Opus</option>
+                </Select>
+                <Select className="max-w-[160px]" defaultValue="24000" name="sampleRate">
+                  <option value="16000">16000 Hz</option>
+                  <option value="24000">24000 Hz</option>
+                  <option value="48000">48000 Hz</option>
+                </Select>
+                <div className="ml-auto flex flex-wrap items-center justify-end gap-2 text-sm text-muted-foreground">
+                  <span>
+                    {text.length.toLocaleString("zh-CN")} / {textLimit.toLocaleString("zh-CN")} 字符
+                  </span>
+                  <span>
+                    计费字符 {estimatedBillingCharacters.toLocaleString("zh-CN")} · 预估{" "}
+                    {estimatedCredits.toLocaleString("zh-CN")} 点
+                  </span>
                 </div>
               </div>
             </section>
 
             <aside className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-sm">
-              <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-4">
-                <div className="flex items-center gap-5 text-lg font-semibold">
-                  <span>调试台</span>
-                  <span className="text-muted-foreground">生成历史</span>
-                </div>
-                <Button className="h-8 px-3 text-muted-foreground" onClick={resetParameters} type="button" variant="ghost">
-                  <RotateCcw data-icon="inline-start" />
-                  参数重置
-                </Button>
-              </div>
               <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
                 <div className="flex flex-col gap-6">
                   <div className="flex flex-col gap-3">
-                    <p className="text-sm font-semibold">音色</p>
-                    <Select name="voiceChoice" value={selectedVoice} onChange={(event) => setSelectedVoice(event.target.value)}>
-                      {compatibleVoices.map((voice) => (
-                        <option key={voice.value} value={voice.value}>
-                          {voice.name} · {voice.badge}
-                        </option>
-                      ))}
-                      {compatibleVoices.length === 0 ? <option value={defaultVoiceValue}>v3.5 播报女声 · CosyVoice v3.5 音色模板</option> : null}
-                    </Select>
-                    <div className="flex gap-3 rounded-xl border border-border bg-secondary/60 p-3">
-                      <div className="flex size-14 shrink-0 items-center justify-center rounded-xl bg-background text-primary">
-                        <Volume2 className="size-7" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold">
-                          {selectedVoiceOption?.name ?? "龙小淳"}
-                        </p>
-                        <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                          {selectedVoiceOption?.description ?? "CosyVoice v3.5 音色模板，适合中文旁白和课程内容。"}
-                        </p>
-                        <Badge className="mt-2" variant="outline">
-                          {selectedVoiceOption?.badge ?? "系统示范"}
-                        </Badge>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {selectedVoiceOption?.ageCategory ? (
-                            <Badge variant="muted">{selectedVoiceOption.ageCategory}</Badge>
-                          ) : null}
-                          {(selectedVoiceOption?.languages?.length
-                            ? selectedVoiceOption.languages
-                            : selectedVoiceOption?.language
-                              ? [selectedVoiceOption.language]
-                              : []
-                          ).map((language) => (
-                            <Badge key={language} variant="muted">
-                              {language}
-                            </Badge>
-                          ))}
-                          <SupportBadge label="SSML" value={selectedVoiceOption?.ssmlSupported} />
-                          <SupportBadge label="Instruct" value={selectedVoiceOption?.instructSupported} />
-                          <SupportBadge label="时间戳" value={selectedVoiceOption?.timestampSupported} />
-                        </div>
-                      </div>
-                    </div>
-                    {selectedVoiceOption?.previewAudioUrl ? (
-                      <audio className="w-full" controls src={selectedVoiceOption.previewAudioUrl}>
-                        <track kind="captions" />
-                      </audio>
-                    ) : (
-                      <p className="text-xs leading-5 text-muted-foreground">
-                        {selectedOfficialPreset
-                          ? "首次使用该 v3.5 音色模板会自动创建对应音色，生成成功后会复用到后续合成。"
-                          : "当前音色暂无试听样例，提交后会直接调用阿里云相关模型生成音频。"}
-                      </p>
-                    )}
-                  </div>
+                    <label className="flex flex-col gap-2 text-sm font-semibold">
+                      模型
+                      <Select name="modelAlias" value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)}>
+                        {models.map((model) => (
+                          <option key={model.aliasKey} value={model.aliasKey}>
+                            {model.displayName} · {model.providerName ?? "语音模型"}
+                          </option>
+                        ))}
+                        {models.length === 0 ? <option value="tts-default">默认语音合成模型 · 登录后加载</option> : null}
+                      </Select>
+                    </label>
 
-                  <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold">{selectedModelOption?.displayName ?? "默认语音合成模型"}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {modelWarning ?? "已配置，可直接合成"}
-                      </p>
+                    <input name="voiceChoice" type="hidden" value={selectedVoice} />
+                    <div className="flex flex-col gap-2">
+                      <p className="text-sm font-semibold">语音</p>
+                      <button
+                        className="flex min-h-16 w-full items-center gap-3 rounded-xl border border-input bg-card px-4 py-3 text-left outline-none transition-colors hover:bg-secondary focus:border-foreground focus:ring-[3px] focus:ring-ring/10"
+                        onClick={() => setVoicePickerOpen(true)}
+                        type="button"
+                      >
+                        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary text-primary">
+                          <Volume2 className="size-4" />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-base font-medium">{selectedVoiceOption?.name ?? "龙小淳"}</span>
+                          <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                            {selectedVoiceOption?.badge ?? "系统示范"}
+                          </span>
+                        </span>
+                        <ChevronRight className="size-5 shrink-0 text-muted-foreground" />
+                      </button>
                     </div>
-                    <ChevronRight className="size-5 text-muted-foreground" />
                   </div>
 
                   <RangeField label="语速" max="2" min="0.5" name="speed" onChange={setSpeed} step="0.1" value={speed} />
@@ -586,6 +551,18 @@ export function VoiceConsole({
           </div>
         </div>
       </form>
+      {voicePickerOpen ? (
+        <VoicePickerModal
+          onClose={() => setVoicePickerOpen(false)}
+          onPick={pickVoice}
+          onPreview={playPreviewAudio}
+          onToggleFavorite={toggleFavoriteVoice}
+          favoriteVoiceValues={favoriteVoiceValues}
+          recentVoiceValues={recentVoiceValues}
+          selectedVoice={selectedVoice}
+          voices={compatibleVoices}
+        />
+      ) : null}
     </main>
   );
 }
@@ -658,16 +635,190 @@ function RangeField({
   );
 }
 
-function SupportBadge({ label, value }: { label: string; value?: boolean }) {
-  if (typeof value !== "boolean") {
-    return null;
-  }
+function VoicePickerModal({
+  favoriteVoiceValues,
+  onClose,
+  onPick,
+  onPreview,
+  onToggleFavorite,
+  recentVoiceValues,
+  selectedVoice,
+  voices
+}: {
+  favoriteVoiceValues: string[];
+  onClose: () => void;
+  onPick: (value: string) => void;
+  onPreview: (url: string | null | undefined) => void;
+  onToggleFavorite: (value: string) => void;
+  recentVoiceValues: string[];
+  selectedVoice: string;
+  voices: VoiceOption[];
+}) {
+  const [tab, setTab] = useState<"library" | "mine" | "favorite">("library");
+  const [keyword, setKeyword] = useState("");
+  const [language, setLanguage] = useState("all");
+  const [gender, setGender] = useState("all");
+  const [age, setAge] = useState("all");
+  const [tagPickerOpen, setTagPickerOpen] = useState(false);
+  const [supportFilters, setSupportFilters] = useState({ ssml: false, instruct: false, timestamp: false });
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const languageOptions = useMemo(() => uniqueValues(voices.flatMap((voice) => voice.languages?.length ? voice.languages : voice.language ? [voice.language] : [])), [voices]);
+  const ageOptions = useMemo(() => uniqueValues(voices.map((voice) => voice.ageCategory).filter(Boolean)), [voices]);
+  const tagOptions = useMemo(() => uniqueValues(voices.flatMap(voiceTags)).slice(0, 24), [voices]);
+  const filteredVoices = useMemo(() => {
+    const base =
+      tab === "mine"
+        ? voices.filter(isUserVoice)
+        : tab === "favorite"
+          ? uniqueValues([...favoriteVoiceValues, ...recentVoiceValues])
+              .map((value) => voices.find((voice) => voice.value === value))
+              .filter((voice): voice is VoiceOption => Boolean(voice))
+          : voices;
+    const query = keyword.trim().toLowerCase();
+
+    return base.filter((voice) => {
+      const searchable = [voice.name, voice.description, voice.badge, voice.trait, voice.scene, ...(voice.languages ?? []), voice.language]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      const voiceLanguages = voice.languages?.length ? voice.languages : voice.language ? [voice.language] : [];
+
+      return (
+        (!query || searchable.includes(query)) &&
+        (language === "all" || voiceLanguages.includes(language)) &&
+        (gender === "all" || inferVoiceGender(voice) === gender) &&
+        (age === "all" || voice.ageCategory === age) &&
+        (!supportFilters.ssml || voice.ssmlSupported === true) &&
+        (!supportFilters.instruct || voice.instructSupported === true) &&
+        (!supportFilters.timestamp || voice.timestampSupported === true) &&
+        selectedTags.every((tag) => voiceTags(voice).includes(tag))
+      );
+    });
+  }, [age, favoriteVoiceValues, gender, keyword, language, recentVoiceValues, selectedTags, supportFilters, tab, voices]);
 
   return (
-    <Badge variant={value ? "secondary" : "outline"}>
-      {label}
-      {value ? "支持" : "不支持"}
-    </Badge>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm">
+      <div className="flex max-h-[86vh] w-full max-w-5xl flex-col rounded-3xl border border-border bg-card shadow-xl" role="dialog" aria-modal="true">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-6 py-5">
+          <div>
+            <h2 className="text-2xl font-semibold tracking-normal">音色选择</h2>
+            <p className="mt-1 text-sm text-muted-foreground">从当前模型兼容的音色中选择一个用于合成。</p>
+          </div>
+          <Button aria-label="关闭音色选择" className="size-10 px-0" onClick={onClose} type="button" variant="ghost">
+            <X className="size-5" />
+          </Button>
+        </div>
+        <div className="flex shrink-0 flex-col gap-4 border-b border-border px-6 py-4">
+          <div className="flex flex-wrap gap-2">
+            {[
+              ["library", "音色库"],
+              ["mine", "我的音色"],
+              ["favorite", "收藏音色"]
+            ].map(([value, label]) => (
+              <button
+                className={cn("rounded-full px-4 py-2 text-sm font-medium", tab === value ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground")}
+                key={value}
+                onClick={() => setTab(value as typeof tab)}
+                type="button"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="grid gap-2 lg:grid-cols-[minmax(180px,1fr)_140px_120px_120px_120px_88px]">
+            <input
+              className="h-10 rounded-full border border-input bg-background px-4 text-sm outline-none focus:border-foreground"
+              onChange={(event) => setKeyword(event.target.value)}
+              placeholder="搜索音色名称、标签或描述"
+              value={keyword}
+            />
+            <FilterSelect label="按语种" value={language} onChange={setLanguage} options={languageOptions} />
+            <FilterSelect label="按性别" value={gender} onChange={setGender} options={["女声", "男声"]} />
+            <FilterSelect label="按年龄" value={age} onChange={setAge} options={ageOptions} />
+            <div className="relative">
+              <Button className="w-full" onClick={() => setTagPickerOpen((current) => !current)} type="button" variant="outline">
+                按标签
+              </Button>
+              {tagPickerOpen ? (
+                <div className="absolute right-0 top-12 z-10 w-80 rounded-2xl border border-border bg-card p-4 shadow-xl">
+                  <div className="grid gap-2 text-sm">
+                    <CheckboxFilter checked={supportFilters.ssml} label="支持 SSML" onChange={(checked) => setSupportFilters((current) => ({ ...current, ssml: checked }))} />
+                    <CheckboxFilter checked={supportFilters.instruct} label="支持 Instruct" onChange={(checked) => setSupportFilters((current) => ({ ...current, instruct: checked }))} />
+                    <CheckboxFilter checked={supportFilters.timestamp} label="支持时间戳" onChange={(checked) => setSupportFilters((current) => ({ ...current, timestamp: checked }))} />
+                  </div>
+                  <div className="mt-4 flex max-h-48 flex-wrap gap-2 overflow-y-auto">
+                    {tagOptions.map((tag) => {
+                      const active = selectedTags.includes(tag);
+                      return (
+                        <button
+                          className={cn("rounded-full border px-3 py-1.5 text-xs", active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background")}
+                          key={tag}
+                          onClick={() => setSelectedTags((current) => active ? current.filter((item) => item !== tag) : [...current, tag])}
+                          type="button"
+                        >
+                          {tag}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+            <Button onClick={() => setTagPickerOpen(false)} type="button">
+              查找
+            </Button>
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
+          <div className="flex flex-col gap-3 pt-4">
+            {filteredVoices.map((voice) => {
+              const selected = voice.value === selectedVoice;
+              const favorited = favoriteVoiceValues.includes(voice.value);
+
+              return (
+                <div
+                  className={cn(
+                    "flex w-full items-center gap-4 rounded-2xl border p-4 text-left transition-colors",
+                    selected ? "border-primary bg-primary/5" : "border-border bg-background hover:bg-secondary"
+                  )}
+                  key={voice.value}
+                >
+                  <span className="flex size-14 shrink-0 items-center justify-center rounded-xl bg-secondary text-primary">
+                    <Volume2 className="size-6" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-base font-semibold">{voice.name}</span>
+                    <span className="mt-1 line-clamp-2 text-sm leading-6 text-muted-foreground">
+                      {voice.description ?? "暂无描述"}
+                    </span>
+                  </span>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Button disabled={!voice.previewAudioUrl} onClick={() => onPreview(voice.previewAudioUrl)} type="button" variant="outline">
+                      试听
+                    </Button>
+                    <Button onClick={() => onToggleFavorite(voice.value)} type="button" variant={favorited ? "default" : "outline"}>
+                      {favorited ? "已收藏" : "收藏"}
+                    </Button>
+                    <button
+                      className={cn("rounded-full px-5 py-2 text-sm font-medium", selected ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground")}
+                      onClick={() => onPick(voice.value)}
+                      type="button"
+                    >
+                    {selected ? "已选" : "选择"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+            {filteredVoices.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-border px-6 py-10 text-center text-sm text-muted-foreground">
+                没有符合条件的音色。
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -718,6 +869,54 @@ function VoiceResult({ task }: { task: CurrentVoiceTask | null }) {
       </div>
     </div>
   );
+}
+
+function FilterSelect({ label, onChange, options, value }: { label: string; onChange: (value: string) => void; options: string[]; value: string }) {
+  return (
+    <Select className="h-10 rounded-full" value={value} onChange={(event) => onChange(event.target.value)}>
+      <option value="all">{label}</option>
+      {options.map((option) => (
+        <option key={option} value={option}>
+          {option}
+        </option>
+      ))}
+    </Select>
+  );
+}
+
+function CheckboxFilter({ checked, label, onChange }: { checked: boolean; label: string; onChange: (checked: boolean) => void }) {
+  return (
+    <label className="flex items-center gap-2">
+      <input checked={checked} onChange={(event) => onChange(event.target.checked)} type="checkbox" />
+      {label}
+    </label>
+  );
+}
+
+function uniqueValues(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.filter((value): value is string => Boolean(value))));
+}
+
+function voiceTags(voice: VoiceOption) {
+  return uniqueValues([voice.badge, voice.trait, voice.scene, voice.ageCategory, ...(voice.languages ?? []), voice.language]);
+}
+
+function isUserVoice(voice: VoiceOption) {
+  return voice.value.startsWith("voice:") && !voice.badge.startsWith("平台");
+}
+
+function inferVoiceGender(voice: VoiceOption) {
+  const text = `${voice.name} ${voice.description ?? ""} ${voice.trait ?? ""}`.toLowerCase();
+
+  if (/[女媛姐娘]/.test(text) || text.includes("female")) {
+    return "女声";
+  }
+
+  if (/[男叔哥爷]/.test(text) || text.includes("male")) {
+    return "男声";
+  }
+
+  return "";
 }
 
 function VoiceSubmitButton({ disabled }: { disabled: boolean }) {

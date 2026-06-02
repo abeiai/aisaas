@@ -48,6 +48,7 @@ export interface OrganizationMember {
   orgId: string;
   userId: string;
   email: string;
+  phone: string | null;
   nickname: string;
   role: string;
   roleName: string;
@@ -61,10 +62,13 @@ export interface OrganizationMember {
 export interface UserOrganization {
   id: string;
   name: string;
+  legalName: string | null;
+  type: string;
   status: string;
   role: string;
   memberId: string;
   memberStatus: string;
+  memberCount: number;
   wallet: OrganizationWallet | null;
   quota: {
     totalQuota: number;
@@ -189,49 +193,124 @@ export async function getOrganization(id: string) {
 }
 
 export async function createOrganizationAction(formData: FormData) {
-  await apiFetch<OrganizationDetail>("/organizations", {
-    method: "POST",
-    body: JSON.stringify({
-      name: text(formData, "name"),
-      legalName: text(formData, "legalName") || undefined,
-      type: text(formData, "type") || undefined,
-      industry: text(formData, "industry") || undefined,
-      employeeSize: text(formData, "employeeSize") || undefined
-    })
-  });
+  try {
+    await apiFetch<OrganizationDetail>("/organizations", {
+      method: "POST",
+      body: JSON.stringify({
+        name: text(formData, "name"),
+        legalName: text(formData, "legalName") || undefined,
+        type: text(formData, "type") || undefined,
+        industry: text(formData, "industry") || undefined,
+        employeeSize: text(formData, "employeeSize") || undefined
+      })
+    });
 
-  revalidatePath("/dashboard/organizations");
+    revalidatePath("/dashboard/organizations");
+
+    return { ok: true } satisfies ActionResult;
+  } catch (error) {
+    return actionError(error, "组织账号创建失败，请稍后重试。");
+  }
 }
 
 export async function addOrganizationMemberAction(formData: FormData) {
   const orgId = text(formData, "orgId");
-  await apiFetch<OrganizationMember>(`/organizations/${orgId}/members`, {
-    method: "POST",
-    body: JSON.stringify({
-      email: text(formData, "email"),
-      role: text(formData, "role"),
-      title: text(formData, "title") || undefined
-    })
-  });
+  try {
+    const member = await apiFetch<OrganizationMember>(`/organizations/${orgId}/members`, {
+      method: "POST",
+      body: JSON.stringify({
+        userId: text(formData, "userId") || undefined,
+        email: text(formData, "email") || undefined,
+        phone: text(formData, "phone") || undefined,
+        role: text(formData, "role") || "MEMBER",
+        title: text(formData, "title") || undefined
+      })
+    });
+    const initialQuota = numberValue(formData, "initialQuota");
 
-  revalidatePath("/dashboard/organizations");
-  revalidatePath(`/dashboard/organizations?org=${orgId}`);
+    if (initialQuota > 0) {
+      await apiFetch<OrganizationQuota>(`/organizations/${orgId}/members/${member.id}/quotas`, {
+        method: "POST",
+        body: JSON.stringify({
+          totalQuota: initialQuota,
+          quotaType: "ONE_TIME",
+          remark: "加入组织时分配点数"
+        })
+      });
+    }
+
+    revalidatePath("/dashboard/organizations");
+    revalidatePath(`/dashboard/organizations?org=${orgId}`);
+
+    return { ok: true } satisfies ActionResult;
+  } catch (error) {
+    return actionError(error, "成员加入组织失败，请稍后重试。");
+  }
 }
 
 export async function allocateOrganizationQuotaAction(formData: FormData) {
   const orgId = text(formData, "orgId");
   const memberId = text(formData, "memberId");
-  await apiFetch<OrganizationQuota>(`/organizations/${orgId}/members/${memberId}/quotas`, {
-    method: "POST",
-    body: JSON.stringify({
-      totalQuota: numberValue(formData, "totalQuota"),
-      quotaType: text(formData, "quotaType") || "ONE_TIME",
-      remark: text(formData, "remark") || undefined
-    })
-  });
+  try {
+    await apiFetch<OrganizationQuota>(`/organizations/${orgId}/members/${memberId}/quotas`, {
+      method: "POST",
+      body: JSON.stringify({
+        totalQuota: numberValue(formData, "totalQuota"),
+        quotaType: text(formData, "quotaType") || "ONE_TIME",
+        remark: text(formData, "remark") || undefined
+      })
+    });
 
-  revalidatePath("/dashboard/organizations");
-  revalidatePath(`/dashboard/organizations?org=${orgId}`);
+    revalidatePath("/dashboard/organizations");
+    revalidatePath(`/dashboard/organizations?org=${orgId}`);
+
+    return { ok: true } satisfies ActionResult;
+  } catch (error) {
+    return actionError(error, "组织成员点数分配失败，请稍后重试。");
+  }
+}
+
+export async function adjustOrganizationMemberQuotaAction(formData: FormData) {
+  const orgId = text(formData, "orgId");
+  const memberId = text(formData, "memberId");
+  try {
+    await apiFetch<OrganizationQuota | null>(`/organizations/${orgId}/members/${memberId}/quotas/adjust`, {
+      method: "POST",
+      body: JSON.stringify({
+        amount: numberValue(formData, "amount"),
+        remark: text(formData, "remark") || undefined
+      })
+    });
+
+    revalidatePath("/dashboard/organizations");
+    revalidatePath(`/dashboard/organizations?org=${orgId}`);
+
+    return { ok: true } satisfies ActionResult;
+  } catch (error) {
+    return actionError(error, "组织成员点数调整失败，请稍后重试。");
+  }
+}
+
+export async function updateOrganizationMemberAction(formData: FormData) {
+  const orgId = text(formData, "orgId");
+  const memberId = text(formData, "memberId");
+  try {
+    await apiFetch<OrganizationMember>(`/organizations/${orgId}/members/${memberId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        role: text(formData, "role") || undefined,
+        status: text(formData, "status") || undefined,
+        title: text(formData, "title")
+      })
+    });
+
+    revalidatePath("/dashboard/organizations");
+    revalidatePath(`/dashboard/organizations?org=${orgId}`);
+
+    return { ok: true } satisfies ActionResult;
+  } catch (error) {
+    return actionError(error, "组织成员保存失败，请稍后重试。");
+  }
 }
 
 export async function getAdminOrganizations() {

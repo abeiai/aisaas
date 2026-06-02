@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Req } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req } from "@nestjs/common";
 import { AuthService } from "../auth/auth.service.js";
 import { successResponse } from "../common/api-response.js";
 import {
   AddOrganizationMemberDto,
+  AdjustMemberQuotaDto,
   AllocateMemberQuotaDto,
   CreateOrganizationDto,
   UpdateOrganizationMemberDto
@@ -28,6 +29,13 @@ export class OrganizationsController {
     const user = await this.authService.me(request as never);
 
     return successResponse(await this.organizationsService.createOrganization(user.id, dto));
+  }
+
+  @Get("users/search")
+  async searchUsers(@Req() request: unknown, @Query("q") query = "") {
+    const user = await this.authService.me(request as never);
+
+    return successResponse(await this.organizationsService.searchUsers(user.id, query));
   }
 
   @Get(":id")
@@ -66,5 +74,17 @@ export class OrganizationsController {
     const user = await this.authService.me(request as never);
 
     return successResponse(await this.organizationsService.allocateQuota(user.id, id, memberId, dto));
+  }
+
+  @Post(":id/members/:memberId/quotas/adjust")
+  async adjustQuota(
+    @Req() request: unknown,
+    @Param("id") id: string,
+    @Param("memberId") memberId: string,
+    @Body() dto: AdjustMemberQuotaDto
+  ) {
+    const user = await this.authService.me(request as never);
+
+    return successResponse(await this.organizationsService.adjustMemberQuota(user.id, id, memberId, dto));
   }
 }

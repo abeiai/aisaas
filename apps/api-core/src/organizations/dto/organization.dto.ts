@@ -71,9 +71,20 @@ export class AdminUpdateOrganizationDto {
 }
 
 export class AddOrganizationMemberDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  userId?: string;
+
+  @IsOptional()
   @IsEmail()
   @MaxLength(160)
-  email!: string;
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  phone?: string;
 
   @IsOptional()
   @IsIn(["ADMIN", "FINANCE_ADMIN", "MEMBER"])
@@ -109,6 +120,17 @@ export class AllocateMemberQuotaDto {
   @IsOptional()
   @IsIn(["ONE_TIME", "MONTHLY"])
   quotaType?: "ONE_TIME" | "MONTHLY";
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  remark?: string;
+}
+
+export class AdjustMemberQuotaDto {
+  @Type(() => Number)
+  @IsInt()
+  amount!: number;
 
   @IsOptional()
   @IsString()

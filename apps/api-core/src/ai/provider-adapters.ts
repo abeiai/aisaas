@@ -469,7 +469,7 @@ class DashScopeAudioProviderAdapter extends ReservedProviderAdapter {
 
     try {
       const apiKey = decryptProviderApiKey(input.apiKeyEncrypted);
-      const response = await fetch(`${normalizeBaseUrl(input.gatewayBaseUrl ?? "http://localhost:7343")}/audio/providers/dashscope/test`, {
+      const response = await fetch(`${normalizeBaseUrl(input.gatewayBaseUrl ?? "http://127.0.0.1:7343")}/audio/providers/dashscope/test`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"

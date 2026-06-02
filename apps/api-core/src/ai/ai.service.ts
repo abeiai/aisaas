@@ -3052,7 +3052,7 @@ export class AiService {
       region: runtime.region,
       apiKeyEncrypted: runtime.apiKeyEncrypted,
       modelName: testModel.providerModelName,
-      gatewayBaseUrl: process.env.AI_GATEWAY_BASE_URL ?? "http://localhost:7343",
+      gatewayBaseUrl: process.env.AI_GATEWAY_BASE_URL ?? "http://127.0.0.1:7343",
       timeoutMs: Number(process.env.AI_PROVIDER_TEST_TIMEOUT_MS ?? 8000)
     });
     const resultWithContext =
@@ -4245,7 +4245,7 @@ export class AiService {
 
       try {
         const result = await adapter.streamText({
-          gatewayBaseUrl: process.env.AI_GATEWAY_BASE_URL ?? "http://localhost:7343",
+          gatewayBaseUrl: process.env.AI_GATEWAY_BASE_URL ?? "http://127.0.0.1:7343",
           scenarioSlug: scenario.slug,
           baseUrl: activeModel.provider.baseUrl,
           apiKeyEncrypted: activeModel.provider.apiKeyEncrypted,
@@ -4426,7 +4426,7 @@ export class AiService {
 
     try {
       const result = await adapter.generateText({
-        gatewayBaseUrl: process.env.AI_GATEWAY_BASE_URL ?? "http://localhost:7343",
+        gatewayBaseUrl: process.env.AI_GATEWAY_BASE_URL ?? "http://127.0.0.1:7343",
         scenarioSlug: scenario.slug,
         baseUrl: activeModel.provider.baseUrl,
         apiKeyEncrypted: activeModel.provider.apiKeyEncrypted,

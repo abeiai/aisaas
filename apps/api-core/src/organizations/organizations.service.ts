@@ -4,6 +4,7 @@ import { getPrismaClient, type Prisma } from "@aisaas/database";
 import { AppException } from "../common/app-exception.js";
 import {
   AddOrganizationMemberDto,
+  AdjustMemberQuotaDto,
   AdjustOrganizationCreditsDto,
   AdminCreateOrganizationDto,
   AdminUpdateOrganizationDto,
@@ -69,15 +70,17 @@ export class OrganizationsService {
 
     const members = await this.prisma.organizationMember.findMany({
       where: {
-        userId,
-        status: {
-          not: "REMOVED"
-        }
+        userId
       },
       include: {
         organization: {
           include: {
-            wallet: true
+            wallet: true,
+            _count: {
+              select: {
+                members: true
+              }
+            }
           }
         },
         quotas: {
@@ -154,18 +157,68 @@ export class OrganizationsService {
     return this.toOrganizationDetail(organization);
   }
 
+  async searchUsers(userId: string, query: string) {
+    await this.requireEnterpriseEnabled();
+    const keyword = query.trim();
+
+    if (keyword.length < 2) {
+      return [];
+    }
+
+    const users = await this.prisma.user.findMany({
+      where: {
+        status: "ACTIVE",
+        OR: [
+          {
+            id: keyword
+          },
+          {
+            email: {
+              contains: keyword,
+              mode: "insensitive"
+            }
+          },
+          {
+            phone: {
+              contains: keyword
+            }
+          },
+          {
+            nickname: {
+              contains: keyword,
+              mode: "insensitive"
+            }
+          }
+        ]
+      },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        nickname: true
+      },
+      orderBy: {
+        createdAt: "desc"
+      },
+      take: 10
+    });
+
+    return users.map((user) => ({
+      id: user.id,
+      email: user.email,
+      phone: user.phone,
+      nickname: user.nickname,
+      isCurrentUser: user.id === userId
+    }));
+  }
+
   async addMember(userId: string, orgId: string, dto: AddOrganizationMemberDto) {
     await this.requireEnterpriseEnabled();
     const actor = await this.requireManager(userId, orgId);
-    const email = dto.email.trim().toLowerCase();
-    const user = await this.prisma.user.findUnique({
-      where: {
-        email
-      }
-    });
+    const user = await this.resolveMemberUser(dto);
 
     if (!user) {
-      throw new AppException(40401, "被邀请用户尚未注册，请先让员工完成注册", HttpStatus.NOT_FOUND);
+      throw new AppException(40401, "未找到可加入组织的已注册用户", HttpStatus.NOT_FOUND);
     }
 
     if (user.id === actor.userId) {
@@ -198,6 +251,132 @@ export class OrganizationsService {
     });
 
     return this.toMember(member);
+  }
+
+  async adjustMemberQuota(userId: string, orgId: string, memberId: string, dto: AdjustMemberQuotaDto) {
+    await this.requireEnterpriseEnabled();
+    const actor = await this.requireManager(userId, orgId);
+    const amount = Math.trunc(dto.amount);
+
+    if (!amount) {
+      throw new AppException(40001, "调整点数不能为 0", HttpStatus.BAD_REQUEST);
+    }
+
+    const member = await this.prisma.organizationMember.findFirst({
+      where: {
+        id: memberId,
+        orgId,
+        status: {
+          not: "REMOVED"
+        }
+      }
+    });
+
+    if (!member) {
+      throw new AppException(40401, "组织成员不存在", HttpStatus.NOT_FOUND);
+    }
+
+    return this.prisma.$transaction(async (transaction) => {
+      if (amount > 0) {
+        const created = await transaction.organizationMemberQuota.create({
+          data: {
+            orgId,
+            memberId,
+            quotaType: "ONE_TIME",
+            totalQuota: amount,
+            createdById: actor.id
+          }
+        });
+
+        await transaction.organizationQuotaLedger.create({
+          data: {
+            orgId,
+            memberId,
+            quotaAccountId: created.id,
+            direction: "GRANT",
+            pointsDelta: amount,
+            quotaAfter: amount,
+            sourceType: "manual_adjust",
+            operatorId: actor.id,
+            idempotencyKey: `org-quota:${created.id}:adjust-grant:${randomUUID()}`,
+            remark: cleanOptional(dto.remark) ?? "组织管理员增加成员点数"
+          }
+        });
+
+        return this.toQuota(created);
+      }
+
+      let remaining = Math.abs(amount);
+      const quotas = await transaction.organizationMemberQuota.findMany({
+        where: {
+          orgId,
+          memberId,
+          status: "ACTIVE"
+        },
+        orderBy: {
+          createdAt: "desc"
+        }
+      });
+
+      for (const quota of quotas) {
+        if (remaining <= 0) {
+          break;
+        }
+
+        const available = quota.totalQuota - quota.usedQuota - quota.reservedQuota;
+
+        if (available <= 0) {
+          continue;
+        }
+
+        const decrement = Math.min(remaining, available);
+        const updated = await transaction.organizationMemberQuota.update({
+          where: {
+            id: quota.id
+          },
+          data: {
+            totalQuota: {
+              decrement
+            },
+            status: available - decrement <= 0 && quota.usedQuota === 0 && quota.reservedQuota === 0 ? "REVOKED" : "ACTIVE"
+          }
+        });
+
+        await transaction.organizationQuotaLedger.create({
+          data: {
+            orgId,
+            memberId,
+            quotaAccountId: quota.id,
+            direction: "REVOKE",
+            pointsDelta: -decrement,
+            quotaAfter: updated.totalQuota - updated.usedQuota - updated.reservedQuota,
+            sourceType: "manual_adjust",
+            operatorId: actor.id,
+            idempotencyKey: `org-quota:${quota.id}:adjust-revoke:${randomUUID()}`,
+            remark: cleanOptional(dto.remark) ?? "组织管理员扣减成员点数"
+          }
+        });
+
+        remaining -= decrement;
+      }
+
+      if (remaining > 0) {
+        throw new AppException(40004, "成员可扣减点数不足", HttpStatus.BAD_REQUEST);
+      }
+
+      const latest = await transaction.organizationMemberQuota.findFirst({
+        where: {
+          orgId,
+          memberId,
+          status: "ACTIVE"
+        },
+        orderBy: {
+          createdAt: "desc"
+        }
+      });
+
+      return latest ? this.toQuota(latest) : null;
+    });
   }
 
   async updateMember(userId: string, orgId: string, memberId: string, dto: UpdateOrganizationMemberDto) {
@@ -921,6 +1100,38 @@ export class OrganizationsService {
     return member;
   }
 
+  private async resolveMemberUser(dto: AddOrganizationMemberDto) {
+    const userId = cleanOptional(dto.userId);
+    const email = cleanOptional(dto.email)?.toLowerCase();
+    const phone = cleanOptional(dto.phone);
+
+    if (userId) {
+      return this.prisma.user.findUnique({
+        where: {
+          id: userId
+        }
+      });
+    }
+
+    if (email) {
+      return this.prisma.user.findUnique({
+        where: {
+          email
+        }
+      });
+    }
+
+    if (phone) {
+      return this.prisma.user.findUnique({
+        where: {
+          phone
+        }
+      });
+    }
+
+    throw new AppException(40001, "请先选择或填写要加入组织的用户", HttpStatus.BAD_REQUEST);
+  }
+
   private async requireActiveMemberInTransaction(transaction: Prisma.TransactionClient, userId: string, orgId: string) {
     const member = await transaction.organizationMember.findUnique({
       where: {
@@ -1013,10 +1224,13 @@ export class OrganizationsService {
     return {
       id: member.organization.id,
       name: member.organization.name,
+      legalName: member.organization.legalName,
+      type: member.organization.type,
       status: member.organization.status,
       role: member.role,
       memberId: member.id,
       memberStatus: member.status,
+      memberCount: member.organization._count.members,
       wallet: member.organization.wallet ? this.toWallet(member.organization.wallet) : null,
       quota: this.summarizeQuotas(member.quotas)
     };
@@ -1070,6 +1284,7 @@ export class OrganizationsService {
       orgId: member.orgId,
       userId: member.userId,
       email: member.user.email,
+      phone: member.user.phone,
       nickname: member.user.nickname,
       role: member.role,
       roleName: roleName(member.role as OrganizationRole),
@@ -1190,6 +1405,7 @@ function memberInclude() {
       select: {
         id: true,
         email: true,
+        phone: true,
         nickname: true
       }
     },
@@ -1268,6 +1484,11 @@ type MemberWithOrgPayload = Prisma.OrganizationMemberGetPayload<{
     organization: {
       include: {
         wallet: true;
+        _count: {
+          select: {
+            members: true;
+          };
+        };
       };
     };
     quotas: true;

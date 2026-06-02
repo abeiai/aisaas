@@ -4790,7 +4790,7 @@ function maxAudioUploadBytes() {
 }
 
 function gatewayBaseUrl() {
-  return (process.env.AI_GATEWAY_BASE_URL ?? "http://localhost:7343").replace(/\/+$/, "");
+  return (process.env.AI_GATEWAY_BASE_URL ?? "http://127.0.0.1:7343").replace(/\/+$/, "");
 }
 
 function normalizeBaseUrl(value: string) {
