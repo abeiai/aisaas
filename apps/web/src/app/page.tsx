@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getPublicArticles } from "@/lib/cms-api";
-import { conversionSteps, featureGroups, productTools } from "@/lib/product-data";
+import { conversionSteps, featureGroups } from "@/lib/product-data";
 import { getPublicHomeComposition } from "@/lib/page-composition-api";
 import { getPublicSystemConfigs } from "@/lib/settings-api";
 
@@ -108,7 +108,7 @@ export default async function HomePage() {
               </Link>
             </Button>
             <Button asChild variant="outline">
-              <Link href="/tools">查看 AI 工具</Link>
+              <Link href="/experience/chat">进入体验区</Link>
             </Button>
             <Button asChild variant="outline">
               <Link href="/pricing">价格方案</Link>
@@ -130,7 +130,7 @@ export default async function HomePage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             {[
-              ["选择工具", "从 AI 文案生成开始试用"],
+              ["选择能力", "从体验区开始试用"],
               ["充值点数", "支付宝或微信创建充值订单"],
               ["回看任务", "在用户中心查看结果和流水"]
             ].map(([title, description]) => (
@@ -179,7 +179,7 @@ export default async function HomePage() {
             从注册到生成结果
           </h2>
           <p className="leading-7 text-muted-foreground">
-            首页直接引导用户进入工具、充值和任务历史，避免只停留在产品介绍。
+            首页直接引导用户进入体验区、充值和任务历史，避免只停留在产品介绍。
           </p>
         </div>
         <div className="grid gap-4 md:grid-cols-2">
@@ -198,47 +198,6 @@ export default async function HomePage() {
               </span>
             </Link>
           ))}
-        </div>
-      </section>
-
-      <section className="border-y border-border bg-card">
-        <div className="flex w-full flex-col gap-8 px-5 py-20">
-          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-            <div className="flex w-full flex-col gap-3">
-              <p className="text-sm font-semibold text-muted-foreground">AI 工具</p>
-              <h2 className="font-display text-4xl font-light leading-tight tracking-normal">
-                把首页流量导向可用工具
-              </h2>
-            </div>
-            <Button asChild variant="outline">
-              <Link href="/tools">
-                查看全部工具
-                <ArrowRight data-icon="inline-end" />
-              </Link>
-            </Button>
-          </div>
-          <div className="grid gap-4 md:grid-cols-3">
-            {productTools.map((tool) => (
-              <Card className="bg-background" key={tool.slug}>
-                <CardHeader>
-                  <Badge variant={tool.isAvailable ? "secondary" : "outline"}>
-                    {tool.isAvailable ? "已开放" : "规划中"}
-                  </Badge>
-                  <CardTitle>{tool.title}</CardTitle>
-                  <CardDescription>{tool.summary}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Link
-                    className="inline-flex items-center gap-2 text-sm font-medium text-foreground"
-                    href={`/tools/${tool.slug}`}
-                  >
-                    进入详情
-                    <ArrowRight />
-                  </Link>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
         </div>
       </section>
 

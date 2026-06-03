@@ -168,7 +168,7 @@ function PlatformVoiceCard({ voice }: { voice: VoiceAsset }) {
             </Button>
           </form>
           <Button asChild size="sm" variant="outline">
-            <Link href={`/tools/text-to-speech?voice=${voice.id}`}>
+            <Link href={`/experience/voice?voice=${voice.id}`}>
               使用
               <MoreHorizontal data-icon="inline-end" />
             </Link>
@@ -235,7 +235,7 @@ function CustomVoiceCard({ voice }: { voice: VoiceAsset }) {
           ) : null}
           <VoiceDeleteForm action={deleteVoiceAssetAction} id={voice.id} />
           <Button asChild size="sm" variant="outline">
-            <Link href={`/tools/text-to-speech?voice=${voice.id}`}>
+            <Link href={`/experience/voice?voice=${voice.id}`}>
               使用
               <MoreHorizontal data-icon="inline-end" />
             </Link>

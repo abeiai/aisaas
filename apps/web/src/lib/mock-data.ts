@@ -11,6 +11,7 @@ import {
   Menu,
   Mail,
   Package,
+  Palette,
   PanelsTopLeft,
   Mic2,
   Newspaper,
@@ -181,6 +182,11 @@ export const adminNavGroups: AdminNavGroup[] = [
     icon: LayoutTemplate,
     items: [
       {
+        href: "/admin/themes",
+        label: "主题模板",
+        icon: Palette
+      },
+      {
         href: "/admin/modules",
         label: "模块管理",
         icon: LayoutTemplate
@@ -194,23 +200,6 @@ export const adminNavGroups: AdminNavGroup[] = [
         href: "/admin/menus",
         label: "菜单管理",
         icon: Menu
-      }
-    ]
-  },
-  {
-    key: "tools",
-    label: "工具应用",
-    icon: Bot,
-    items: [
-      {
-        href: "/admin/ai/tool-categories",
-        label: "工具分类",
-        icon: FolderTree
-      },
-      {
-        href: "/admin/ai/tool-templates",
-        label: "工具模板",
-        icon: Bot
       }
     ]
   },
@@ -326,5 +315,5 @@ export const adminNavItems: AdminNavItem[] = [
 export const dashboardActivities = [
   "账号资料已创建，当前会话由真实登录接口维护",
   "点数钱包已接入，可查看充值、冻结、消耗和释放流水",
-  "AI 文案生成已接入，可在工具页提交任务并查看结果"
+  "体验区任务已接入，可在任务历史查看结果与点数消耗"
 ];

@@ -149,9 +149,17 @@ async function main() {
       sortOrder: 16
     },
     {
+      key: "activeThemeTemplate",
+      label: "当前主题模板",
+      value: "default",
+      description: "前台使用的主题模板。主题只影响展示样式，不影响菜单、CMS、支付、AI 和用户数据。",
+      isPublic: true,
+      sortOrder: 17
+    },
+    {
       key: "publicNavItems",
       label: "前台导航菜单",
-      value: "首页|/\n功能|/features\n场景|/use-cases\n工具|/tools\n价格|/pricing\n文章|/articles\n用户中心|/dashboard",
+      value: "首页|/\n功能|/features\n场景|/use-cases\n价格|/pricing\n文章|/articles\n用户中心|/dashboard",
       description: "每行一个菜单，格式为 名称|站内路径，最多 12 项。",
       isPublic: true,
       sortOrder: 17

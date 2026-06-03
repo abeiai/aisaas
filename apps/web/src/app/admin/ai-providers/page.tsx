@@ -91,7 +91,7 @@ export default async function AdminAiProvidersPage() {
           ) : (
             <Card>
               <CardContent className="pt-6 text-sm text-muted-foreground">
-                暂无 AI Provider。未配置时前台 AI 工具会继续使用本地 mock 生成。
+                暂无 AI Provider。未配置时前台体验区会展示模型配置提示。
               </CardContent>
             </Card>
           )}

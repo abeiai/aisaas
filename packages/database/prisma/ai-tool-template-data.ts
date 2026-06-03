@@ -75,7 +75,7 @@ export const aiToolTemplates = [
           label: "补充要求",
           type: "textarea",
           required: true,
-          placeholder: "例如：为一个面向内容运营的 AI 工具写首页介绍文案，语气克制可信。"
+          placeholder: "例如：为一个面向内容运营的场景应用写首页介绍文案，语气克制可信。"
         },
         {
           name: "topic",
@@ -120,7 +120,7 @@ export const aiToolTemplates = [
           label: "标题主题",
           type: "textarea",
           required: true,
-          placeholder: "例如：AI 工具站如何提升内容团队效率"
+          placeholder: "例如：AI 场景应用如何提升内容团队效率"
         },
         {
           name: "count",
@@ -226,7 +226,7 @@ export const aiToolTemplates = [
           label: "产品或主题",
           type: "textarea",
           required: true,
-          placeholder: "例如：一款帮助运营团队批量生成文章摘要的 AI 工具"
+          placeholder: "例如：一款帮助运营团队批量生成文章摘要的场景应用"
         },
         {
           name: "audience",
@@ -250,7 +250,7 @@ export const aiToolTemplates = [
   {
     name: "AI SEO 标题描述生成",
     slug: "seo-title-description",
-    description: "为文章、工具页或单页生成 SEO 标题、描述和关键词建议。",
+    description: "为文章、场景应用页或单页生成 SEO 标题、描述和关键词建议。",
     categorySlug: "seo",
     sortOrder: 60,
     costCredits: 70,

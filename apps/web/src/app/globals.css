@@ -75,6 +75,45 @@
 }
 
 @layer components {
+  .aisaas-public-shell {
+    background: var(--background);
+  }
+
+  .aisaas-public-shell[data-public-theme="blue-tech"] {
+    background-image:
+      linear-gradient(rgba(11, 99, 246, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(11, 99, 246, 0.06) 1px, transparent 1px);
+    background-position: top center;
+    background-size: 40px 40px;
+  }
+
+  .aisaas-public-shell[data-public-theme="blue-tech"] .aisaas-public-header {
+    border-color: rgba(111, 157, 220, 0.34);
+    box-shadow: var(--theme-header-shadow, none);
+  }
+
+  .aisaas-public-shell[data-public-theme="blue-tech"] .aisaas-public-footer {
+    background: rgba(255, 255, 255, 0.76);
+    border-color: rgba(111, 157, 220, 0.34);
+  }
+
+  .aisaas-public-shell[data-public-theme="blue-tech"] .aisaas-card,
+  .aisaas-public-shell[data-public-theme="blue-tech"] .aisaas-pricing-card {
+    box-shadow: var(--theme-card-shadow, none);
+  }
+
+  .aisaas-public-shell[data-public-theme="blue-tech"] .aisaas-button {
+    box-shadow: 0 10px 24px rgba(11, 99, 246, 0.14);
+  }
+
+  .aisaas-public-shell[data-public-theme="blue-tech"] .aisaas-button.border {
+    box-shadow: none;
+  }
+
+  .aisaas-public-shell[data-public-theme="blue-tech"] .aisaas-badge {
+    border-color: rgba(11, 99, 246, 0.18);
+  }
+
   .aisaas-vditor.vditor {
     border-color: var(--input);
     border-radius: var(--radius);

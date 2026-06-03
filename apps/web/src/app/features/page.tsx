@@ -10,7 +10,7 @@ import { featureGroups } from "@/lib/product-data";
 
 export const metadata: Metadata = {
   title: "产品功能 - AI SaaS",
-  description: "了解 AI SaaS 的中文内容站、AI 工具、CMS、支付点数和后台管理能力。"
+  description: "了解 AI SaaS 的中文内容站、AI 能力体验、CMS、支付点数和后台管理能力。"
 };
 
 export default function FeaturesPage() {

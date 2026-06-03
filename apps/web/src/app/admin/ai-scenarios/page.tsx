@@ -102,7 +102,7 @@ function ScenarioForm({
         </Field>
         <div className="grid gap-4 md:grid-cols-2">
           <Field>
-            <FieldLabel htmlFor={`${scenario.id}-category`}>工具分类</FieldLabel>
+            <FieldLabel htmlFor={`${scenario.id}-category`}>场景分类</FieldLabel>
             <Select id={`${scenario.id}-category`} name="toolCategoryId" defaultValue={scenario.toolCategoryId ?? ""}>
               <option value="">不绑定分类</option>
               {categories.map((category) => (
@@ -144,7 +144,7 @@ function ScenarioForm({
             defaultValue={JSON.stringify(scenario.inputSchema ?? { fields: [] }, null, 2)}
             rows={10}
           />
-          <FieldDescription>支持 text、textarea、select、number、switch、voice-select、audio-upload、slider、audio-preview、format-select。保存后前台工具页会按 schema 渲染表单。</FieldDescription>
+          <FieldDescription>支持 text、textarea、select、number、switch、voice-select、audio-upload、slider、audio-preview、format-select。保存后场景应用可按 schema 渲染表单。</FieldDescription>
         </Field>
         <Field>
           <FieldLabel htmlFor={`${scenario.id}-vars`}>模板变量</FieldLabel>

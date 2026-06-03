@@ -151,7 +151,7 @@ export default async function AiDashboardPage({
                       defaultValue={taskInputText(currentTask)}
                       minLength={2}
                       maxLength={2000}
-                      placeholder="例如：为一个面向内容运营的 AI 工具写首页介绍文案"
+                      placeholder="例如：为一个面向内容运营的场景应用写首页介绍文案"
                       rows={8}
                       required
                     />

@@ -9,6 +9,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { ActionToast } from "@/components/ui/action-toast";
 import {
   updatePaymentConfigAction,
   type AdminPaymentConfig,
@@ -47,6 +48,8 @@ export function PaymentConfigForm({ config }: { config: AdminPaymentConfig }) {
 
   return (
     <div className="flex flex-col gap-6">
+      <ActionToast state={alipayState} />
+      <ActionToast state={wechatState} />
       <form action={alipayFormAction}>
         <Card>
         <CardHeader className="flex flex-row items-start justify-between gap-4">
@@ -124,7 +127,6 @@ export function PaymentConfigForm({ config }: { config: AdminPaymentConfig }) {
               <FieldDescription>可选，用于用户完成支付后的浏览器跳转。</FieldDescription>
             </Field>
           </FieldGroup>
-          <ActionMessage state={alipayState} />
         </CardContent>
       </Card>
       </form>
@@ -240,7 +242,6 @@ export function PaymentConfigForm({ config }: { config: AdminPaymentConfig }) {
               <FieldDescription>仅微信内 JSAPI 支付需要。</FieldDescription>
             </Field>
           </FieldGroup>
-          <ActionMessage state={wechatState} />
         </CardContent>
       </Card>
       </form>
@@ -267,18 +268,6 @@ function PaymentCardActions({
       </Button>
     </div>
   );
-}
-
-function ActionMessage({ state }: { state: PaymentConfigActionState }) {
-  if (state.error) {
-    return <p className="mt-4 text-sm text-destructive">{state.error}</p>;
-  }
-
-  if (state.success) {
-    return <p className="mt-4 text-sm text-muted-foreground">{state.success}</p>;
-  }
-
-  return null;
 }
 
 function AlipayHiddenFields({ config }: { config: AdminPaymentConfig["alipay"] }) {

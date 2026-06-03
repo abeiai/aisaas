@@ -1,6 +1,6 @@
 "use client";
 
-import { type DragEvent, useMemo, useState } from "react";
+import { type DragEvent, useActionState, useMemo, useState } from "react";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronDown, GripVertical, Link2, Plus, Save, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { ActionToast } from "@/components/ui/action-toast";
 import {
   buildMenuConfigFromLegacyNav,
   isSafeMenuHref,
@@ -20,7 +21,7 @@ import {
   type SiteMenuItem,
   type SiteMenuItemType
 } from "@/lib/menu-config";
-import { updateMenuConfigAction } from "@/lib/settings-api";
+import { saveMenuConfigAction, type MenuConfigActionState } from "@/lib/settings-api";
 import { cn } from "@/lib/utils";
 
 interface MenuSourceItem {
@@ -45,6 +46,8 @@ interface DropIntent {
   mode: DropMode;
   targetId: string;
 }
+
+const initialSaveState: MenuConfigActionState = {};
 
 export function MenuManager({
   articles,
@@ -71,6 +74,7 @@ export function MenuManager({
   const [draggingItemId, setDraggingItemId] = useState("");
   const [dropIntent, setDropIntent] = useState<DropIntent | null>(null);
   const [newMenuName, setNewMenuName] = useState("");
+  const [saveState, saveFormAction, isSavePending] = useActionState(saveMenuConfigAction, initialSaveState);
 
   const activeMenu = config.menus.find((menu) => menu.id === activeMenuId) ?? config.menus[0] ?? null;
   const serializedConfig = serializeSiteMenuConfig(config);
@@ -406,6 +410,7 @@ export function MenuManager({
 
   return (
     <div className="flex flex-col gap-6">
+      <ActionToast state={saveState} />
       <div className="flex flex-wrap items-center gap-2 border-b border-border">
         <button
           className={cn(
@@ -464,8 +469,9 @@ export function MenuManager({
             <CardDescription>为前台顶部菜单和底部菜单选择要显示的菜单。</CardDescription>
           </CardHeader>
           <CardContent>
-            <form action={updateMenuConfigAction} className="grid gap-5 lg:grid-cols-[1fr_1fr_auto] lg:items-end">
+            <form action={saveFormAction} className="grid gap-5 lg:grid-cols-[1fr_1fr_auto] lg:items-end">
               <input name="siteMenus" type="hidden" value={serializedConfig} />
+              <input name="saveLabel" type="hidden" value="菜单位置" />
               <Field>
                 <FieldLabel htmlFor="primaryMenuId">顶部菜单</FieldLabel>
                 <Select
@@ -496,9 +502,9 @@ export function MenuManager({
                   ))}
                 </Select>
               </Field>
-              <Button type="submit">
+              <Button disabled={isSavePending} type="submit">
                 <Save data-icon="inline-start" />
-                保存位置
+                {isSavePending ? "保存中..." : "保存位置"}
               </Button>
             </form>
           </CardContent>
@@ -587,11 +593,12 @@ export function MenuManager({
                       </div>
                     )}
                   </div>
-                  <form action={updateMenuConfigAction} className="flex flex-wrap items-center gap-3 border-t border-border pt-5">
+                  <form action={saveFormAction} className="flex flex-wrap items-center gap-3 border-t border-border pt-5">
                     <input name="siteMenus" type="hidden" value={serializedConfig} />
-                    <Button type="submit">
+                    <input name="saveLabel" type="hidden" value="菜单" />
+                    <Button disabled={isSavePending} type="submit">
                       <Save data-icon="inline-start" />
-                      保存菜单
+                      {isSavePending ? "保存中..." : "保存菜单"}
                     </Button>
                     <Button onClick={deleteActiveMenu} type="button" variant="outline">
                       <Trash2 data-icon="inline-start" />

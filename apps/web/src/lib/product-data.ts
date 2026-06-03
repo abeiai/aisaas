@@ -45,10 +45,10 @@ export const featureGroups = [
     items: ["文章分类管理", "文章发布与草稿保护", "单页内容管理", "首页配置可运营"]
   },
   {
-    title: "AI 工具入口",
-    description: "工具列表、详情输入、任务结果和历史记录面向用户可见。",
+    title: "体验区入口",
+    description: "AI 对话、语音、图片和视频体验面向用户可见，后续场景应用从这里扩展。",
     icon: Sparkles,
-    items: ["AI 场景展示", "点数消耗提示", "生成结果回看", "失败释放冻结点数"]
+    items: ["AI 能力体验", "点数消耗提示", "生成结果回看", "失败释放冻结点数"]
   },
   {
     title: "支付与点数",
@@ -67,7 +67,7 @@ export const featureGroups = [
 export const useCaseGroups = [
   {
     title: "内容运营",
-    description: "用文章和单页承接自然流量，再用 AI 工具提升内容生产效率。",
+    description: "用文章和单页承接自然流量，再用体验区和场景应用提升内容生产效率。",
     icon: PenLine,
     examples: ["活动文案初稿", "文章摘要扩写", "产品介绍优化"]
   },
@@ -96,7 +96,7 @@ export const productTools = [
     costCredits: 120,
     isAvailable: true,
     icon: Megaphone,
-    placeholder: "例如：为一个面向内容运营的 AI 工具写首页介绍文案，语气克制可信。",
+    placeholder: "例如：为一个面向内容运营的场景应用写首页介绍文案，语气克制可信。",
     inputLabel: "文案需求",
     resultLabel: "生成文案",
     tips: ["写清产品对象和使用场景", "补充目标用户和语气要求", "需要长文时分段提交更稳定"]
@@ -110,7 +110,7 @@ export const productTools = [
     costCredits: 80,
     isAvailable: false,
     icon: FileText,
-    placeholder: "例如：围绕 AI 工具站如何做内容增长，生成一份文章大纲。",
+    placeholder: "例如：围绕 AI 场景应用如何做内容增长，生成一份文章大纲。",
     inputLabel: "文章主题",
     resultLabel: "大纲结果",
     tips: ["适合先确定标题方向", "可配合 CMS 文章发布", "后续接入真实 AI 场景"]
@@ -119,7 +119,7 @@ export const productTools = [
     slug: "seo-title",
     title: "SEO 标题优化",
     category: "增长转化",
-    summary: "为文章或工具页生成更适合点击和检索的中文标题。",
+    summary: "为文章或场景应用页生成更适合点击和检索的中文标题。",
     description: "适合优化文章标题、页面标题和摘要卖点。",
     costCredits: 60,
     isAvailable: false,
@@ -146,10 +146,10 @@ export const conversionSteps = [
     href: "/register"
   },
   {
-    title: "选择工具",
-    description: "从工具列表进入 AI 文案生成，先看点数消耗再提交任务。",
+    title: "选择能力",
+    description: "从体验区进入 AI 对话、语音、图片或视频能力，先看点数消耗再提交任务。",
     icon: Bot,
-    href: "/tools"
+    href: "/experience/chat"
   },
   {
     title: "充值点数",
@@ -167,10 +167,10 @@ export const conversionSteps = [
 
 export const dashboardQuickLinks = [
   {
-    title: "AI 工具",
-    description: "进入工具列表，创建新的生成任务。",
+    title: "体验区",
+    description: "进入 AI 对话、语音、图片或视频体验。",
     icon: Sparkles,
-    href: "/tools"
+    href: "/experience/chat"
   },
   {
     title: "任务历史",
@@ -186,7 +186,7 @@ export const dashboardQuickLinks = [
   },
   {
     title: "知识库",
-    description: "上传文件，供 AI 工具进行基础 RAG 检索。",
+    description: "上传文件，为后续场景应用提供基础 RAG 检索。",
     icon: Database,
     href: "/dashboard/knowledge"
   },

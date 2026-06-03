@@ -123,7 +123,7 @@ export function UserAccountMenu({
         title={displayName}
         type="button"
       >
-        <span className="flex size-8 items-center justify-center rounded-full bg-foreground text-sm font-semibold text-background">
+        <span className="flex size-8 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
           {displayName.slice(0, 1).toUpperCase()}
         </span>
       </button>

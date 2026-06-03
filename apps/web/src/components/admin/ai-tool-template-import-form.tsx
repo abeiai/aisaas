@@ -62,7 +62,7 @@ export function AiToolTemplateImportForm() {
             id="payload"
             name="payload"
             onChange={(event) => setPayload(event.target.value)}
-            placeholder='{"templates":[{"name":"AI 工具","slug":"ai-tool","category":{"name":"写作","slug":"writing"},"inputSchema":{"fields":[{"name":"input","label":"输入内容","type":"textarea","required":true}]},"promptTemplate":"请处理：{input}"}]}'
+            placeholder='{"templates":[{"name":"场景应用","slug":"scenario-app","category":{"name":"写作","slug":"writing"},"inputSchema":{"fields":[{"name":"input","label":"输入内容","type":"textarea","required":true}]},"promptTemplate":"请处理：{input}"}]}'
             rows={12}
             value={payload}
           />

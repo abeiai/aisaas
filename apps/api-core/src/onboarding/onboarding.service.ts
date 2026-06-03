@@ -89,7 +89,7 @@ export class OnboardingService {
         label: "AI Provider",
         state: hasAiProvider ? "PASS" : "WARN",
         required: false,
-        message: hasAiProvider ? "已配置至少一个 Provider" : "可先跳过，AI 工具会提示未配置模型"
+        message: hasAiProvider ? "已配置至少一个 Provider" : "可先跳过，体验区会提示未配置模型"
       },
       {
         key: "enabledModel",
@@ -121,10 +121,10 @@ export class OnboardingService {
       },
       {
         key: "presetTools",
-        label: "预置 AI 工具",
+        label: "场景应用准备",
         state: hasPresetTools ? "PASS" : "WARN",
         required: false,
-        message: hasPresetTools ? `已检测到 ${toolTemplateCount} 个预置工具` : "请执行 pnpm ai:seed-tools 后启用"
+        message: hasPresetTools ? `已检测到 ${toolTemplateCount} 个历史模板，可迁移为场景应用` : "后续通过场景应用体系接入"
       }
     ];
     const requiredReady = hasAdmin && hasSiteName && hasBaseSeed;
@@ -247,7 +247,7 @@ export class OnboardingService {
 
     return {
       enabledCount: result.count,
-      message: result.count > 0 ? "预置 AI 工具已启用" : "未检测到预置 AI 工具，请先执行 pnpm ai:seed-tools"
+      message: result.count > 0 ? "历史模板已启用，可迁移为场景应用" : "未检测到历史模板"
     };
   }
 

@@ -23,6 +23,11 @@ export class UpdateSystemConfigDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(40)
+  activeThemeTemplate?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(1000)
   publicNavItems?: string;
 

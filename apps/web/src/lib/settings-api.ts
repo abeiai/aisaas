@@ -22,6 +22,18 @@ export interface SystemConfig {
   updatedAt: string;
 }
 
+export interface MenuConfigActionState {
+  message?: string;
+  status?: "success" | "error";
+  submittedAt?: number;
+}
+
+export interface ThemeTemplateActionState {
+  message?: string;
+  status?: "success" | "error";
+  submittedAt?: number;
+}
+
 function getApiBaseUrl() {
   return process.env.API_BASE_URL ?? "http://localhost:7342/api";
 }
@@ -115,6 +127,45 @@ export async function updateSystemConfigAction(formData: FormData) {
   revalidatePath("/robots.txt");
 }
 
+export async function updateThemeTemplateAction(
+  _prevState: ThemeTemplateActionState,
+  formData: FormData
+): Promise<ThemeTemplateActionState> {
+  try {
+    await apiFetch<SystemConfig[]>("/system-config", {
+      method: "PATCH",
+      body: JSON.stringify({
+        activeThemeTemplate: text(formData, "activeThemeTemplate")
+      })
+    });
+
+    revalidatePath("/admin");
+    revalidatePath("/admin/themes");
+    revalidatePath("/", "layout");
+    revalidatePath("/");
+    revalidatePath("/features");
+    revalidatePath("/use-cases");
+    revalidatePath("/pricing");
+    revalidatePath("/articles");
+    revalidatePath("/experience/chat");
+    revalidatePath("/experience/voice");
+    revalidatePath("/experience/image");
+    revalidatePath("/experience/video");
+
+    return {
+      status: "success",
+      message: "主题模板切换成功",
+      submittedAt: Date.now()
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: error instanceof Error && error.message ? `主题模板切换失败：${error.message}` : "主题模板切换失败，请稍后重试",
+      submittedAt: Date.now()
+    };
+  }
+}
+
 export async function updateMenuConfigAction(formData: FormData) {
   await apiFetch<SystemConfig[]>("/system-config", {
     method: "PATCH",
@@ -131,6 +182,29 @@ export async function updateMenuConfigAction(formData: FormData) {
   revalidatePath("/tools");
   revalidatePath("/pricing");
   revalidatePath("/articles");
+}
+
+export async function saveMenuConfigAction(
+  _prevState: MenuConfigActionState,
+  formData: FormData
+): Promise<MenuConfigActionState> {
+  const label = text(formData, "saveLabel") || "菜单";
+
+  try {
+    await updateMenuConfigAction(formData);
+
+    return {
+      status: "success",
+      message: `${label}保存成功`,
+      submittedAt: Date.now()
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: error instanceof Error && error.message ? `${label}保存失败：${error.message}` : `${label}保存失败，请稍后重试`,
+      submittedAt: Date.now()
+    };
+  }
 }
 
 export async function updateAiConfigAction(formData: FormData) {

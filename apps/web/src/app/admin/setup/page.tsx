@@ -22,7 +22,6 @@ import {
   completeSetupAction,
   createFirstAdminAction,
   enableSetupModelAction,
-  enableSetupToolsAction,
   getCurrentAdminOrNull,
   getSetupStatus,
   testSetupProviderAction,
@@ -35,7 +34,7 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "初始化向导 - AI SaaS",
-  description: "首次启动 AI SaaS 时配置管理员、站点、AI Provider 和预置工具。"
+  description: "首次启动 AI SaaS 时配置管理员、站点和 AI Provider。"
 };
 
 function stateBadge(state: "PASS" | "WARN" | "FAIL") {
@@ -71,10 +70,6 @@ function setupMessage(searchParams: Record<string, string | undefined>) {
     return "默认模型已更新。";
   }
 
-  if (searchParams.tools) {
-    return "预置 AI 工具已启用。";
-  }
-
   return "";
 }
 
@@ -104,7 +99,7 @@ export default async function AdminSetupPage({
               完成首次启动配置
             </h1>
             <p className="text-base leading-7 text-muted-foreground">
-              按步骤创建管理员、设置站点、配置 AI Provider、绑定默认模型，并启用预置工具。
+              按步骤创建管理员、设置站点、配置 AI Provider，并绑定默认模型。
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
@@ -243,7 +238,7 @@ export default async function AdminSetupPage({
                   3. 配置 AI Provider
                 </CardTitle>
                 <CardDescription>
-                  可以先跳过。跳过后 AI 工具页面会展示配置提示，不会绕过后台模型体系。
+                  可以先跳过。跳过后体验区会展示配置提示，不会绕过后台模型体系。
                 </CardDescription>
               </CardHeader>
               <CardContent className="grid gap-5 lg:grid-cols-2">
@@ -321,7 +316,7 @@ export default async function AdminSetupPage({
             <Card>
               <CardHeader>
                 <CardTitle>4. 选择默认模型</CardTitle>
-                <CardDescription>将一个已启用模型绑定到 default-chat，工具模板会优先使用该别名。</CardDescription>
+                <CardDescription>将一个已启用模型绑定到 default-chat，体验区和场景应用会优先使用该别名。</CardDescription>
               </CardHeader>
               <CardContent>
                 <form action={updateSetupDefaultAliasAction} className="grid gap-4 md:grid-cols-[1fr_auto]">
@@ -340,19 +335,7 @@ export default async function AdminSetupPage({
 
             <Card>
               <CardHeader>
-                <CardTitle>5. 启用预置 AI 工具</CardTitle>
-                <CardDescription>启用已 seed 的工具模板，不会创建用户任务，也不会写入 API Key。</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <form action={enableSetupToolsAction}>
-                  <Button type="submit">启用预置工具</Button>
-                </form>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>6. 完成初始化</CardTitle>
+                <CardTitle>5. 完成初始化</CardTitle>
                 <CardDescription>
                   AI Provider 和支付可以跳过，但生产上线前应补齐。完成后会写入系统设置，不再强制跳转向导。
                 </CardDescription>

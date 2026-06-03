@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Fragment, type CSSProperties, type ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 
 import { UserAccountMenu } from "@/components/shell/user-account-menu";
@@ -15,12 +15,13 @@ import {
 } from "@/lib/menu-config";
 import { getUserOrganizations } from "@/lib/organizations-api";
 import { getPublicSystemConfigs } from "@/lib/settings-api";
+import { getThemeTemplate, themeTemplateStyle } from "@/lib/theme-templates";
+import { cn } from "@/lib/utils";
 
 const defaultNavItems = [
   { href: "/", label: "首页" },
   { href: "/features", label: "功能" },
   { href: "/use-cases", label: "场景" },
-  { href: "/tools", label: "工具" },
   { href: "/pricing", label: "价格" },
   { href: "/articles", label: "文章" },
   { href: "/dashboard", label: "用户中心" }
@@ -29,7 +30,6 @@ const defaultNavItems = [
 const defaultFooterLinks = [
   { href: "/features", label: "产品功能" },
   { href: "/use-cases", label: "使用场景" },
-  { href: "/tools", label: "AI 工具" },
   { href: "/pricing", label: "价格方案" },
   { href: "/articles", label: "文章列表" },
   { href: "/pages/about", label: "关于我们" }
@@ -70,29 +70,33 @@ export async function PublicShell({
   const footerMenu = getMenuByLocation(siteMenus, "footer");
   const navItems = hasManagedMenus
     ? primaryMenu
-      ? menuItemsToNavTree(primaryMenu.items)
+      ? hideToolApplicationItems(menuItemsToNavTree(primaryMenu.items))
       : []
-    : parseNavItems(configs.get("publicNavItems")).filter((item) => !item.href.startsWith("/experience"));
+    : hideToolApplicationItems(parseNavItems(configs.get("publicNavItems"))).filter(
+        (item) => !item.href.startsWith("/experience")
+      );
   const footerLinks = hasManagedMenus
     ? footerMenu
-      ? menuItemsToNavTree(footerMenu.items)
+      ? hideToolApplicationItems(menuItemsToNavTree(footerMenu.items))
       : []
-    : defaultFooterLinks.map((item) => toNavMenuItem(item));
-  const style = {
-    "--primary": safeHexColor(configs.get("themePrimaryColor"), "#292524"),
-    "--ring": safeHexColor(configs.get("themePrimaryColor"), "#292524")
-  } as CSSProperties;
+    : hideToolApplicationItems(defaultFooterLinks.map((item) => toNavMenuItem(item)));
+  const theme = getThemeTemplate(configs.get("activeThemeTemplate"));
+  const style = themeTemplateStyle(theme, safeHexColor(configs.get("themePrimaryColor"), "#292524"));
 
   return (
-    <main className="min-h-screen bg-background text-foreground" style={style}>
+    <main
+      className={cn("aisaas-public-shell min-h-screen bg-background text-foreground", `theme-${theme.key}`)}
+      data-public-theme={theme.key}
+      style={style}
+    >
       {showHeader ? (
-        <header className="sticky top-0 z-50 border-b border-border bg-background/95 backdrop-blur">
+        <header className="aisaas-public-header sticky top-0 z-50 border-b border-border bg-background/95 backdrop-blur">
           <div className="flex h-16 w-full items-center justify-between px-5">
             <Link className="flex min-w-0 items-center gap-2 font-display text-2xl font-light tracking-normal" href="/">
               {siteLogo ? <img alt={siteName} className="h-8 w-auto shrink-0 object-contain" src={siteLogo} /> : null}
               {!siteLogo ? <span className="truncate">{siteName}</span> : null}
             </Link>
-            <nav className="hidden items-center gap-7 text-sm font-medium text-muted-foreground lg:flex">
+            <nav className="aisaas-public-nav hidden items-center gap-7 text-sm font-medium text-muted-foreground lg:flex">
               {navItems.map((item, index) => (
                 <Fragment key={`${item.label}-${item.href}`}>
                   {!hasManagedMenus && index === 1 ? <ExperienceNavMenu /> : null}
@@ -116,7 +120,7 @@ export async function PublicShell({
       ) : null}
       {children}
       {showFooter ? (
-        <footer className="border-t border-border bg-background">
+        <footer className="aisaas-public-footer border-t border-border bg-background">
           <div className="flex w-full flex-col items-center gap-4 px-5 py-8 text-center text-sm text-muted-foreground">
             {footerLinks.length > 0 ? (
               <nav className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
@@ -265,6 +269,19 @@ function toNavMenuItem(item: { href: string; label: string }): NavMenuItem {
     external: isExternalHref(item.href),
     children: []
   };
+}
+
+function hideToolApplicationItems(items: NavMenuItem[]): NavMenuItem[] {
+  return items
+    .filter((item) => !isToolApplicationHref(item.href))
+    .map((item) => ({
+      ...item,
+      children: hideToolApplicationItems(item.children)
+    }));
+}
+
+function isToolApplicationHref(href: string) {
+  return href === "/tools" || href.startsWith("/tools/");
 }
 
 function safeHexColor(value: string | undefined, fallback: string) {

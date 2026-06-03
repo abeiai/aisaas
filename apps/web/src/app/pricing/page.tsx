@@ -165,29 +165,29 @@ function PricingProductCard({
     : `/login?next=${encodeURIComponent(checkoutPath)}`;
 
   return (
-    <article className="mx-auto flex min-h-[620px] w-full max-w-[390px] flex-col border border-border bg-background p-4 md:p-5">
+    <article className="aisaas-pricing-card mx-auto flex min-h-[620px] w-full max-w-[390px] flex-col border border-border bg-card p-4 md:p-5">
       <div
         className={
           isFeatured
-            ? "flex min-h-52 flex-col justify-between rounded-2xl bg-foreground p-6 text-background"
+            ? "flex min-h-52 flex-col justify-between rounded-2xl bg-primary p-6 text-primary-foreground"
             : "flex min-h-52 flex-col justify-between rounded-2xl border border-border bg-card p-6"
         }
       >
         <div className="flex items-start justify-between gap-3">
           <div className="flex flex-col gap-2">
             <h2 className="text-2xl font-semibold tracking-normal">{product.name}</h2>
-            <p className={isFeatured ? "text-sm text-background/70" : "text-sm text-muted-foreground"}>
+            <p className={isFeatured ? "text-sm text-primary-foreground/75" : "text-sm text-muted-foreground"}>
               {product.code}
             </p>
           </div>
           {isFeatured ? (
-            <span className="rounded-full border border-background/45 px-3 py-1 text-xs font-medium">推荐</span>
+            <span className="rounded-full border border-primary-foreground/45 px-3 py-1 text-xs font-medium">推荐</span>
           ) : null}
         </div>
         <div className="flex flex-col gap-3">
           <div className="flex items-end gap-2">
             <span className="font-display text-5xl font-light tracking-normal">¥{product.amountCny}</span>
-            <span className={isFeatured ? "pb-2 text-sm text-background/70" : "pb-2 text-sm text-muted-foreground"}>
+            <span className={isFeatured ? "pb-2 text-sm text-primary-foreground/75" : "pb-2 text-sm text-muted-foreground"}>
               / 次充值
             </span>
           </div>
@@ -200,7 +200,7 @@ function PricingProductCard({
 
       <div className="flex flex-1 flex-col gap-6 px-1 py-6">
         <p className="min-h-12 text-sm leading-6 text-muted-foreground">{product.description}</p>
-        <Button asChild className="h-12 rounded-full bg-foreground text-background hover:bg-foreground/90">
+        <Button asChild className="h-12 rounded-full bg-primary text-primary-foreground hover:bg-primary/90">
           <Link href={selectHref}>购买 {product.name}</Link>
         </Button>
         <div className="border-t border-dotted border-border pt-5">
@@ -262,18 +262,18 @@ function PricingPurchaseModal({
             <CardContent className="flex flex-1 flex-col">
               {product ? (
                 <div className="flex flex-col gap-5">
-                  <div className="rounded-2xl bg-foreground p-6 text-background">
+                  <div className="rounded-2xl bg-primary p-6 text-primary-foreground">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex flex-col gap-2">
                         <h3 className="text-2xl font-semibold">{product.name}</h3>
-                        <p className="text-sm text-background/70">{product.code}</p>
+                        <p className="text-sm text-primary-foreground/75">{product.code}</p>
                       </div>
-                      <Badge className="bg-background text-foreground hover:bg-background">充值模式</Badge>
+                      <Badge className="bg-primary-foreground text-primary hover:bg-primary-foreground">充值模式</Badge>
                     </div>
                     <div className="mt-10 flex flex-col gap-3">
                       <div className="flex items-end gap-2">
                         <span className="font-display text-5xl font-light">¥{product.amountCny}</span>
-                        <span className="pb-2 text-sm text-background/70">/ 次充值</span>
+                        <span className="pb-2 text-sm text-primary-foreground/75">/ 次充值</span>
                       </div>
                       <div className="flex items-center gap-2 text-lg font-semibold">
                         <Coins className="size-5" />

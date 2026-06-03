@@ -10,6 +10,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { ActionToast } from "@/components/ui/action-toast";
 import {
   updateEmailSendConfigAction,
   updateSmsSendConfigAction,
@@ -25,6 +26,8 @@ export function SendConfigForm({ config }: { config: AdminSendConfig }) {
 
   return (
     <div className="flex flex-col gap-6">
+      <ActionToast state={emailState} />
+      <ActionToast state={smsState} />
       <form action={emailFormAction}>
         <Card>
           <CardHeader className="flex flex-row items-start justify-between gap-4">
@@ -134,7 +137,6 @@ export function SendConfigForm({ config }: { config: AdminSendConfig }) {
                 <FieldDescription>使用 <code>{"${code}"}</code> 作为验证码变量。</FieldDescription>
               </Field>
             </FieldGroup>
-            <ActionMessage state={emailState} />
           </CardContent>
         </Card>
       </form>
@@ -247,7 +249,6 @@ export function SendConfigForm({ config }: { config: AdminSendConfig }) {
                 />
               </Field>
             </FieldGroup>
-            <ActionMessage state={smsState} />
           </CardContent>
         </Card>
       </form>
@@ -298,16 +299,4 @@ function statusBadge(enabled: boolean, ready: boolean) {
       待配置
     </Badge>
   );
-}
-
-function ActionMessage({ state }: { state: SendConfigActionState }) {
-  if (state.error) {
-    return <p className="mt-4 text-sm text-destructive">{state.error}</p>;
-  }
-
-  if (state.success) {
-    return <p className="mt-4 text-sm text-muted-foreground">{state.success}</p>;
-  }
-
-  return null;
 }

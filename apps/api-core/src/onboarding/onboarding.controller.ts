@@ -50,7 +50,7 @@ export class OnboardingController {
       action: "ENABLE_SETUP_AI_TOOLS",
       resourceType: "AI_SCENARIO",
       resourceId: null,
-      description: `初始化启用预置 AI 工具：${result.enabledCount} 个`,
+      description: `初始化启用历史模板：${result.enabledCount} 个`,
       request: request as HeaderRequestLike
     });
 

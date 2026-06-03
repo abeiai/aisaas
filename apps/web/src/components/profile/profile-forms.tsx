@@ -7,6 +7,7 @@ import { ArrowRight, LogOut, Save, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { ActionToast } from "@/components/ui/action-toast";
 import {
   bindPhoneAction,
   changePasswordAction,
@@ -36,6 +37,7 @@ export function ProfileForm({ user }: { user: PublicUser }) {
 
   return (
     <form action={formAction} className="flex flex-col gap-6">
+      <ActionToast state={state} />
       <FieldGroup>
         <Field>
           <FieldLabel htmlFor="email">邮箱</FieldLabel>
@@ -54,8 +56,6 @@ export function ProfileForm({ user }: { user: PublicUser }) {
           />
         </Field>
       </FieldGroup>
-      {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
-      {state.success ? <p className="text-sm text-muted-foreground">{state.success}</p> : null}
       <Button className="w-fit" disabled={isPending} type="submit">
         <Save data-icon="inline-start" />
         {isPending ? "保存中..." : "保存资料"}
@@ -74,6 +74,8 @@ export function BindPhoneForm({ user }: { user: PublicUser }) {
 
   return (
     <div className="flex flex-col gap-6">
+      <ActionToast state={codeState} />
+      <ActionToast state={bindState} />
       <div className="rounded-lg border bg-secondary/40 px-4 py-3 text-sm text-muted-foreground">
         当前绑定手机号：<span className="font-medium text-foreground">{maskPhone(user.phone)}</span>
       </div>
@@ -91,8 +93,6 @@ export function BindPhoneForm({ user }: { user: PublicUser }) {
           />
           <FieldDescription>绑定后可使用手机号验证码登录。</FieldDescription>
         </Field>
-        {codeState.error ? <p className="text-sm text-destructive">{codeState.error}</p> : null}
-        {codeState.success ? <p className="text-sm text-muted-foreground">{codeState.success}</p> : null}
         <Button className="w-fit" disabled={isCodePending || !phone} type="submit" variant="outline">
           <Smartphone data-icon="inline-start" />
           {isCodePending ? "发送中..." : "获取验证码"}
@@ -112,8 +112,6 @@ export function BindPhoneForm({ user }: { user: PublicUser }) {
           />
           <FieldDescription>本地默认验证码为 199599。</FieldDescription>
         </Field>
-        {bindState.error ? <p className="text-sm text-destructive">{bindState.error}</p> : null}
-        {bindState.success ? <p className="text-sm text-muted-foreground">{bindState.success}</p> : null}
         <Button className="w-fit" disabled={isBindPending || !phone} type="submit">
           <Save data-icon="inline-start" />
           {isBindPending ? "绑定中..." : "绑定手机号"}
@@ -128,6 +126,7 @@ export function PasswordForm() {
 
   return (
     <form action={formAction} className="flex flex-col gap-6">
+      <ActionToast state={state} />
       <FieldGroup>
         <Field>
           <FieldLabel htmlFor="currentPassword">当前密码</FieldLabel>
@@ -139,8 +138,6 @@ export function PasswordForm() {
           <FieldDescription>密码会在服务端哈希存储，不会明文保存。</FieldDescription>
         </Field>
       </FieldGroup>
-      {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
-      {state.success ? <p className="text-sm text-muted-foreground">{state.success}</p> : null}
       <Button className="w-fit" disabled={isPending} type="submit" variant="outline">
         <ArrowRight data-icon="inline-start" />
         {isPending ? "修改中..." : "修改密码"}
@@ -163,7 +160,7 @@ export function LogoutPanel() {
           </Button>
         </form>
         <Button asChild variant="ghost">
-          <Link href="/tools">继续使用工具</Link>
+          <Link href="/experience/chat">继续体验</Link>
         </Button>
       </div>
     </div>

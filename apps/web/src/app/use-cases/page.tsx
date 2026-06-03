@@ -6,7 +6,7 @@ import { PublicShell } from "@/components/shell/public-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { productTools, useCaseGroups } from "@/lib/product-data";
+import { useCaseGroups } from "@/lib/product-data";
 
 export const metadata: Metadata = {
   title: "使用场景 - AI SaaS",
@@ -24,12 +24,12 @@ export default function UseCasesPage() {
               先服务高频中文内容工作流
             </h1>
             <p className="text-base leading-7 text-muted-foreground">
-              第一阶段聚焦中文内容站和轻量 AI 工具，把用户注册、点数充值、生成结果和后台内容发布连接起来。
+              第一阶段聚焦中文内容站和 AI 能力体验，把用户注册、点数充值、生成结果和后台内容发布连接起来。
             </p>
             <div className="flex flex-wrap gap-3">
               <Button asChild>
-                <Link href="/tools">
-                  进入工具列表
+                <Link href="/experience/chat">
+                  进入体验区
                   <ArrowRight data-icon="inline-end" />
                 </Link>
               </Button>
@@ -41,10 +41,10 @@ export default function UseCasesPage() {
           <Card>
             <CardHeader>
               <CardTitle>推荐启动路径</CardTitle>
-              <CardDescription>从一个可用工具开始验证需求，再补充更多场景。</CardDescription>
+              <CardDescription>从一个体验能力开始验证需求，再补充更多场景应用。</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 text-sm">
-              {["注册账号", "选择 AI 文案生成", "余额不足时充值", "在任务历史回看结果"].map((step) => (
+              {["注册账号", "选择体验能力", "余额不足时充值", "在任务历史回看结果"].map((step) => (
                 <div className="flex items-center gap-3" key={step}>
                   <CheckCircle2 data-icon="inline-start" />
                   <span>{step}</span>
@@ -76,34 +76,6 @@ export default function UseCasesPage() {
         </div>
       </section>
 
-      <section className="border-y border-border bg-card">
-        <div className="flex w-full flex-col gap-8 px-5 py-16">
-          <div className="flex w-full flex-col gap-3">
-            <p className="text-sm font-semibold text-muted-foreground">工具示例</p>
-            <h2 className="font-display text-4xl font-light leading-tight tracking-normal">
-              用具体工具承接场景
-            </h2>
-          </div>
-          <div className="grid gap-4 md:grid-cols-3">
-            {productTools.map((tool) => (
-              <Card className="bg-background" key={tool.slug}>
-                <CardHeader>
-                  <Badge variant={tool.isAvailable ? "secondary" : "outline"}>
-                    {tool.isAvailable ? "已开放" : "规划中"}
-                  </Badge>
-                  <CardTitle>{tool.title}</CardTitle>
-                  <CardDescription>{tool.summary}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Button asChild variant="outline">
-                    <Link href={`/tools/${tool.slug}`}>查看详情</Link>
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-      </section>
     </PublicShell>
   );
 }
