@@ -632,6 +632,7 @@ function normalizeBaseUrl(value: string) {
 }
 
 function openAiCompatibleUserContent(input: ProviderTextInput) {
+  const prompt = textWithInput(input.prompt, input.input);
   const imageParts = (input.attachments ?? [])
     .filter((attachment) => isInlineImageAttachment(attachment))
     .map((attachment) => ({
@@ -642,16 +643,27 @@ function openAiCompatibleUserContent(input: ProviderTextInput) {
     }));
 
   if (imageParts.length === 0) {
-    return input.prompt;
+    return prompt;
   }
 
   return [
     {
       type: "text",
-      text: input.prompt
+      text: prompt
     },
     ...imageParts
   ];
+}
+
+function textWithInput(prompt: string, input: string) {
+  const normalizedPrompt = String(prompt || "").trim();
+  const normalizedInput = String(input || "").trim();
+
+  if (!normalizedInput || normalizedPrompt.includes(normalizedInput)) {
+    return normalizedPrompt;
+  }
+
+  return `${normalizedPrompt}\n\n输入内容：\n${normalizedInput}`;
 }
 
 function isInlineImageAttachment(attachment: ProviderTextAttachment) {

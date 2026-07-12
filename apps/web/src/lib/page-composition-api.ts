@@ -1,8 +1,8 @@
 "use server";
 
-import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 
+import { adminApiFetch, getCoreApiBaseUrl } from "@/lib/admin-api-fetch";
 import type { CmsPage } from "@/lib/cms-api";
 import type { ContentModule } from "@/lib/content-module-api";
 
@@ -37,32 +37,19 @@ export interface PageComposition {
   items: PageCompositionItem[];
 }
 
-function getApiBaseUrl() {
-  return process.env.API_BASE_URL ?? "http://localhost:7342/api";
-}
-
-async function getCookieHeader() {
-  const cookieStore = await cookies();
-
-  return cookieStore
-    .getAll()
-    .map((cookie) => `${cookie.name}=${encodeURIComponent(cookie.value)}`)
-    .join("; ");
-}
-
 async function apiFetch<TData>(
   path: string,
   init: RequestInit = {},
   options: { admin?: boolean; allowNull?: boolean } = {}
 ) {
+  if (options.admin) {
+    return adminApiFetch<TData>(path, init, { allowNull: options.allowNull });
+  }
+
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
 
-  if (options.admin) {
-    headers.set("Cookie", await getCookieHeader());
-  }
-
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+  const response = await fetch(`${getCoreApiBaseUrl()}${path}`, {
     ...init,
     headers,
     cache: "no-store"

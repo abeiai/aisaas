@@ -262,6 +262,7 @@ const systemVoices = cosyVoiceSystemVoices;
 const systemVoiceOverrideConfigKey = "cosyVoiceSystemVoiceOverrides";
 
 const audioModelAliases = [
+  "speech-to-text",
   "tts-default",
   "tts-fast",
   "voice-clone-default",
@@ -269,6 +270,7 @@ const audioModelAliases = [
   "audio-preview"
 ] as const;
 const dashscopeAudioProviderKey = "aliyun_dashscope_audio";
+type AudioModelCapability = "ASR" | "TTS" | "VOICE_CLONE" | "VOICE_DESIGN";
 
 @Injectable()
 export class AudioService {
@@ -312,17 +314,7 @@ export class AudioService {
           status: "DISABLED"
         }
       }));
-    const existingModelCount = await this.prisma.aiModelInstance.count({
-      where: {
-        providerInstanceId: instance.id
-      }
-    });
-
     await this.normalizeDefaultAudioModelPricing(instance.id, preset.modelPresets);
-
-    if (existingModelCount > 0) {
-      return;
-    }
 
     for (const modelPreset of preset.modelPresets) {
       const recommendedAlias = emptyToNull(modelPreset.recommendedAlias ?? undefined);
@@ -331,19 +323,18 @@ export class AudioService {
       }
 
       const capabilityTags = jsonStringArray(modelPreset.capabilityTags);
-      const model = await this.prisma.aiModelInstance.upsert({
+      const existingModel = await this.prisma.aiModelInstance.findUnique({
         where: {
           providerInstanceId_providerModelName: {
             providerInstanceId: instance.id,
             providerModelName: modelPreset.providerModelName
           }
-        },
-        update: {
-          displayName: modelPreset.displayName,
-          capabilityTags: capabilityTags as Prisma.InputJsonValue,
-          modelPresetId: modelPreset.id
-        },
-        create: {
+        }
+      });
+      const model =
+        existingModel ??
+        (await this.prisma.aiModelInstance.create({
+          data: {
           providerInstanceId: instance.id,
           modelPresetId: modelPreset.id,
           displayName: modelPreset.displayName,
@@ -354,11 +345,11 @@ export class AudioService {
           capabilityTags: capabilityTags as Prisma.InputJsonValue,
           inputPrice: capabilityTags.includes("TTS") ? "1" : "0",
           outputPrice: "0",
-          pricingMode: "CHARACTERS",
-          pricingUnit: "TEN_K_CHARACTERS",
+          pricingMode: capabilityTags.includes("ASR") ? "SECONDS" : "CHARACTERS",
+          pricingUnit: capabilityTags.includes("ASR") ? "SECOND" : "TEN_K_CHARACTERS",
           isEnabled: true
         }
-      });
+        }));
 
       if (model.isEnabled) {
         await this.bindRecommendedAudioAlias(recommendedAlias, model.id);
@@ -2610,7 +2601,7 @@ export class AudioService {
 
   private async getModelByAlias(
     aliasKey: string,
-    capability: "TTS" | "VOICE_CLONE" | "VOICE_DESIGN",
+    capability: AudioModelCapability,
     preferredModelNames: string[] = [],
     preferredContextLabel: string | null = null
   ) {
@@ -2707,7 +2698,7 @@ export class AudioService {
   }
 
   private async findFallbackAudioModel(
-    capability: "TTS" | "VOICE_CLONE" | "VOICE_DESIGN",
+    capability: AudioModelCapability,
     aliasKey: string,
     preferredModelNames: string[]
   ) {
@@ -2757,7 +2748,7 @@ export class AudioService {
 
   private toActiveAudioModel(
     model: ActiveAudioModelRecord,
-    capability: "TTS" | "VOICE_CLONE" | "VOICE_DESIGN"
+    capability: AudioModelCapability
   ): ActiveAudioModel | null {
     const providerInstance = model.providerInstance;
     const providerPreset = providerInstance.providerPreset;
@@ -3857,6 +3848,7 @@ function providerErrorMessage(error: unknown) {
 
 function audioAliasName(aliasKey: string) {
   const names: Record<string, string> = {
+    "speech-to-text": "默认语音识别模型",
     "tts-default": "默认语音合成模型",
     "tts-fast": "快速语音合成模型",
     "voice-clone-default": "默认声音复刻模型",
@@ -3872,7 +3864,8 @@ function isAudioModelAliasKey(value: string): value is (typeof audioModelAliases
 }
 
 function audioAliasRequiredCapability(aliasKey: (typeof audioModelAliases)[number]) {
-  const capabilities: Record<(typeof audioModelAliases)[number], AudioTaskType | null> = {
+  const capabilities: Record<(typeof audioModelAliases)[number], AudioModelCapability | null> = {
+    "speech-to-text": "ASR",
     "tts-default": "TTS",
     "tts-fast": "TTS",
     "voice-clone-default": "VOICE_CLONE",

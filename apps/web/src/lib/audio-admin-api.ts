@@ -1,14 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
-interface ApiResponse<TData> {
-  code: number;
-  message: string;
-  data: TData;
-}
+import { adminApiFetch } from "@/lib/admin-api-fetch";
 
 export type AudioOperationType = "TTS" | "VOICE_CLONE" | "VOICE_DESIGN";
 
@@ -360,36 +355,8 @@ export interface AdminAudioTask {
   finishedAt: string | null;
 }
 
-function getApiBaseUrl() {
-  return process.env.API_BASE_URL ?? "http://localhost:7342/api";
-}
-
-async function getCookieHeader() {
-  const cookieStore = await cookies();
-
-  return cookieStore
-    .getAll()
-    .map((cookie) => `${cookie.name}=${encodeURIComponent(cookie.value)}`)
-    .join("; ");
-}
-
 async function apiFetch<TData>(path: string, init: RequestInit = {}) {
-  const headers = new Headers(init.headers);
-  headers.set("Content-Type", "application/json");
-  headers.set("Cookie", await getCookieHeader());
-
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    ...init,
-    headers,
-    cache: "no-store"
-  });
-  const payload = (await response.json()) as ApiResponse<TData | null>;
-
-  if (!response.ok || payload.code !== 0 || payload.data === null) {
-    throw new Error(payload.message || "请求失败");
-  }
-
-  return payload.data;
+  return adminApiFetch<TData>(path, init);
 }
 
 function text(formData: FormData, name: string) {

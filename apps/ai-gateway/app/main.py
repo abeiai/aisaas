@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import json
 import time
 import urllib.error
@@ -57,7 +58,7 @@ class TextGenerateRequest(BaseModel):
     modelName: str | None = None
     messages: list[ChatMessage] | None = None
     prompt: str = Field(min_length=1, max_length=8000)
-    input: str = Field(min_length=1, max_length=2000)
+    input: str = Field(min_length=1, max_length=200000)
     temperature: float = 0.7
     maxTokens: int = 800
     timeoutMs: int = Field(default=45000, ge=1000, le=180000)
@@ -85,7 +86,7 @@ class DashScopeAudioProviderConfig(BaseModel):
     webSocketUrl: str | None = Field(default=None, max_length=400)
     apiKey: str = Field(min_length=1, max_length=4000)
     region: str | None = Field(default=None, max_length=40)
-    timeoutMs: int = Field(default=45000, ge=1000, le=120000)
+    timeoutMs: int = Field(default=45000, ge=1000, le=180000)
 
 
 class DashScopeAudioTestRequest(DashScopeAudioProviderConfig):
@@ -119,6 +120,14 @@ class DashScopeTtsRequest(DashScopeAudioProviderConfig):
     speed: float | None = Field(default=None, ge=0.5, le=2)
     pitch: float | None = Field(default=None, ge=-500, le=500)
     volume: float | None = Field(default=None, ge=0, le=2)
+
+
+class DashScopeAsrRequest(DashScopeAudioProviderConfig):
+    model: str = Field(default="paraformer-v2", min_length=1, max_length=120)
+    audioUrl: str = Field(min_length=1, max_length=1200)
+    languageHints: list[str] | None = Field(default=None, max_length=8)
+    timestampAlignmentEnabled: bool = True
+    timeoutMs: int = Field(default=300000, ge=1000, le=900000)
 
 
 @app.post("/v1/text/generate")
@@ -279,6 +288,19 @@ def synthesize_speech(payload: DashScopeTtsRequest) -> dict[str, Any]:
         raise audio_provider_error(error) from error
 
 
+@app.post("/audio/asr/transcribe")
+def transcribe_audio(payload: DashScopeAsrRequest) -> dict[str, Any]:
+    try:
+        return dashscope_audio_adapter(payload).transcribe_audio(
+            model=payload.model,
+            audio_url=payload.audioUrl,
+            language_hints=payload.languageHints,
+            timestamp_alignment_enabled=payload.timestampAlignmentEnabled,
+        )
+    except DashScopeAudioError as error:
+        raise audio_provider_error(error) from error
+
+
 def call_openai_compatible(payload: TextGenerateRequest) -> tuple[dict[str, Any], str | None]:
     endpoint = chat_completions_url(payload.baseUrl or "")
     request_body = openai_compatible_request_body(payload)
@@ -303,6 +325,14 @@ def call_openai_compatible(payload: TextGenerateRequest) -> tuple[dict[str, Any]
             provider_error_code(detail, error.code),
             provider_error_message(detail, error.code),
         ) from error
+    except http.client.IncompleteRead as error:
+        partial = error.partial.decode("utf-8", errors="ignore") if isinstance(error.partial, bytes) else ""
+        parsed = safe_json(partial)
+
+        if isinstance(parsed, dict):
+            return parsed, None
+
+        raise provider_error("PROVIDER_RESPONSE_INTERRUPTED", "AI Provider 响应中断，请稍后重试") from error
     except TimeoutError as error:
         raise provider_error("PROVIDER_TIMEOUT", "AI Provider 请求超时") from error
     except OSError as error:
@@ -447,7 +477,8 @@ def openai_compatible_messages(payload: TextGenerateRequest) -> list[dict[str, A
     if payload.messages:
         return [chat_message_to_dict(message) for message in payload.messages]
 
-    content_parts: list[dict[str, Any]] = [{"type": "text", "text": payload.prompt}]
+    text = text_with_input(payload.prompt, payload.input)
+    content_parts: list[dict[str, Any]] = [{"type": "text", "text": text}]
 
     for attachment in payload.attachments or []:
         if not is_inline_image_attachment(attachment):
@@ -463,9 +494,19 @@ def openai_compatible_messages(payload: TextGenerateRequest) -> list[dict[str, A
         )
 
     if len(content_parts) == 1:
-        return [{"role": "user", "content": payload.prompt}]
+        return [{"role": "user", "content": text}]
 
     return [{"role": "user", "content": content_parts}]
+
+
+def text_with_input(prompt: str, user_input: str) -> str:
+    normalized_prompt = (prompt or "").strip()
+    normalized_input = (user_input or "").strip()
+
+    if not normalized_input or normalized_input in normalized_prompt:
+        return normalized_prompt
+
+    return f"{normalized_prompt}\n\n输入内容：\n{normalized_input}"
 
 
 def chat_message_to_dict(message: ChatMessage) -> dict[str, Any]:

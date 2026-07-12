@@ -1,15 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { cookies } from "next/headers";
 
+import { adminApiFetch } from "@/lib/admin-api-fetch";
 import type { PaymentOrder, PaymentProvider, RechargeProduct } from "@/lib/billing-api";
-
-interface ApiResponse<TData> {
-  code: number;
-  message: string;
-  data: TData;
-}
 
 export interface PaymentNotifyLog {
   id: string;
@@ -31,36 +25,8 @@ export interface PaymentSyncResult {
   channelStatus: "PAID" | "CLOSED" | "UNPAID";
 }
 
-function getApiBaseUrl() {
-  return process.env.API_BASE_URL ?? "http://localhost:7342/api";
-}
-
-async function getCookieHeader() {
-  const cookieStore = await cookies();
-
-  return cookieStore
-    .getAll()
-    .map((cookie) => `${cookie.name}=${encodeURIComponent(cookie.value)}`)
-    .join("; ");
-}
-
 async function apiFetch<TData>(path: string, init: RequestInit = {}) {
-  const headers = new Headers(init.headers);
-  headers.set("Content-Type", "application/json");
-  headers.set("Cookie", await getCookieHeader());
-
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    ...init,
-    headers,
-    cache: "no-store"
-  });
-  const payload = (await response.json()) as ApiResponse<TData | null>;
-
-  if (!response.ok || payload.code !== 0 || payload.data === null) {
-    throw new Error(payload.message || "请求失败");
-  }
-
-  return payload.data;
+  return adminApiFetch<TData>(path, init);
 }
 
 export async function getAdminPaymentOrders() {

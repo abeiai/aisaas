@@ -151,6 +151,9 @@ export const aiCapabilityTags = [
   "REFERENCE_FILE",
   "REFERENCE_AUDIO",
   "AUDIO",
+  "ASR",
+  "SPEECH_TO_TEXT",
+  "SUBTITLE",
   "TTS",
   "VOICE_CLONE",
   "VOICE_DESIGN",
@@ -645,6 +648,22 @@ export const providerPresets = [
     docsUrl: "https://help.aliyun.com/zh/model-studio/text-to-speech",
     region: "cn-beijing,intl-singapore",
     models: [
+      {
+        modelKey: "paraformer-v2",
+        displayName: "Paraformer v2",
+        providerModelName: "paraformer-v2",
+        capabilityTags: [
+          "AUDIO",
+          "ASR",
+          "SPEECH_TO_TEXT",
+          "SUBTITLE",
+          "TIMESTAMP",
+          "MULTILINGUAL",
+          "CHINA_MAINLAND"
+        ],
+        supportsAudio: true,
+        recommendedAlias: "speech-to-text"
+      },
       {
         modelKey: "cosyvoice-v3-5-plus",
         displayName: "CosyVoice v3.5 Plus",
